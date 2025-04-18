@@ -72,3 +72,34 @@ def kl_divergence(loc, scale): # assumes scale is logscale
 
     return total_kl, dim_wise_kls, mean_kl
                                
+# Function to calculate additional metrics
+def calculate_metrics(model, y, x, r):
+    """Calculate additional metrics beyond just loss"""
+    with torch.no_grad():
+        x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(y, x, r)
+        
+        # Reconstruction MSE
+        recon_mse = F.mse_loss(x_recon, x).item()
+        
+        # Classification accuracy
+        _, y_pred = y_hat.max(1)
+        if len(y.shape) > 1 and y.shape[1] > 1:
+            _, y_true = y.max(1)
+        else:
+            y_true = y.long()
+        y_accuracy = (y_pred == y_true).float().mean().item()
+        
+        # Attribute accuracy
+        _, a_pred = a_hat.max(1)
+        if len(r.shape) > 1 and r.shape[1] > 1:
+            _, a_true = r.max(1)
+        else:
+            a_true = r.long()
+        a_accuracy = (a_pred == a_true).float().mean().item()
+        
+        return {
+            'recon_mse': recon_mse,
+            'y_accuracy': y_accuracy,
+            'a_accuracy': a_accuracy
+        }
+    

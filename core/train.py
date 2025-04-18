@@ -2,14 +2,12 @@ import torch
 import os
 from typing import Dict, Tuple
 from tqdm import tqdm
-from .trainer import Trainer
-from .CRMNIST.model import NVAE
-from .data import get_dataloaders
+from core.trainer import Trainer
 
-def train(args, model, optimizer, train_loader, val_loader, device):
+def train(args, model, optimizer, train_loader, val_loader, device, patience):
     """
-    Train the model in-place and return training metrics.
-    The model's state will be updated during training and the best state will be loaded at the end.
+    Train the model in-place, updating its state with the best parameters found during training.
+    Also returns training statistics about the training process.
     """
     # Create output directories
     os.makedirs(args.out, exist_ok=True)
@@ -20,28 +18,21 @@ def train(args, model, optimizer, train_loader, val_loader, device):
         optimizer=optimizer,
         device=device,
         args=args,
-        patience=args.patience,
-        min_epochs=args.min_epochs
+        patience=patience,
     )
     
-    # Train model (this will update the model in-place)
+    # Train model (updates model state in-place with best parameters)
     trainer.train(train_loader, val_loader, args.epochs)
     
-    # Save final model
+    # Save final model state
     trainer.save_final_model(args.epochs)
 
-    # Return training metrics
+    # Return training statistics
     return {
-        'best_val_loss': trainer.best_val_loss,
-        'epochs_trained': trainer.epochs_trained
+        'best_validation_loss': trainer.best_val_loss,
+        'total_epochs_trained': trainer.epochs_trained,
+        'best_model_epoch': trainer.best_epoch + 1,  
+        'best_model_state': trainer.best_model_state
     }
 
     
-    # # Evaluate on test set
-    # test_loss, test_metrics = trainer._validate(test_loader)
-    # print("\nTest Results:")
-    # print(f"Test Loss: {test_loss:.4f}")
-    # for k, v in test_metrics.items():
-    #     print(f"Test {k}: {v:.4f}")
-    
-    # return model, test_loss, test_metrics 

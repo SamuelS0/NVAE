@@ -11,19 +11,19 @@ class Trainer:
         device: torch.device,
         args,
         patience: int = 5,
-        min_epochs: int = 10
     ):
         self.model = model
         self.optimizer = optimizer
         self.device = device
         self.args = args
         self.patience = patience
-        self.min_epochs = min_epochs
         
         # Early stopping setup
         self.best_val_loss = float('inf')
         self.best_model_state = None
         self.patience_counter = 0
+        self.epochs_trained = 0
+        self.best_epoch = 0
         
         # Create output directories
         self.models_dir = os.path.join(args.out, 'models')
@@ -51,7 +51,9 @@ class Trainer:
             if self._check_early_stopping(val_loss, epoch, num_epochs):
                 print(f"Early stopping triggered after {epoch+1} epochs")
                 break
-            
+        
+        self.epochs_trained = epoch + 1
+        
     def _train_epoch(self, train_loader) -> Tuple[float, Dict[str, float]]:
         """Train for one epoch."""
         self.model.train()
@@ -158,6 +160,7 @@ class Trainer:
         if val_loss < self.best_val_loss:
             self.best_val_loss = val_loss
             self.best_model_state = self.model.state_dict().copy()
+            self.best_epoch = epoch
             self.patience_counter = 0
             
             # Save best model immediately when new best is found

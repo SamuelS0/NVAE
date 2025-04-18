@@ -15,8 +15,10 @@ import random
 import core.CRMNIST.utils
 from core.CRMNIST.data_generation import generate_crmnist_dataset, CRMNIST
 from core.CRMNIST.model import VAE
-from tqdm import tqdm
 from core.train import train
+from core.CRMNIST.utils import select_diverse_sample_batch, visualize_reconstructions, visualize_conditional_generation
+from core.test import test
+
 """
 CRMNIST VAE training script.
 
@@ -97,374 +99,11 @@ def run_experiment(args):
     
     # Setup optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
-    
-    # Early stopping setup
-    patience = 5  # Number of epochs to wait for improvement
-    best_val_loss = float('inf')
-    best_model_state = None
-    patience_counter = 0
-    
-    def select_diverse_sample_batch(loader, args, samples_per_domain=10):
-        """
-        Select a diverse batch of samples with equal representation from each domain.
-        Returns exactly 10 samples per rotation domain (0-4).
-        
-        Args:
-            loader: DataLoader to select samples from
-            args: Arguments from command line
-            samples_per_domain: Number of samples to select per domain (default: 10)
-            
-        Returns:
-            Tuple of (images, labels, color_labels, rotation_labels)
-        """
-        # Initialize dictionaries to store samples for each rotation domain
-        rotation_samples = {i: [] for i in range(5)}  # 5 rotation domains (0-4)
-        red_samples = []  # Track red images separately
-        
-        # Initialize lists to store all samples
-        all_x, all_y, all_c, all_r = [], [], [], []
-        
-        # Track how many images we've processed
-        images_processed = 0
-        
-        # Iterate through batches until we have enough samples or reach the end
-        for batch_idx, (x, y, c, r) in enumerate(loader):
-            images_processed += len(x)
-            
-            # Check domain assignments for each image in the batch
-            for i in range(len(x)):
-                # Check rotation domain - each sample belongs to one rotation domain
-                if torch.max(r[i]) > 0:  # If there's a valid rotation assignment
-                    rotation_idx = torch.argmax(r[i]).item()
-                    
-                    # Store this sample in its rotation domain
-                    rotation_samples[rotation_idx].append((x[i], y[i], c[i], r[i]))
-                
-                # Also check if it's a red image (these might overlap with rotation domains)
-                if torch.max(c[i]) > 0 and torch.argmax(c[i]).item() == 5:  # Red is index 5
-                    red_samples.append((x[i], y[i], c[i], r[i]))
-            
-            # Print counts for debugging
-            domain_counts = {domain: len(samples) for domain, samples in rotation_samples.items()}
-            print(f"Processed {images_processed} images: {domain_counts}")
-            print(f"Red images found: {len(red_samples)}")
-            
-            # Check if we have enough samples from each domain to proceed
-            min_samples = min([len(samples) for samples in rotation_samples.values()])
-            if min_samples >= samples_per_domain:
-                print(f"Found at least {samples_per_domain} samples in each domain. Proceeding with selection.")
-                break
-        
-        # If we didn't get enough samples, just use the first batch
-        if min_samples < samples_per_domain:
-            print(f"Warning: Could not find {samples_per_domain} samples in each domain.")
-            print(f"Using the entire first batch instead.")
-            return next(iter(loader))
-        
-        # Randomly select exactly samples_per_domain samples from each domain
-        selected_x, selected_y, selected_c, selected_r = [], [], [], []
-        
-        for domain in range(5):
-            # Randomly sample without replacement
-            if len(rotation_samples[domain]) > samples_per_domain:
-                selected_indices = random.sample(range(len(rotation_samples[domain])), samples_per_domain)
-                selected_samples = [rotation_samples[domain][i] for i in selected_indices]
-            else:
-                # If we don't have enough, use what we have
-                selected_samples = rotation_samples[domain][:samples_per_domain]
-            
-            # Add to our lists
-            for x_i, y_i, c_i, r_i in selected_samples:
-                selected_x.append(x_i)
-                selected_y.append(y_i)
-                selected_c.append(c_i)
-                selected_r.append(r_i)
-        
-        # Convert lists to tensors
-        selected_x = torch.stack(selected_x)
-        selected_y = torch.stack(selected_y)
-        selected_c = torch.stack(selected_c)
-        selected_r = torch.stack(selected_r)
-        
-        # Print final counts
-        print(f"Final selection: {len(selected_x)} total images, {samples_per_domain} per rotation domain")
-        
-        return (selected_x, selected_y, selected_c, selected_r)
 
-    def visualize_reconstructions(epoch, batch_data):
-        """
-        Visualize original images and their reconstructions, organized by domain.
-        Each domain shows 10 samples with their reconstructions.
-        
-        Args:
-            epoch: Current epoch number
-            batch_data: Tuple of (x, y, c, r) tensors
-        """
-        x, y, c, r = batch_data
-        if args.cuda:
-            x, y, c, r = x.to(args.device), y.to(args.device), c.to(args.device), r.to(args.device)
-        
-        model.eval()
-        with torch.no_grad():
-            x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(y, x, r)
-        
-        # Get labels in the right format
-        if len(y.shape) > 1 and y.shape[1] > 1:
-            # One-hot format
-            y_labels = y.max(1)[1].cpu().numpy()
-        else:
-            # Integer format
-            y_labels = y.cpu().numpy()
-        
-        # Get color and rotation information
-        color_indices = torch.argmax(c, dim=1).cpu().numpy() if torch.max(c) > 0 else np.zeros(len(x))
-        rotation_indices = torch.argmax(r, dim=1).cpu().numpy() if torch.max(r) > 0 else np.zeros(len(x))
-        
-        # Create a figure with subplots for each domain
-        num_domains = 5  # 5 rotation domains
-        samples_per_domain = 10  # 10 samples per domain
-        
-        # Create a figure with 5 domains, each with 2 rows (original & reconstruction) and 10 columns (samples)
-        fig, axes = plt.subplots(num_domains * 2, samples_per_domain, figsize=(20, 4 * num_domains))
-        
-        # Get rotation angles for titles
-        rotation_angles = ['0°', '15°', '30°', '45°', '60°']
-        
-        # Color mapping for labels
-        color_map = {0: 'blue', 1: 'green', 2: 'yellow', 3: 'cyan', 4: 'magenta', 5: 'red'}
-        
-        # Organize images by domain
-        domain_images = {i: [] for i in range(num_domains)}
-        
-        # Group images by their rotation domain
-        for i in range(len(x)):
-            domain = rotation_indices[i]
-            if domain < num_domains:  # Ensure valid domain
-                domain_images[domain].append(i)
-        
-        # Process each domain
-        for domain in range(num_domains):
-            domain_indices = domain_images[domain]
-            
-            # If we have enough images for this domain, select the exact number needed
-            num_samples = min(samples_per_domain, len(domain_indices))
-            
-            # Print domain stats
-            print(f"Domain {domain} ({rotation_angles[domain]}): {len(domain_indices)} images available, using {num_samples}")
-            
-            # Use consecutive samples since they're already randomly selected in select_diverse_sample_batch
-            for i in range(num_samples):
-                idx = domain_indices[i]
-                
-                # Check if this image has a valid color transformation
-                has_color = torch.max(c[idx]) > 0
-                if has_color:
-                    color_idx = torch.argmax(c[idx]).item()
-                    color = color_map.get(color_idx, 'none')
-                    color_label = f'Color: {color}'
-                else:
-                    color_label = 'Color: none'
-                
-                # Display original (top row)
-                img = x[idx].cpu().detach().permute(1, 2, 0).numpy()
-                img = np.clip(img, 0, 1)
-                axes[domain * 2, i].imshow(img)
-                axes[domain * 2, i].set_title(f'Original\nDigit: {y_labels[idx]}\n{color_label}')
-                axes[domain * 2, i].axis('off')
-                
-                # Display reconstruction (bottom row)
-                img = x_recon[idx].cpu().detach().permute(1, 2, 0).numpy()
-                img = np.clip(img, 0, 1)
-                axes[domain * 2 + 1, i].imshow(img)
-                axes[domain * 2 + 1, i].set_title(f'Recon\nDigit: {y_labels[idx]}\n{color_label}')
-                axes[domain * 2 + 1, i].axis('off')
-            
-            # Fill remaining slots with empty plots
-            for i in range(num_samples, samples_per_domain):
-                axes[domain * 2, i].axis('off')
-                axes[domain * 2 + 1, i].axis('off')
-            
-            # Add rotation angle as y-label for the domain
-            axes[domain * 2, 0].set_ylabel(f'{rotation_angles[domain]}\nOriginal')
-            axes[domain * 2 + 1, 0].set_ylabel(f'{rotation_angles[domain]}\nRecon')
-        
-        plt.suptitle(f'Reconstructions - Epoch {epoch}', y=1.02)
-        plt.tight_layout()
-        plt.savefig(os.path.join(reconstructions_dir, f'epoch_{epoch}.png'))
-        plt.close()
-        
-        print(f"Saved reconstructions visualization for epoch {epoch}")
-    
-    # Function to calculate additional metrics
-    def calculate_metrics(model, y, x, r):
-        """Calculate additional metrics beyond just loss"""
-        with torch.no_grad():
-            x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(y, x, r)
-            
-            # Reconstruction MSE
-            recon_mse = F.mse_loss(x_recon, x).item()
-            
-            # Classification accuracy
-            _, y_pred = y_hat.max(1)
-            if len(y.shape) > 1 and y.shape[1] > 1:
-                _, y_true = y.max(1)
-            else:
-                y_true = y.long()
-            y_accuracy = (y_pred == y_true).float().mean().item()
-            
-            # Attribute accuracy
-            _, a_pred = a_hat.max(1)
-            if len(r.shape) > 1 and r.shape[1] > 1:
-                _, a_true = r.max(1)
-            else:
-                a_true = r.long()
-            a_accuracy = (a_pred == a_true).float().mean().item()
-            
-            return {
-                'recon_mse': recon_mse,
-                'y_accuracy': y_accuracy,
-                'a_accuracy': a_accuracy
-            }
-    
-    # Function to visualize conditional generation
-    def visualize_conditional_generation(model, device, output_dir):
-        """Generate and visualize samples conditioned on digit classes"""
-        model.eval()
-        
-        # Generate one image per class (digits 0-9)
-        samples_per_class = 5
-        
-        # First, generate samples for each digit class
-        plt.figure(figsize=(12, 6))
-        
-        # Generate one row of samples for each digit class (0-9)
-        for digit in range(10):
-            # Generate samples for this digit
-            images, labels = model.generate(y=digit, num_samples=samples_per_class, device=device)
-            
-            # Display the generated images
-            for i in range(samples_per_class):
-                plt.subplot(10, samples_per_class, digit * samples_per_class + i + 1)
-                img = images[i].cpu().detach().permute(1, 2, 0).numpy()
-                img = np.clip(img, 0, 1)
-                plt.imshow(img)
-                if i == 0:
-                    plt.ylabel(f"Digit {digit}")
-                plt.xticks([])
-                plt.yticks([])
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, 'conditional_generations.png'))
-        plt.close()
-        
-        print(f"Conditional generation visualization saved to {os.path.join(output_dir, 'conditional_generations.png')}")
-    
-    def save_domain_samples_visualization(x, y, c, r, epoch, output_dir):
-        """
-        Save the selected samples as a visualization grid, with a special row for red images.
-        
-        Args:
-            x: Images tensor
-            y: Digit labels
-            c: Color labels
-            r: Rotation labels
-            epoch: Current epoch number
-            output_dir: Directory to save the visualization
-        """
-        # Create a figure with subplots for each domain plus red images
-        num_domains = 5  # 5 rotation domains
-        samples_per_domain = 10  # Fixed number for consistent layout
-        
-        # Add an extra row for red images
-        fig, axes = plt.subplots(num_domains + 1, samples_per_domain, figsize=(20, 12))
-        
-        # Get rotation angles for titles
-        rotation_angles = ['0°', '15°', '30°', '45°', '60°']
-        
-        # First, display red images in the top row if any
-        red_images_found = 0
-        for i in range(len(x)):
-            if torch.max(c[i]) > 0 and torch.argmax(c[i]).item() == 5:  # Red is index 5
-                if red_images_found < samples_per_domain:
-                    img = x[i].cpu().detach().permute(1, 2, 0).numpy()
-                    img = np.clip(img, 0, 1)
-                    axes[0, red_images_found].imshow(img)
-                    axes[0, red_images_found].set_title(f'Red\nDigit: {y[i].item()}')
-                    axes[0, red_images_found].axis('off')
-                    red_images_found += 1
-        
-        # Fill remaining red image slots with empty plots
-        for i in range(red_images_found, samples_per_domain):
-            axes[0, i].axis('off')
-        
-        # Label the red images row
-        axes[0, 0].set_ylabel('Red Images')
-        
-        # Now display rotation domain images
-        for domain in range(num_domains):
-            domain_images_found = 0
-            for i in range(len(x)):
-                if torch.max(r[i]) > 0 and torch.argmax(r[i]).item() == domain:
-                    if domain_images_found < samples_per_domain:
-                        img = x[i].cpu().detach().permute(1, 2, 0).numpy()
-                        img = np.clip(img, 0, 1)
-                        
-                        # Get color information
-                        color_idx = torch.argmax(c[i]).item() if torch.max(c[i]) > 0 else -1
-                        color_map = {0: 'blue', 1: 'green', 2: 'yellow', 3: 'cyan', 4: 'magenta', 5: 'red'}
-                        color = color_map.get(color_idx, 'none')
-                        
-                        axes[domain + 1, domain_images_found].imshow(img)
-                        axes[domain + 1, domain_images_found].set_title(f'Digit: {y[i].item()}\nColor: {color}')
-                        axes[domain + 1, domain_images_found].axis('off')
-                        domain_images_found += 1
-            
-            # Fill remaining slots with empty plots
-            for i in range(domain_images_found, samples_per_domain):
-                axes[domain + 1, i].axis('off')
-            
-            # Add rotation angle as y-label
-            axes[domain + 1, 0].set_ylabel(f'{rotation_angles[domain]}')
-        
-        plt.suptitle(f'Domain Samples - Epoch {epoch}', y=1.02)
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f'domain_samples_epoch_{epoch}.png'))
-        plt.close()
-        
-        print(f"Saved domain samples visualization for epoch {epoch}")
-    
-    def test(model, device, test_loader):
-        model.eval()
-        test_loss = 0
-        metrics_sum = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
-        
-        # Select a diverse sample batch with images from all domains
-        sample_batch = select_diverse_sample_batch(test_loader, args)
-        
-        with torch.no_grad():
-            for batch_idx, (x, y, c, r) in enumerate(test_loader):
-                x, y, c, r = x.to(device), y.to(device), c.to(device), r.to(device)
-                
-                loss = model.loss_function(y, x, r)
-                test_loss += loss.item()
-                
-                # Calculate additional metrics
-                batch_metrics = calculate_metrics(model, y, x, r)
-                for k, v in batch_metrics.items():
-                    metrics_sum[k] += v
-        
-        # Average metrics
-        test_loss /= len(test_loader)
-        metrics_avg = {k: v / len(test_loader) for k, v in metrics_sum.items()}
-        
-        print(f'Test Loss: {test_loss:.4f}')
-        for k, v in metrics_avg.items():
-            print(f'Test {k}: {v:.4f}')
-        
-        return test_loss, metrics_avg, sample_batch
-    
+    patience = 5
+
     # Train the model
-    training_metrics = train(args, model, optimizer, train_loader, test_loader, args.device)
+    training_metrics = train(args, model, optimizer, train_loader, test_loader, args.device, patience)
 
     # Load best model for final evaluation
     if training_metrics['best_model_state'] is not None:
@@ -472,40 +111,16 @@ def run_experiment(args):
         print("Loaded best model for final evaluation")
     
     # Save the final model
-    final_model_path = os.path.join(models_dir, f'model_checkpoint_epoch_{epoch+1}.pt')
+    final_model_path = os.path.join(models_dir, f"model_checkpoint_epoch_{training_metrics['best_model_epoch']}.pt")
     torch.save(model.state_dict(), final_model_path)
     
     # Final evaluation
     print("\nEvaluating model on test set...")
     
-    # Add tqdm progress bar for final evaluation
-    model.eval()
-    test_loss = 0
-    metrics_sum = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
-    
     # Select a diverse sample batch with images from all domains
     sample_batch = select_diverse_sample_batch(test_loader, args)
     
-    test_pbar = tqdm(enumerate(test_loader), total=len(test_loader), desc="Final evaluation")
-    
-    with torch.no_grad():
-        for batch_idx, (x, y, c, r) in test_pbar:
-            x, y, c, r = x.to(args.device), y.to(args.device), c.to(args.device), r.to(args.device)
-            
-            loss = model.loss_function(y, x, r)
-            test_loss += loss.item()
-            
-            # Calculate additional metrics
-            batch_metrics = calculate_metrics(model, y, x, r)
-            for k, v in batch_metrics.items():
-                metrics_sum[k] += v
-            
-            # Update progress bar with current loss
-            test_pbar.set_postfix(loss=loss.item())
-    
-    # Average metrics
-    test_loss /= len(test_loader)
-    metrics_avg = {k: v / len(test_loader) for k, v in metrics_sum.items()}
+    test_loss, metrics_avg = test(model, test_loader, args.device)
     
     print(f'Test Loss: {test_loss:.4f}')
     for k, v in metrics_avg.items():
@@ -523,8 +138,8 @@ def run_experiment(args):
     results = {
         'final_test_loss': final_test_loss,
         'final_metrics': final_metrics,
-        'best_val_loss': best_val_loss,
-        'epochs_trained': epoch + 1
+        'best_val_loss': training_metrics['best_val_loss'],
+        'epochs_trained': training_metrics['epochs_trained']
     }
     
     results_path = os.path.join(args.out, 'results.json')
