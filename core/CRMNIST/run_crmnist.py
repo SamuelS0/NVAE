@@ -16,7 +16,7 @@ import core.CRMNIST.utils
 from core.CRMNIST.data_generation import generate_crmnist_dataset, CRMNIST
 from core.CRMNIST.model import VAE
 from tqdm import tqdm
-
+from core.train import train
 """
 CRMNIST VAE training script.
 
@@ -463,116 +463,12 @@ def run_experiment(args):
         
         return test_loss, metrics_avg, sample_batch
     
-    # Training loop
-    for epoch in range(args.epochs):
-        model.train()
-        train_loss = 0
-        train_metrics_sum = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
-        num_batches = 0
-        
-        # Add tqdm progress bar for training
-        train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), 
-                         desc=f"Epoch {epoch+1}/{args.epochs} [Train]")
-        
-        for batch_idx, (x, y, c, r) in train_pbar:
-            optimizer.zero_grad()
-            
-            # Move data to device if using GPU
-            if args.cuda:
-                x, y, c, r = x.to(args.device), y.to(args.device), c.to(args.device), r.to(args.device)
-            
-            # Forward pass and loss calculation
-            loss = model.loss_function(y, x, r)
-            
-            # Backward pass
-            loss.backward()
-            optimizer.step()
-            
-            train_loss += loss.item()
-            
-            # Calculate metrics for training data
-            if batch_idx % 10 == 0:  # Calculate every 10 batches to save computation
-                batch_metrics = calculate_metrics(model, y, x, r)
-                for k, v in batch_metrics.items():
-                    train_metrics_sum[k] += v
-                num_batches += 1
-            
-            # Update progress bar with current loss
-            train_pbar.set_postfix(loss=loss.item())
-        
-        # Calculate average training metrics
-        avg_train_loss = train_loss / len(train_loader)
-        avg_train_metrics = {k: v / num_batches for k, v in train_metrics_sum.items()}
-        
-        # Validation
-        print("Validating...")
-        model.eval()
-        val_loss = 0
-        val_metrics_sum = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
-        
-        # Select a diverse sample batch with images from all domains
-        val_sample_batch = select_diverse_sample_batch(test_loader, args, samples_per_domain=10)
-        
-        # Save domain samples visualization
-        save_domain_samples_visualization(*val_sample_batch, epoch+1, domain_samples_dir)
-        
-        # Visualize reconstructions
-        visualize_reconstructions(epoch+1, val_sample_batch)
-        
-        # Add tqdm progress bar for validation
-        val_pbar = tqdm(enumerate(test_loader), total=len(test_loader), 
-                       desc=f"Epoch {epoch+1}/{args.epochs} [Val]")
-        
-        with torch.no_grad():
-            for batch_idx, (x, y, c, r) in val_pbar:
-                if args.cuda:
-                    x, y, c, r = x.to(args.device), y.to(args.device), c.to(args.device), r.to(args.device)
-                
-                loss = model.loss_function(y, x, r)
-                val_loss += loss.item()
-                
-                # Calculate metrics
-                batch_metrics = calculate_metrics(model, y, x, r)
-                for k, v in batch_metrics.items():
-                    val_metrics_sum[k] += v
-                
-                # Update progress bar with current loss
-                val_pbar.set_postfix(loss=loss.item())
-        
-        # Calculate average validation metrics
-        val_loss /= len(test_loader)
-        val_metrics_avg = {k: v / len(test_loader) for k, v in val_metrics_sum.items()}
-        
-        # Print epoch results
-        print(f'Epoch {epoch+1}/{args.epochs}:')
-        print(f'  Train Loss: {avg_train_loss:.4f}')
-        for k, v in avg_train_metrics.items():
-            print(f'  Train {k}: {v:.4f}')
-            
-        print(f'  Val Loss: {val_loss:.4f}')
-        for k, v in val_metrics_avg.items():
-            print(f'  Val {k}: {v:.4f}')
-        
-        # Early stopping check
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_model_state = model.state_dict().copy()
-            patience_counter = 0
-            # Save best model
-            best_model_path = os.path.join(models_dir, 'model_best.pt')
-            torch.save(best_model_state, best_model_path)
-            print(f"  New best model saved! (Validation Loss: {best_val_loss:.4f})")
-        else:
-            patience_counter += 1
-            print(f"  No improvement in validation loss. Patience: {patience_counter}/{patience}")
-            
-            if patience_counter >= patience and epoch >= min(10, args.epochs // 2):
-                print(f"Early stopping triggered after {epoch+1} epochs")
-                break
-    
+    # Train the model
+    training_metrics = train(args, model, optimizer, train_loader, test_loader, args.device)
+
     # Load best model for final evaluation
-    if best_model_state is not None:
-        model.load_state_dict(best_model_state)
+    if training_metrics['best_model_state'] is not None:
+        model.load_state_dict(training_metrics['best_model_state'])
         print("Loaded best model for final evaluation")
     
     # Save the final model
