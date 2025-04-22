@@ -54,7 +54,8 @@ class VAE(NModule):
             beta_3=1,
             beta_4=1,
             alpha_1=1,
-            alpha_2=2
+            alpha_2=2,
+            diva=False
             ):
         
         super().__init__()
@@ -67,9 +68,13 @@ class VAE(NModule):
         self.zx_dim = zx_dim
         self.zy_dim = zy_dim
         self.za_dim = za_dim
-        self.zay_dim = zay_dim
-        self.z_y_combined_dim = zy_dim + zay_dim
-        self.z_a_combined_dim = za_dim + zay_dim
+
+        # if diva is true, we remove zay latent variable
+        if diva:
+            self.zay_dim = 0
+            self.z_y_combined_dim = zy_dim
+            self.z_a_combined_dim = za_dim
+
         self.z_total_dim = zx_dim + zy_dim + zay_dim + za_dim
 
         self.in_channels = in_channels
@@ -80,6 +85,7 @@ class VAE(NModule):
 
         self.beta_1, self.beta_2, self.beta_3, self.beta_4  = beta_1, beta_2, beta_3, beta_4
         self.alpha_1, self.alpha_2 = alpha_1, alpha_2
+        self.diva = diva
 
         self.zy_index_range = [0, zy_dim]
         self.zx_index_range = [zy_dim, zy_dim + zx_dim]
@@ -88,11 +94,11 @@ class VAE(NModule):
         
         self.qz = qz(zy_dim, zx_dim, zay_dim, za_dim, self.z_total_dim,
                      in_channels, out_channels, kernel, stride, padding)
-        self.qy = qy(y_dim, zy_dim, zay_dim)
-        self.qa = qa(a_dim, za_dim, zay_dim)
+        self.qy = qy(y_dim, zy_dim, zay_dim, diva)
+        self.qa = qa(a_dim, za_dim, zay_dim, diva)
 
         self.pzy = pzy(y_dim, zy_dim)
-        self.pzay = pzay(y_dim, a_dim, zay_dim)
+        self.pzay = pzay(y_dim, a_dim, zay_dim, diva)
         self.pza = pza(a_dim, za_dim)
         self.px = px(zy_dim, zx_dim, zay_dim, za_dim, self.z_total_dim, in_channels, out_channels, kernel)
 
@@ -112,7 +118,10 @@ class VAE(NModule):
 
         zy = z[:, self.zy_index_range[0]:self.zy_index_range[1]]
         zx = z[:, self.zx_index_range[0]:self.zx_index_range[1]]
-        zay = z[:, self.zay_index_range[0]:self.zay_index_range[1]]
+        if self.diva:
+            zay = torch.zeros_like(zy)
+        else:
+            zay = z[:, self.zay_index_range[0]:self.zay_index_range[1]]
         za = z[:, self.za_index_range[0]:self.za_index_range[1]]
         
         if not hasattr(self, '_shape_checked'):
@@ -126,13 +135,20 @@ class VAE(NModule):
         pzy_loc, pzy_scale = self.pzy(y)
         pzx_loc, pzx_scale = torch.zeros(zx.size(0), self.zx_dim), torch.ones(zx.size(0), self.zx_dim)
         pza_loc, pza_scale = self.pza(a)
-        pzay_loc, pzay_scale = self.pzay(y, a)
+        
+        if self.diva:
+            pzay_loc, pzay_scale = None, None
+        else:
+            pzay_loc, pzay_scale = self.pzay(y, a)
 
         # Priors Reparameterization
         pzy = dist.Normal(pzy_loc, pzy_scale)
         pzx = dist.Normal(pzx_loc, pzx_scale)
         pza = dist.Normal(pza_loc, pza_scale)
-        pzay = dist.Normal(pzay_loc, pzay_scale)
+        if self.diva:
+            pzay = None
+        else:
+            pzay = dist.Normal(pzay_loc, pzay_scale)
 
         # Auxiliary
         y_hat = self.qy(zy, zay)
@@ -154,7 +170,11 @@ class VAE(NModule):
         x_recon_loss = F.mse_loss(x_recon, x, reduction='sum')
         kl_zy = torch.sum(log_prob_zy - pzy.log_prob(zy))
         kl_zx = torch.sum(log_prob_zx - pzx.log_prob(zx))
-        kl_zay = torch.sum(log_prob_zay - pzay.log_prob(zay))
+        if self.diva:
+            kl_zay = torch.zeros_like(kl_zy)
+        else:
+            kl_zay = torch.sum(log_prob_zay - pzay.log_prob(zay))
+
         kl_za = torch.sum(log_prob_za - pza.log_prob(za))
 
         # Handle y label - could be index or one-hot
@@ -189,7 +209,10 @@ class VAE(NModule):
             z_loc, z_scale = self.qz(x)
             zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
             zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
-            zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
+            if self.diva:
+                zay = torch.zeros_like(zy)
+            else:
+                zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
             za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
             y_hat = self.qy(zy, zay)
             return y_hat
@@ -251,10 +274,13 @@ class VAE(NModule):
 
             a = torch.randint(0, self.a_dim, (batch_size,)).to(device)
             a_one_hot = F.one_hot(a, self.a_dim).float()
-            
-            pza_loc, pza_scale = self.pza(a)
-            pza = dist.Normal(pza_loc, pza_scale)
-            za = pza.sample()
+
+            if self.diva:
+                zay = torch.zeros_like(zy)
+            else:
+                pza_loc, pza_scale = self.pza(a)
+                pza = dist.Normal(pza_loc, pza_scale)
+                za = pza.sample()
             
             pzay_loc, pzay_scale = self.pzay(y, a)
             pzay = dist.Normal(pzay_loc, pzay_scale)
@@ -279,15 +305,19 @@ class qz(NModule):
                  out_channels=32,
                  kernel=3,
                  stride=1,
-                 padding=1
-                 ):
+                 padding=1,
+                 diva=False):
         super().__init__()
 
         self.zy_dim = zy_dim
         self.zx_dim = zx_dim
-        self.zay_dim = zay_dim
-        self.za_dim = za_dim
-        self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
+        if diva:
+            self.zay_dim = 0
+            self.z_total_dim = zy_dim + zx_dim + za_dim
+        else:
+            self.zay_dim = zay_dim
+            self.za_dim = za_dim
+            self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
         self.encoder = nn.Sequential(                                          #out dims... in dims is (N, 3, 28, 28)
             nn.Conv2d(in_channels = 3, out_channels = 32, kernel_size = 3, stride = 1, padding = 1),     #(N, 32, 28, 28) 
             nn.ReLU(),
@@ -317,10 +347,18 @@ class qz(NModule):
         
 #Auxiliarry classifiers
 class qy(NModule):
-    def __init__(self, y_dim, zy_dim, zay_dim):
+    def __init__(self, y_dim, zy_dim, zay_dim, diva=False):
         super().__init__()
+        self.diva = diva
 
-        self.fc1 = nn.Linear(zy_dim + zay_dim, 64)
+        if self.diva:
+            self.zay_dim = 0
+            self.z_combined_dim = zy_dim
+        else:
+            self.zay_dim = zay_dim
+            self.z_combined_dim = zy_dim + zay_dim
+
+        self.fc1 = nn.Linear(self.z_combined_dim, 64)
         self.fc2 = nn.Linear(64, y_dim)
         self.fc3 = nn.Linear(y_dim, y_dim)
 
@@ -329,7 +367,11 @@ class qy(NModule):
             self.fc1.bias.zero_()
 
     def forward(self, zy, zay):
-        z_combined = torch.cat((zy, zay), -1)
+        if self.diva:
+            z_combined = torch.cat((zy, zay), -1)
+        else:
+            z_combined = torch.cat((zy, zay), -1)
+
         h = self.fc1(z_combined)
         h = F.relu(h)
         h = self.fc2(h)
@@ -340,10 +382,15 @@ class qy(NModule):
 
 
 class qa(NModule):
-    def __init__(self, a_dim, za_dim, zay_dim):
+    def __init__(self, a_dim, za_dim, zay_dim, diva=False):
         super().__init__()
-
-        self.z_combined_dim = za_dim + zay_dim
+        self.diva = diva
+        if self.diva:
+            self.zay_dim = 0
+            self.z_combined_dim = za_dim
+        else:
+            self.zay_dim = zay_dim
+            self.z_combined_dim = za_dim + zay_dim
 
         self.fc1 = nn.Linear(self.z_combined_dim, 64)
         self.fc2 = nn.Linear(64, a_dim)
@@ -354,7 +401,11 @@ class qa(NModule):
             self.fc1.bias.zero_()
 
     def forward(self, za, zay):
-        z_combined = torch.cat((za, zay), -1)
+        if self.diva:
+            z_combined = torch.cat((za, zay), -1)
+        else:
+            z_combined = torch.cat((za, zay), -1)
+
         h = self.fc1(z_combined)
         h = F.relu(h)
         h = self.fc2(h)
@@ -439,9 +490,17 @@ class px(NModule):
             out_channels,
             kernel,
             stride=1,
-            padding=0):
+            padding=0,
+            diva=False):
         super().__init__()
-        
+
+        self.diva = diva
+
+        if self.diva:
+            self.zay_dim = 0
+            self.z_total_dim = zy_dim + zx_dim + za_dim
+        else:
+            self.zay_dim = zay_dim
         # Store parameters
         self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
         self.out_channels = out_channels
@@ -459,7 +518,10 @@ class px(NModule):
         
     def forward(self, zy, zx, zay, za):
         # Combine latent variables
-        z_combined = torch.cat((zy, zx, zay, za), -1)
+        if self.diva:
+            z_combined = torch.cat((zy, zx, za), -1)
+        else:
+            z_combined = torch.cat((zy, zx, zay, za), -1)
         
         combined_features = z_combined
         
@@ -517,12 +579,17 @@ class pzy(NModule):
 
 #need to handle encoding (one hot?) of a and y?
 class pzay(NModule):
-    def __init__(self, y_dim, a_dim, zay_dim):
+    def __init__(self, y_dim, a_dim, zay_dim, diva=False):
         super().__init__()
         self.y_dim = y_dim
         self.a_dim = a_dim
-        self.zay_dim = zay_dim
-        self.in_dim = y_dim + a_dim  # This should be 10 + 5 = 15
+        self.diva = diva
+        self.in_dim = y_dim + a_dim
+        
+        if diva:
+            self.zay_dim = 0
+        else:
+            self.zay_dim = zay_dim
 
         # Simplify architecture to avoid BatchNorm issues
         self.decoder = nn.Sequential(
