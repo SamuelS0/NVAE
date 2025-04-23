@@ -76,10 +76,23 @@ def train_diva(args, num_y_classes, num_r_classes, class_map, train_loader, test
 
     return diva, training_metrics
 
-def evaluate_models(nvae, diva, train_loader, test_loader):
+def evaluate_models(nvae, diva, test_loader):
     print("Evaluating models")
-    print("NVAE")
-    print("DIVA")
+    
+    test_loss_nvae, test_metrics_nvae = test(nvae, test_loader, device)
+    test_loss_diva, test_metrics_diva = test(diva, test_loader, device)
+
+    print("--------------------------------")
+    print(f"NVAE test results:")
+    print(f"Test loss: {test_loss_nvae}")
+    print(f"Test metrics: {test_metrics_nvae}")
+    
+    print("--------------------------------")
+    print(f"DIVA test results:")
+    print(f"Test loss: {test_loss_diva}")
+    print(f"Test metrics: {test_metrics_diva}")
+ 
+
 
 def run_experiment(args):
     # Load configuration from JSON
@@ -116,11 +129,11 @@ def run_experiment(args):
     diva, training_results_diva = train_diva(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
 
     print("NVAE training results:")
-    print(training_results_nvae)
+    print(f"Best model epoch: {training_results_nvae['best_model_epoch']}\nBest validation loss: {training_results_nvae['best_validation_loss']}\nBest batch metrics: {training_results_nvae['best_batch_metrics']}")
     print("DIVA training results:")
-    print(training_results_diva)
+    print(f"Best model epoch: {training_results_diva['best_model_epoch']}\nBest validation loss: {training_results_diva['best_validation_loss']}\nBest batch metrics: {training_results_diva['best_batch_metrics']}")
 
-    evaluate_models(nvae, diva, train_loader, test_loader)
+    evaluate_models(nvae, diva, test_loader)
     
 if __name__ == "__main__":
     parser = core.utils.get_parser('CRMNIST')

@@ -353,7 +353,7 @@ class qy(NModule):
 
         if self.diva:
             self.zay_dim = 0
-            self.z_combined_dim = zy_dim
+            self.z_combined_dim = zy_dim  # When diva=True, we only use zy_dim
         else:
             self.zay_dim = zay_dim
             self.z_combined_dim = zy_dim + zay_dim
@@ -368,8 +368,10 @@ class qy(NModule):
 
     def forward(self, zy, zay):
         if self.diva:
-            z_combined = torch.cat((zy, zay), -1)
+            # When diva=True, we only use zy
+            z_combined = zy
         else:
+            # When diva=False, concatenate zy and zay
             z_combined = torch.cat((zy, zay), -1)
 
         h = self.fc1(z_combined)
@@ -387,7 +389,7 @@ class qa(NModule):
         self.diva = diva
         if self.diva:
             self.zay_dim = 0
-            self.z_combined_dim = za_dim
+            self.z_combined_dim = za_dim  # When diva=True, we only use za_dim
         else:
             self.zay_dim = zay_dim
             self.z_combined_dim = za_dim + zay_dim
@@ -402,8 +404,10 @@ class qa(NModule):
 
     def forward(self, za, zay):
         if self.diva:
-            z_combined = torch.cat((za, zay), -1)
+            # When diva=True, we only use za
+            z_combined = za
         else:
+            # When diva=False, concatenate za and zay
             z_combined = torch.cat((za, zay), -1)
 
         h = self.fc1(z_combined)

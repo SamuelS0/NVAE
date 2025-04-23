@@ -32,7 +32,8 @@ def train(args, model, optimizer, train_loader, val_loader, device, patience):
         'best_validation_loss': trainer.best_val_loss,
         'total_epochs_trained': trainer.epochs_trained,
         'best_model_epoch': trainer.best_epoch + 1,  
-        'best_model_state': trainer.best_model_state
+        'best_model_state': trainer.best_model_state,
+        'best_batch_metrics': trainer.best_batch_metrics
     }
 
     

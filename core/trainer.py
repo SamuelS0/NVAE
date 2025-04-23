@@ -24,6 +24,7 @@ class Trainer:
         self.patience_counter = 0
         self.epochs_trained = 0
         self.best_epoch = 0
+        self.best_batch_metrics = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
         
         # Create output directories
         self.models_dir = os.path.join(args.out, 'models')
@@ -48,7 +49,7 @@ class Trainer:
                 print(f'  Val {k}: {v:.4f}')
             
             # Early stopping check
-            if self._check_early_stopping(val_loss, epoch, num_epochs):
+            if self._check_early_stopping(val_loss, epoch, num_epochs, train_metrics):
                 print(f"Early stopping triggered after {epoch+1} epochs")
                 break
         
@@ -155,18 +156,19 @@ class Trainer:
                 'a_accuracy': a_accuracy
             }
     
-    def _check_early_stopping(self, val_loss: float, epoch: int, num_epochs: int) -> bool:
+    def _check_early_stopping(self, val_loss: float, epoch: int, num_epochs: int, batch_metrics: Dict[str, float]) -> bool:
         """Check if early stopping criteria are met."""
         if val_loss < self.best_val_loss:
             self.best_val_loss = val_loss
             self.best_model_state = self.model.state_dict().copy()
             self.best_epoch = epoch
             self.patience_counter = 0
-            
+            self.best_batch_metrics = batch_metrics
             # Save best model immediately when new best is found
             best_model_path = os.path.join(self.models_dir, 'model_best.pt')
             torch.save(self.best_model_state, best_model_path)
             print(f"  New best model saved! (Validation Loss: {self.best_val_loss:.4f})")
+            print(f"  Best model batch metrics: {self.best_batch_metrics}")
             return False
         else:
             self.patience_counter += 1
