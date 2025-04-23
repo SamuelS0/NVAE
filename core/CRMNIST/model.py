@@ -133,7 +133,9 @@ class VAE(NModule):
 
         # Priors
         pzy_loc, pzy_scale = self.pzy(y)
-        pzx_loc, pzx_scale = torch.zeros(zx.size(0), self.zx_dim), torch.ones(zx.size(0), self.zx_dim)
+        device = next(self.parameters()).device  # Get the device of the model
+        pzx_loc = torch.zeros(zx.size(0), self.zx_dim, device=device)
+        pzx_scale = torch.ones(zx.size(0), self.zx_dim, device=device)
         pza_loc, pza_scale = self.pza(a)
         
         if self.diva:

@@ -12,7 +12,7 @@ class Trainer:
         args,
         patience: int = 5,
     ):
-        self.model = model
+        self.model = model.to(device)  # Move model to device immediately
         self.optimizer = optimizer
         self.device = device
         self.args = args
