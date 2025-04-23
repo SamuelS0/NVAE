@@ -35,8 +35,9 @@ def train_nvae(args, num_y_classes, num_r_classes, class_map, train_loader, test
                beta_4=args.beta_4,
                diva=False)
     
-    nvae.to(device)
-
+    # Move model to device
+    nvae = nvae.to(args.device)
+    
     optimizer = optim.Adam(nvae.parameters(), lr=args.learning_rate)
     patience = 5
     training_metrics = train(args, nvae, optimizer, train_loader, test_loader, args.device, patience)
@@ -65,7 +66,9 @@ def train_diva(args, num_y_classes, num_r_classes, class_map, train_loader, test
                beta_4=args.beta_4,
                diva=True)
     
-    diva.to(device)
+    # Move model to device
+    diva = diva.to(args.device)
+    
     optimizer = optim.Adam(diva.parameters(), lr=args.learning_rate)
     patience = 5
     training_metrics = train(args, diva, optimizer, train_loader, test_loader, args.device, patience)
@@ -122,8 +125,17 @@ def run_experiment(args):
                           transform_intensity=args.intensity,
                           transform_decay=args.intensity_decay)
     
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
+    train_loader = DataLoader(train_dataset, 
+                             batch_size=args.batch_size, 
+                             shuffle=True,
+                             num_workers=4,
+                             pin_memory=True)
+    
+    test_loader = DataLoader(test_dataset, 
+                            batch_size=args.batch_size,
+                            shuffle=False,
+                            num_workers=4,
+                            pin_memory=True)
 
     num_y_classes = train_dataset.dataset.num_y_classes
     num_r_classes = train_dataset.dataset.num_r_classes
