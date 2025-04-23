@@ -35,6 +35,8 @@ def train_nvae(args, num_y_classes, num_r_classes, class_map, train_loader, test
                beta_4=args.beta_4,
                diva=False)
     
+    nvae.to(device)
+
     optimizer = optim.Adam(nvae.parameters(), lr=args.learning_rate)
     patience = 5
     training_metrics = train(args, nvae, optimizer, train_loader, test_loader, args.device, patience)
@@ -63,6 +65,7 @@ def train_diva(args, num_y_classes, num_r_classes, class_map, train_loader, test
                beta_4=args.beta_4,
                diva=True)
     
+    diva.to(device)
     optimizer = optim.Adam(diva.parameters(), lr=args.learning_rate)
     patience = 5
     training_metrics = train(args, diva, optimizer, train_loader, test_loader, args.device, patience)
