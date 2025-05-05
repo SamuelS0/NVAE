@@ -33,15 +33,15 @@ class NModule(nn.Module):
         cls.y_dim = y_dim
         cls.a_dim = a_dim
 
-
+# make latent dims divisible by 3
 class VAE(NModule):
     def __init__(
             self,
             class_map,
-            zy_dim = 16,
-            zx_dim= 16,
-            zay_dim = 16,
-            za_dim=16,
+            zy_dim = 12,
+            zx_dim= 12,
+            zay_dim = 12,
+            za_dim=12,
             y_dim=10,   # 10 for MNIST's 10 digit classes (0-9)
             a_dim=5,    # Updated to 5 for exactly 5 attribute classes (0-4)
             in_channels = 3,
@@ -61,21 +61,32 @@ class VAE(NModule):
         super().__init__()
 
         self.class_map = class_map
-        
+
+        if diva:
+            assert zay_dim % 3 == 0, "zay_dim must be divisible by 3"
+
+            extra_dim = zay_dim // 3
+
+            self.zy_dim = zy_dim + extra_dim
+            self.zx_dim = zx_dim + extra_dim
+            self.za_dim = za_dim + extra_dim
+            self.zay_dim = None
+            self.z_y_combined_dim = self.zy_dim
+            self.z_a_combined_dim = self.za_dim
+            self.z_total_dim = self.zx_dim + self.zy_dim + self.za_dim
+
+        else:
+            self.zy_dim = zy_dim
+            self.zx_dim = zx_dim
+            self.zay_dim = zay_dim
+            self.za_dim = za_dim
+            self.z_y_combined_dim = zy_dim + zay_dim
+            self.z_a_combined_dim = za_dim + zay_dim
+            self.z_total_dim = zx_dim + zy_dim + zay_dim + za_dim
+
         self.y_dim = y_dim
         self.a_dim = a_dim
 
-        self.zx_dim = zx_dim
-        self.zy_dim = zy_dim
-        self.za_dim = za_dim
-
-        # if diva is true, we remove zay latent variable
-        if diva:
-            self.zay_dim = 0
-            self.z_y_combined_dim = zy_dim
-            self.z_a_combined_dim = za_dim
-
-        self.z_total_dim = zx_dim + zy_dim + zay_dim + za_dim
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -87,20 +98,29 @@ class VAE(NModule):
         self.alpha_1, self.alpha_2 = alpha_1, alpha_2
         self.diva = diva
 
-        self.zy_index_range = [0, zy_dim]
-        self.zx_index_range = [zy_dim, zy_dim + zx_dim]
-        self.zay_index_range = [zy_dim + zx_dim, zy_dim + zx_dim + zay_dim]
-        self.za_index_range = [zy_dim + zx_dim + zay_dim, self.z_total_dim]
+        self.zy_index_range = [0, self.zy_dim]
+        self.zx_index_range = [self.zy_dim, self.zy_dim + self.zx_dim]
+        if diva:
+            self.zay_index_range = None
+            self.za_index_range = [self.zy_dim + self.zx_dim, self.z_total_dim]
+        else:
+            self.zay_index_range = [self.zy_dim + self.zx_dim, self.zy_dim + self.zx_dim + self.zay_dim]
+            self.za_index_range = [self.zy_dim + self.zx_dim + self.zay_dim, self.z_total_dim]
         
-        self.qz = qz(zy_dim, zx_dim, zay_dim, za_dim, self.z_total_dim,
-                     in_channels, out_channels, kernel, stride, padding)
-        self.qy = qy(y_dim, zy_dim, zay_dim, diva)
-        self.qa = qa(a_dim, za_dim, zay_dim, diva)
+        self.qz = qz(self.zy_dim, self.zx_dim, self.zay_dim, self.za_dim, self.z_total_dim,
+                     in_channels, out_channels, kernel, stride, padding, diva)
+        self.qy = qy(self.y_dim, self.zy_dim, self.zay_dim, diva)
+        self.qa = qa(self.a_dim, self.za_dim, self.zay_dim, diva)
 
-        self.pzy = pzy(y_dim, zy_dim)
-        self.pzay = pzay(y_dim, a_dim, zay_dim, diva)
-        self.pza = pza(a_dim, za_dim)
-        self.px = px(zy_dim, zx_dim, zay_dim, za_dim, self.z_total_dim, in_channels, out_channels, kernel)
+        self.pzy = pzy(self.y_dim, self.zy_dim)
+        
+        if diva:
+            self.pzay = None
+        else:
+            self.pzay = pzay(self.y_dim, self.a_dim, self.zay_dim)
+
+        self.pza = pza(self.a_dim, self.za_dim)
+        self.px = px(self.zy_dim, self.zx_dim, self.zay_dim, self.za_dim, self.z_total_dim, in_channels, out_channels, kernel, diva=diva)
 
     def forward(self, y, x, a):
         # Encode
@@ -119,14 +139,21 @@ class VAE(NModule):
         zy = z[:, self.zy_index_range[0]:self.zy_index_range[1]]
         zx = z[:, self.zx_index_range[0]:self.zx_index_range[1]]
         if self.diva:
-            zay = torch.zeros_like(zy)
+            zay = None
         else:
             zay = z[:, self.zay_index_range[0]:self.zay_index_range[1]]
+
         za = z[:, self.za_index_range[0]:self.za_index_range[1]]
         
         if not hasattr(self, '_shape_checked'):
-            print(f"Split latent vectors - zy: {zy.shape}, zx: {zx.shape}, zay: {zay.shape}, za: {za.shape}")
+            zay_shape = "None" if zay is None else zay.shape
+            print(f"Split latent vectors - zy: {zy.shape}, zx: {zx.shape}, zay: {zay_shape}, za: {za.shape}")
             self._shape_checked = True
+
+        if self.diva:
+            assert z.shape[1] == self.zy_dim + self.zx_dim + self.za_dim
+        else:
+            assert z.shape[1] == self.zy_dim + self.zx_dim + self.zay_dim + self.za_dim
 
         # Decoder Reconstruction
         x_recon = self.px(zy, zx, zay, za)
@@ -166,7 +193,10 @@ class VAE(NModule):
         log_prob_z = qz.log_prob(z)
         log_prob_zy = log_prob_z[:, self.zy_index_range[0]:self.zy_index_range[1]]
         log_prob_zx = log_prob_z[:, self.zx_index_range[0]:self.zx_index_range[1]]
-        log_prob_zay = log_prob_z[:, self.zay_index_range[0]:self.zay_index_range[1]]
+        if self.diva:
+            log_prob_zay = torch.zeros_like(log_prob_zy)  # Create zero tensor for DIVA mode
+        else:
+            log_prob_zay = log_prob_z[:, self.zay_index_range[0]:self.zay_index_range[1]]
         log_prob_za = log_prob_z[:, self.za_index_range[0]:self.za_index_range[1]]
 
         x_recon_loss = F.mse_loss(x_recon, x, reduction='sum')
@@ -176,7 +206,6 @@ class VAE(NModule):
             kl_zay = torch.zeros_like(kl_zy)
         else:
             kl_zay = torch.sum(log_prob_zay - pzay.log_prob(zay))
-
         kl_za = torch.sum(log_prob_za - pza.log_prob(za))
 
         # Handle y label - could be index or one-hot
@@ -278,15 +307,18 @@ class VAE(NModule):
             a_one_hot = F.one_hot(a, self.a_dim).float()
 
             if self.diva:
-                zay = torch.zeros_like(zy)
+                zay = None
             else:
                 pza_loc, pza_scale = self.pza(a)
                 pza = dist.Normal(pza_loc, pza_scale)
                 za = pza.sample()
             
-            pzay_loc, pzay_scale = self.pzay(y, a)
-            pzay = dist.Normal(pzay_loc, pzay_scale)
-            zay = pzay.sample()
+            if self.diva:
+                pzay_loc, pzay_scale = None, None
+            else:
+                pzay_loc, pzay_scale = self.pzay(y, a)
+                pzay = dist.Normal(pzay_loc, pzay_scale)
+                zay = pzay.sample()
             
             # Generate images using the decoder with conditional y, a
             generated_images = self.px(zy, zx, zay, za)
@@ -313,13 +345,14 @@ class qz(NModule):
 
         self.zy_dim = zy_dim
         self.zx_dim = zx_dim
+        self.za_dim = za_dim 
         if diva:
             self.zay_dim = 0
             self.z_total_dim = zy_dim + zx_dim + za_dim
         else:
             self.zay_dim = zay_dim
-            self.za_dim = za_dim
             self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
+
         self.encoder = nn.Sequential(                                          #out dims... in dims is (N, 3, 28, 28)
             nn.Conv2d(in_channels = 3, out_channels = 32, kernel_size = 3, stride = 1, padding = 1),     #(N, 32, 28, 28) 
             nn.ReLU(),
@@ -354,7 +387,7 @@ class qy(NModule):
         self.diva = diva
 
         if self.diva:
-            self.zay_dim = 0
+            self.zay_dim = None
             self.z_combined_dim = zy_dim  # When diva=True, we only use zy_dim
         else:
             self.zay_dim = zay_dim
@@ -501,14 +534,18 @@ class px(NModule):
         super().__init__()
 
         self.diva = diva
-
+        print(f"diva: {diva}")
+        self.zy_dim = zy_dim
+        self.zx_dim = zx_dim
+        self.za_dim = za_dim
+        print(f"zy_dim: {zy_dim}")
         if self.diva:
-            self.zay_dim = 0
-            self.z_total_dim = zy_dim + zx_dim + za_dim
+            self.zay_dim = None
+            self.z_total_dim = self.zy_dim + self.zx_dim + self.za_dim
         else:
             self.zay_dim = zay_dim
-        # Store parameters
-        self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
+            self.z_total_dim = self.zy_dim + self.zx_dim + self.zay_dim + self.za_dim
+
         self.out_channels = out_channels
 
         self.fc1 = nn.Linear(z_total_dim, 64 * 7 * 7)
@@ -525,6 +562,7 @@ class px(NModule):
     def forward(self, zy, zx, zay, za):
         # Combine latent variables
         if self.diva:
+            assert zay is None, "zay should be None in DIVA mode"
             z_combined = torch.cat((zy, zx, za), -1)
         else:
             z_combined = torch.cat((zy, zx, zay, za), -1)
@@ -585,17 +623,14 @@ class pzy(NModule):
 
 #need to handle encoding (one hot?) of a and y?
 class pzay(NModule):
-    def __init__(self, y_dim, a_dim, zay_dim, diva=False):
+    def __init__(self, y_dim, a_dim, zay_dim):
         super().__init__()
         self.y_dim = y_dim
         self.a_dim = a_dim
-        self.diva = diva
         self.in_dim = y_dim + a_dim
         
-        if diva:
-            self.zay_dim = 0
-        else:
-            self.zay_dim = zay_dim
+
+        self.zay_dim = zay_dim
 
         # Simplify architecture to avoid BatchNorm issues
         self.decoder = nn.Sequential(
