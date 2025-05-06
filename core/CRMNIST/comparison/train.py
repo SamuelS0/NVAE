@@ -3,6 +3,8 @@ from core.train import train
 import torch.optim as optim
 import os
 import torch
+from core.CRMNIST.comparison.dann import DANN
+from core.CRMNIST.comparison.dann_trainer import DANNTrainer
 
 """
     Train NVAE and comparison models
@@ -71,3 +73,17 @@ def train_diva(args, num_y_classes, num_r_classes, class_map, train_loader, test
     torch.save(diva.state_dict(), final_model_path)
 
     return diva, training_metrics
+
+def train_dann(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir):
+    print("Training DANN...")
+
+    # latent dimension is the sum of all split latent dimensions
+    z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
+
+    dann = DANN(num_y_classes, num_r_classes, z_dim)
+    dann = dann.to(args.device)
+    optimizer = optim.Adam(dann.parameters(), lr=args.learning_rate)
+    patience = 5
+    training_metrics = train(args, dann, optimizer, train_loader, test_loader, args.device, patience, DANNTrainer)
+
+    return dann, training_metrics

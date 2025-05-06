@@ -4,7 +4,7 @@ from typing import Dict, Tuple
 from tqdm import tqdm
 from core.trainer import Trainer
 
-def train(args, model, optimizer, train_loader, val_loader, device, patience):
+def train(args, model, optimizer, train_loader, val_loader, device, patience, trainer_class=Trainer):
     """
     Train the model in-place, updating its state with the best parameters found during training.
     Also returns training statistics about the training process.
@@ -13,7 +13,7 @@ def train(args, model, optimizer, train_loader, val_loader, device, patience):
     os.makedirs(args.out, exist_ok=True)
     
     # Initialize trainer
-    trainer = Trainer(
+    trainer = trainer_class(
         model=model,
         optimizer=optimizer,
         device=device,

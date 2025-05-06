@@ -3,7 +3,7 @@ from core.test import test
 from core.CRMNIST.model import VAE
 import torch
 from core.CRMNIST.data_generation import generate_crmnist_dataset, CRMNIST
-from core.CRMNIST.comparison.train import train_nvae, train_diva
+from core.CRMNIST.comparison.train import train_nvae, train_diva, train_dann
 import core.CRMNIST.utils
 import json
 from torch.utils.data import DataLoader
@@ -27,7 +27,7 @@ import os
 
 device = None 
 
-def evaluate_models(nvae, diva, test_loader, test_domain=None):
+def evaluate_models(nvae, diva, dann, test_loader, test_domain=None):
     """
     Evaluate models on the test set, optionally for a specific domain.
     
@@ -47,7 +47,7 @@ def evaluate_models(nvae, diva, test_loader, test_domain=None):
     
     test_loss_nvae, test_metrics_nvae = test(nvae, domain_test_loader, device)
     test_loss_diva, test_metrics_diva = test(diva, domain_test_loader, device)
-
+    test_loss_dann, test_metrics_dann = test(dann, domain_test_loader, device)
     print("--------------------------------")
     print(f"NVAE test results:")
     print(f"Test loss: {test_loss_nvae}")
@@ -58,9 +58,15 @@ def evaluate_models(nvae, diva, test_loader, test_domain=None):
     print(f"Test loss: {test_loss_diva}")
     print(f"Test metrics: {test_metrics_diva}")
     
+    print("--------------------------------")
+    print(f"DANN test results:")
+    print(f"Test loss: {test_loss_dann}")
+    print(f"Test metrics: {test_metrics_dann}")
+    
     return {
         'nvae': {'loss': test_loss_nvae, 'metrics': test_metrics_nvae},
-        'diva': {'loss': test_loss_diva, 'metrics': test_metrics_diva}
+        'diva': {'loss': test_loss_diva, 'metrics': test_metrics_diva},
+        'dann': {'loss': test_loss_dann, 'metrics': test_metrics_dann}
     }
 
 def filter_domain_loader(loader, domain, exclude=False):
@@ -130,18 +136,19 @@ def print_results(results, holdout=False):
     print(f"{'Holdout' if holdout else 'Cross-domain'} results:")
 
     for model in results:
+        print(f"--------------------------------")
         print(f"Domain results for {model.upper()}:")
         for domain in results[model]:
             print(f"\n{'Held out test' if holdout else 'Cross-domain test'} domain {domain} ({domain * 15}°):")
             print(f"Loss: {results[model][domain]['loss']:.4f}")
             for metric in results[model][domain]['metrics']:
                 print(f"{metric}: {results[model][domain]['metrics'][metric]:.4f}")
-
+        print(f"--------------------------------")
     print(f"--------------------------------")
 
 
 
-def run_cross_domain_evaluation(args, nvae, diva, test_loader):
+def run_cross_domain_evaluation(args, nvae, diva, dann, test_loader):
     """
     Run evaluation across all domains and compute statistics.
     
@@ -155,12 +162,12 @@ def run_cross_domain_evaluation(args, nvae, diva, test_loader):
         Dictionary containing mean and std of metrics across domains
     """
     num_domains = 5  # 5 rotation domains
-    cross_domain_results = {'nvae': {}, 'diva': {}}
+    cross_domain_results = {'nvae': {}, 'diva': {}, 'dann': {}}
     
     # Evaluate on each domain
     for domain in range(num_domains):
         print(f"\nEvaluating on domain {domain} ({domain * 15}°)")
-        results = evaluate_models(nvae, diva, test_loader, test_domain=domain)
+        results = evaluate_models(nvae, diva, dann, test_loader, test_domain=domain)
         for model in cross_domain_results:
             cross_domain_results[model][domain] = {
                 'loss': results[model]['loss'],
@@ -211,9 +218,16 @@ def run_holdout_evaluation(args, train_loader, test_loader, class_map):
               f"Best validation loss: {training_results_diva['best_validation_loss']}\n"
               f"Best batch metrics: {training_results_diva['best_batch_metrics']}")
         
+        dann, training_results_dann = train_dann(args, num_y_classes, num_r_classes, class_map, 
+                                               filtered_train_loader, test_loader, args.out)
+        print(f"DANN training results: \n"
+              f"Best model epoch: {training_results_dann['best_model_epoch']}\n"
+              f"Best validation loss: {training_results_dann['best_validation_loss']}\n"
+              f"Best batch metrics: {training_results_dann['best_batch_metrics']}")
+        
         # Test on holdout domain
         holdout_test_loader = filter_domain_loader(test_loader, holdout_domain)
-        results = evaluate_models(nvae, diva, holdout_test_loader)
+        results = evaluate_models(nvae, diva, dann, holdout_test_loader)
         
         # Store results
         for model in holdout_results:
@@ -271,14 +285,19 @@ def run_experiment(args):
 
     nvae, training_results_nvae = train_nvae(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
     diva, training_results_diva = train_diva(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
+    dann, training_results_dann = train_dann(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
 
     print("NVAE training results:")
     print(f"Best model epoch: {training_results_nvae['best_model_epoch']}\nBest validation loss: {training_results_nvae['best_validation_loss']}\nBest batch metrics: {training_results_nvae['best_batch_metrics']}")
+    print("--------------------------------")
     print("DIVA training results:")
     print(f"Best model epoch: {training_results_diva['best_model_epoch']}\nBest validation loss: {training_results_diva['best_validation_loss']}\nBest batch metrics: {training_results_diva['best_batch_metrics']}")
+    print("--------------------------------")
+    print("DANN training results:")
+    print(f"Best model epoch: {training_results_dann['best_model_epoch']}\nBest validation loss: {training_results_dann['best_validation_loss']}\nBest batch metrics: {training_results_dann['best_batch_metrics']}")
 
     # Run cross-domain evaluation
-    cross_domain_results = run_cross_domain_evaluation(args, nvae, diva, test_loader)
+    cross_domain_results = run_cross_domain_evaluation(args, nvae, diva, dann, test_loader)
     
     # Run holdout evaluation
     holdout_results = run_holdout_evaluation(args, train_loader, test_loader, class_map)
