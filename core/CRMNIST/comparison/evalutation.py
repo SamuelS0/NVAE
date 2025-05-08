@@ -49,9 +49,9 @@ def evaluate_models(nvae, diva, dann, test_loader, test_domain=None, path=None):
     test_loss_nvae, test_metrics_nvae = test_nvae(nvae, domain_test_loader, device)
     
 
-    # test_loss_diva, test_metrics_diva = test_nvae(diva, domain_test_loader, device)
+    test_loss_diva, test_metrics_diva = test_nvae(diva, domain_test_loader, device)
     
-    # test_loss_dann, test_metrics_dann = test_dann(dann, domain_test_loader, device)
+    test_loss_dann, test_metrics_dann = test_dann(dann, domain_test_loader, device)
     
 
     print("--------------------------------")
@@ -59,20 +59,20 @@ def evaluate_models(nvae, diva, dann, test_loader, test_domain=None, path=None):
     print(f"Test loss: {test_loss_nvae}")
     print(f"Test metrics: {test_metrics_nvae}")
     
-    # print("--------------------------------")
-    # print(f"DIVA test results:")
-    # print(f"Test loss: {test_loss_diva}")
-    # print(f"Test metrics: {test_metrics_diva}")
+    print("--------------------------------")
+    print(f"DIVA test results:")
+    print(f"Test loss: {test_loss_diva}")
+    print(f"Test metrics: {test_metrics_diva}")
     
-    # print("--------------------------------")
-    # print(f"DANN test results:")
-    # print(f"Test loss: {test_loss_dann}")
-    # print(f"Test metrics: {test_metrics_dann}")
+    print("--------------------------------")
+    print(f"DANN test results:")
+    print(f"Test loss: {test_loss_dann}")
+    print(f"Test metrics: {test_metrics_dann}")
    
     return {
         'nvae': {'loss': test_loss_nvae, 'metrics': test_metrics_nvae},
-        # 'diva': {'loss': test_loss_diva, 'metrics': test_metrics_diva},
-        # 'dann': {'loss': test_loss_dann, 'metrics': test_metrics_dann}
+        'diva': {'loss': test_loss_diva, 'metrics': test_metrics_diva},
+        'dann': {'loss': test_loss_dann, 'metrics': test_metrics_dann}
     }
 
 def filter_domain_loader(loader, domain, exclude=False):
@@ -291,8 +291,8 @@ def run_experiment(args):
     num_r_classes = train_dataset.dataset.num_r_classes
     
     nvae, training_results_nvae = train_nvae(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
-    # diva, training_results_diva = train_diva(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
-    # dann, training_results_dann = train_dann(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
+    diva, training_results_diva = train_diva(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
+    dann, training_results_dann = train_dann(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
 
     print("NVAE training results:")
     print(f"Best model epoch: {training_results_nvae['best_model_epoch']}\nBest validation loss: {training_results_nvae['best_validation_loss']}\nBest batch metrics: {training_results_nvae['best_batch_metrics']}")
@@ -301,16 +301,16 @@ def run_experiment(args):
     nvae.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'nvae_latent_correlations'))
     print("--------------------------------")
 
-    # print("DIVA training results:")
-    # print(f"Best model epoch: {training_results_diva['best_model_epoch']}\nBest validation loss: {training_results_diva['best_validation_loss']}\nBest batch metrics: {training_results_diva['best_batch_metrics']}")
-    # diva.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'diva_latent_space'))
-    # diva.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'diva_disentanglement'))
-    # diva.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'diva_latent_correlations'))
+    print("DIVA training results:")
+    print(f"Best model epoch: {training_results_diva['best_model_epoch']}\nBest validation loss: {training_results_diva['best_validation_loss']}\nBest batch metrics: {training_results_diva['best_batch_metrics']}")
+    diva.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'diva_latent_space'))
+    diva.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'diva_disentanglement'))
+    diva.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'diva_latent_correlations'))
 
-    # print("--------------------------------")
-    # print("DANN training results:")
-    # print(f"Best model epoch: {training_results_dann['best_model_epoch']}\nBest validation loss: {training_results_dann['best_validation_loss']}\nBest batch metrics: {training_results_dann['best_batch_metrics']}")
-    # dann.visualize_latent_space(test_loader, device, os.path.join(args.out, 'dann_latent_space'))
+    print("--------------------------------")
+    print("DANN training results:")
+    print(f"Best model epoch: {training_results_dann['best_model_epoch']}\nBest validation loss: {training_results_dann['best_validation_loss']}\nBest batch metrics: {training_results_dann['best_batch_metrics']}")
+    dann.visualize_latent_space(test_loader, device, os.path.join(args.out, 'dann_latent_space'))
 
     # Run cross-domain evaluation
     cross_domain_results = run_cross_domain_evaluation(args, nvae, None, None, test_loader)
