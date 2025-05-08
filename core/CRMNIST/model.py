@@ -643,9 +643,9 @@ class qz(NModule):
                  z_total_dim, 
                  in_channels=3,
                  out_channels=32,
-                 kernel=3,
+                 kernel=5,  # Changed to 5x5 kernel
                  stride=1,
-                 padding=1,
+                 padding=2,  # Adjusted padding for 5x5 kernel
                  diva=False):
         super().__init__()
 
@@ -659,32 +659,35 @@ class qz(NModule):
             self.zay_dim = zay_dim
             self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
 
-        # triple conv channels
-        self.encoder = nn.Sequential(                                          #out dims... in dims is (N, 3, 28, 28)
-            nn.Conv2d(in_channels = 3, out_channels = 32, kernel_size = 3, stride = 1, padding = 1),     #(N, 32, 28, 28) 
+        # Encoder architecture matching DIVA paper
+        self.encoder = nn.Sequential(
+            # Block 1
+            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.MaxPool2d(2),                                                   #(N, 32, 14, 14)
-            nn.Conv2d(out_channels, out_channels*2, kernel_size = 3, stride = 1, padding = 1),  #(N, 64, 14, 14) 
+            # Block 2
+            nn.MaxPool2d(2, 2),
+            # Block 3
+            nn.Conv2d(32, 64, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.MaxPool2d(2),                                                   #(N, 64, 7, 7)
+            # Block 4
+            nn.MaxPool2d(2, 2),
             nn.Flatten()
-            )
-        self.loc = nn.Linear(64*7*7, z_total_dim)                          
-        self.scale = nn.Linear(64*7*7, z_total_dim)                       
-
-
+        )
+        
+        # Block 5: Linear layers
+        self.loc = nn.Linear(64 * 7 * 7, z_total_dim)  # 7x7 after two max pools
+        self.scale = nn.Sequential(
+            nn.Linear(64 * 7 * 7, z_total_dim),
+            nn.Softplus()  # Using Softplus as in the paper
+        )
 
     def forward(self, x):
         h = self.encoder(x)
-        h = F.relu(h)
         z_loc = self.loc(h)
-        z_scale = F.softplus(self.scale(h)) + 1e-7
+        z_scale = self.scale(h) + 1e-7  # Add small epsilon for numerical stability
         
-        # h = self.encoder(x)
-        # z_loc = self.loc(h)
-        # z_scale = F.softplus(self.scale(h)) + 1e-7
-        
-
         return z_loc, z_scale
         
 #Auxiliarry classifiers
@@ -841,11 +844,9 @@ class px(NModule):
         super().__init__()
 
         self.diva = diva
-        print(f"diva: {diva}")
         self.zy_dim = zy_dim
         self.zx_dim = zx_dim
         self.za_dim = za_dim
-        print(f"zy_dim: {zy_dim}")
         if self.diva:
             self.zay_dim = None
             self.z_total_dim = self.zy_dim + self.zx_dim + self.za_dim
@@ -853,18 +854,35 @@ class px(NModule):
             self.zay_dim = zay_dim
             self.z_total_dim = self.zy_dim + self.zx_dim + self.zay_dim + self.za_dim
 
-        self.out_channels = out_channels
+        # Block 1: Initial linear layer
+        self.fc = nn.Sequential(
+            nn.Linear(z_total_dim, 64 * 7 * 7),  # Changed from 1024 to match reshape dimensions
+            nn.BatchNorm1d(64 * 7 * 7),
+            nn.ReLU()
+        )
 
-        self.fc1 = nn.Linear(z_total_dim, 64 * 7 * 7)
-        self.decoder = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='nearest'),
-            nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, 3, kernel_size=4, stride=2, padding=1),
-            nn.Sigmoid()  # Add sigmoid to ensure output values are in [0,1] range
-            )
-        
+        # Block 2: First upsampling
+        self.upsample1 = nn.Upsample(scale_factor=2, mode='nearest')
+
+        # Block 3: First transposed convolution
+        self.conv1 = nn.Sequential(
+            nn.ConvTranspose2d(64, 128, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(128),
+            nn.ReLU()
+        )
+
+        # Block 4: Second upsampling
+        self.upsample2 = nn.Upsample(scale_factor=2, mode='nearest')
+
+        # Block 5: Second transposed convolution
+        self.conv2 = nn.Sequential(
+            nn.ConvTranspose2d(128, 256, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(256),
+            nn.ReLU()
+        )
+
+        # Block 6: Final convolution
+        self.conv3 = nn.Conv2d(256, 3, kernel_size=1)
         
     def forward(self, zy, zx, zay, za):
         # Combine latent variables
@@ -874,13 +892,18 @@ class px(NModule):
         else:
             z_combined = torch.cat((zy, zx, zay, za), -1)
         
-        combined_features = z_combined
+        # Initial linear layer
+        h = self.fc(z_combined)
+        h = h.view(-1, 64, 7, 7)  
         
-        # Decode
-        h = self.fc1(combined_features)
-        h = h.view(-1, 64, 7, 7)
-        h = self.decoder(h)
-        return h
+        # Upsampling and convolutions
+        h = self.upsample1(h)  # 7x7 -> 14x14
+        h = self.conv1(h)
+        h = self.upsample2(h)  # 14x14 -> 28x28
+        h = self.conv2(h)
+        h = self.conv3(h)
+        
+        return torch.sigmoid(h)  # Ensure output is in [0,1] range
 
 # y is input, y is one hot encoded as vector of dimension y_dim.
 class pzy(NModule):
