@@ -1,5 +1,5 @@
 from core.train import train
-from core.test import test
+from core.test import test_nvae, test_dann
 from core.CRMNIST.model import VAE
 import torch
 from core.CRMNIST.data_generation import generate_crmnist_dataset, CRMNIST
@@ -15,6 +15,7 @@ import os
     - test against domain adversarial network
     - compute metrics for each model using each rotation as a test domain, get mean and std of metrics
     - run each method with multiple random seeds, reporting mean ± standard-deviation.
+    - visualize latent space
 """
 
 """
@@ -27,7 +28,7 @@ import os
 
 device = None 
 
-def evaluate_models(nvae, diva, dann, test_loader, test_domain=None):
+def evaluate_models(nvae, diva, dann, test_loader, test_domain=None, path=None):
     """
     Evaluate models on the test set, optionally for a specific domain.
     
@@ -45,28 +46,33 @@ def evaluate_models(nvae, diva, dann, test_loader, test_domain=None):
     else:
         domain_test_loader = test_loader
     
-    test_loss_nvae, test_metrics_nvae = test(nvae, domain_test_loader, device)
-    test_loss_diva, test_metrics_diva = test(diva, domain_test_loader, device)
-    test_loss_dann, test_metrics_dann = test(dann, domain_test_loader, device)
+    test_loss_nvae, test_metrics_nvae = test_nvae(nvae, domain_test_loader, device)
+    
+
+    # test_loss_diva, test_metrics_diva = test_nvae(diva, domain_test_loader, device)
+    
+    # test_loss_dann, test_metrics_dann = test_dann(dann, domain_test_loader, device)
+    
+
     print("--------------------------------")
     print(f"NVAE test results:")
     print(f"Test loss: {test_loss_nvae}")
     print(f"Test metrics: {test_metrics_nvae}")
     
-    print("--------------------------------")
-    print(f"DIVA test results:")
-    print(f"Test loss: {test_loss_diva}")
-    print(f"Test metrics: {test_metrics_diva}")
+    # print("--------------------------------")
+    # print(f"DIVA test results:")
+    # print(f"Test loss: {test_loss_diva}")
+    # print(f"Test metrics: {test_metrics_diva}")
     
-    print("--------------------------------")
-    print(f"DANN test results:")
-    print(f"Test loss: {test_loss_dann}")
-    print(f"Test metrics: {test_metrics_dann}")
-    
+    # print("--------------------------------")
+    # print(f"DANN test results:")
+    # print(f"Test loss: {test_loss_dann}")
+    # print(f"Test metrics: {test_metrics_dann}")
+   
     return {
         'nvae': {'loss': test_loss_nvae, 'metrics': test_metrics_nvae},
-        'diva': {'loss': test_loss_diva, 'metrics': test_metrics_diva},
-        'dann': {'loss': test_loss_dann, 'metrics': test_metrics_dann}
+        # 'diva': {'loss': test_loss_diva, 'metrics': test_metrics_diva},
+        # 'dann': {'loss': test_loss_dann, 'metrics': test_metrics_dann}
     }
 
 def filter_domain_loader(loader, domain, exclude=False):
@@ -167,7 +173,7 @@ def run_cross_domain_evaluation(args, nvae, diva, dann, test_loader):
     # Evaluate on each domain
     for domain in range(num_domains):
         print(f"\nEvaluating on domain {domain} ({domain * 15}°)")
-        results = evaluate_models(nvae, diva, dann, test_loader, test_domain=domain)
+        results = evaluate_models(nvae, diva, dann, test_loader, test_domain=domain, path=os.path.join(args.out, f'cross_domain_domain_{domain}'))
         for model in cross_domain_results:
             cross_domain_results[model][domain] = {
                 'loss': results[model]['loss'],
@@ -227,7 +233,7 @@ def run_holdout_evaluation(args, train_loader, test_loader, class_map):
         
         # Test on holdout domain
         holdout_test_loader = filter_domain_loader(test_loader, holdout_domain)
-        results = evaluate_models(nvae, diva, dann, holdout_test_loader)
+        results = evaluate_models(nvae, diva, dann, holdout_test_loader, path=os.path.join(args.out, f'holdout_domain_{holdout_domain}'))
         
         # Store results
         for model in holdout_results:
@@ -280,24 +286,34 @@ def run_experiment(args):
                             num_workers=args.num_workers,
                             pin_memory=True)
 
+
     num_y_classes = train_dataset.dataset.num_y_classes
     num_r_classes = train_dataset.dataset.num_r_classes
-
+    
     nvae, training_results_nvae = train_nvae(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
-    diva, training_results_diva = train_diva(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
-    dann, training_results_dann = train_dann(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
+    # diva, training_results_diva = train_diva(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
+    # dann, training_results_dann = train_dann(args, num_y_classes, num_r_classes, class_map, train_loader, test_loader, models_dir)
 
     print("NVAE training results:")
     print(f"Best model epoch: {training_results_nvae['best_model_epoch']}\nBest validation loss: {training_results_nvae['best_validation_loss']}\nBest batch metrics: {training_results_nvae['best_batch_metrics']}")
+    nvae.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'nvae_latent_space'))
+    nvae.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'nvae_disentanglement'))
+    nvae.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'nvae_latent_correlations'))
     print("--------------------------------")
-    print("DIVA training results:")
-    print(f"Best model epoch: {training_results_diva['best_model_epoch']}\nBest validation loss: {training_results_diva['best_validation_loss']}\nBest batch metrics: {training_results_diva['best_batch_metrics']}")
-    print("--------------------------------")
-    print("DANN training results:")
-    print(f"Best model epoch: {training_results_dann['best_model_epoch']}\nBest validation loss: {training_results_dann['best_validation_loss']}\nBest batch metrics: {training_results_dann['best_batch_metrics']}")
+
+    # print("DIVA training results:")
+    # print(f"Best model epoch: {training_results_diva['best_model_epoch']}\nBest validation loss: {training_results_diva['best_validation_loss']}\nBest batch metrics: {training_results_diva['best_batch_metrics']}")
+    # diva.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'diva_latent_space'))
+    # diva.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'diva_disentanglement'))
+    # diva.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'diva_latent_correlations'))
+
+    # print("--------------------------------")
+    # print("DANN training results:")
+    # print(f"Best model epoch: {training_results_dann['best_model_epoch']}\nBest validation loss: {training_results_dann['best_validation_loss']}\nBest batch metrics: {training_results_dann['best_batch_metrics']}")
+    # dann.visualize_latent_space(test_loader, device, os.path.join(args.out, 'dann_latent_space'))
 
     # Run cross-domain evaluation
-    cross_domain_results = run_cross_domain_evaluation(args, nvae, diva, dann, test_loader)
+    cross_domain_results = run_cross_domain_evaluation(args, nvae, None, None, test_loader)
     
     # Run holdout evaluation
     holdout_results = run_holdout_evaluation(args, train_loader, test_loader, class_map)

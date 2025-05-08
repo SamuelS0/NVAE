@@ -4,6 +4,9 @@ from torch.nn import functional as F
 import torch.distributions as dist
 from core.utils import kl_divergence
 from torchsummary import summary
+import numpy as np
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
 
 #consider implementing a sparsity penalty
 
@@ -325,6 +328,309 @@ class VAE(NModule):
             
             return generated_images, y
 
+    def visualize_latent_spaces(self, dataloader, device, save_path=None):
+        """
+        Visualize all latent spaces using t-SNE
+        Args:
+            dataloader: DataLoader containing (x, y, c, r) tuples where:
+                x: input images
+                y: digit labels (0-9)
+                c: color labels (one-hot encoded, 5 dimensions)
+                r: rotation/domain labels (one-hot encoded, 5 dimensions)
+            device: torch device
+            save_path: Optional path to save the visualization
+        """
+        self.eval()
+        zy_list, za_list, zay_list, zx_list = [], [], [], []
+        y_list, c_list, r_list = [], [], []
+        
+        with torch.no_grad():
+            for x, y, c, r in dataloader:
+                x = x.to(device)
+  
+                # Get latent representations
+                z_loc, _ = self.qz(x)
+                zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
+                zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
+                if self.diva:
+                    zay = None
+                else:
+                    zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
+                za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
+                
+                # Store latent vectors and labels
+                zy_list.append(zy.cpu().numpy())
+                za_list.append(za.cpu().numpy())
+                if not self.diva:
+                    zay_list.append(zay.cpu().numpy())
+                zx_list.append(zx.cpu().numpy())
+                y_list.append(y.cpu().numpy())
+                c_list.append(c.cpu().numpy())
+                r_list.append(r.cpu().numpy())
+        
+        # Convert to numpy arrays
+        zy = np.concatenate(zy_list, axis=0)
+        za = np.concatenate(za_list, axis=0)
+        if not self.diva:
+            zay = np.concatenate(zay_list, axis=0)
+        zx = np.concatenate(zx_list, axis=0)
+        y_labels = np.concatenate(y_list, axis=0)
+        c_labels = np.concatenate(c_list, axis=0)
+        r_labels = np.concatenate(r_list, axis=0)
+        
+        # Print raw rotation labels for debugging
+        print("\nRaw rotation labels shape:", r_labels.shape)
+        print("Sample of raw rotation labels:", r_labels[:5])
+        print("Unique values in raw rotation labels:", np.unique(r_labels, axis=0))
+        
+        # Convert one-hot encoded labels to single dimension
+        if len(c_labels.shape) > 1:
+            c_labels = np.argmax(c_labels, axis=1)
+        if len(r_labels.shape) > 1:
+            # Ensure we're working with the correct axis
+            print("\nBefore argmax - r_labels shape:", r_labels.shape)
+            print("Sample of r_labels before argmax:", r_labels[:5])
+            r_labels = np.argmax(r_labels, axis=1)
+            print("\nAfter argmax - r_labels shape:", r_labels.shape)
+            print("Sample of r_labels after argmax:", r_labels[:5])
+        
+        # Print distribution of labels
+
+        print("\nUnique values in labels:")
+        print("Unique digit labels:", np.unique(y_labels))
+        print("Unique color labels:", np.unique(c_labels))
+        print("Unique rotation labels:", np.unique(r_labels))
+        
+        # Ensure all labels are 1D arrays
+        if len(y_labels.shape) > 1:
+            y_labels = y_labels.reshape(-1)
+        
+        # Verify dimensions match
+        assert len(y_labels) == len(zy), f"Label dimension mismatch: {len(y_labels)} vs {len(zy)}"
+        assert len(c_labels) == len(za), f"Color label dimension mismatch: {len(c_labels)} vs {len(za)}"
+        assert len(r_labels) == len(za), f"Rotation label dimension mismatch: {len(r_labels)} vs {len(za)}"
+        
+        # Apply t-SNE to each latent space
+        tsne = TSNE(n_components=2, random_state=42)
+        zy_2d = tsne.fit_transform(zy)
+        za_2d = tsne.fit_transform(za)
+        if not self.diva:
+            zay_2d = tsne.fit_transform(zay)
+        zx_2d = tsne.fit_transform(zx)
+        
+        # Create figure with 2 rows (digit labels and rotation labels) and 4 columns (zy, za, zay, zx)
+        if self.diva:
+            fig, axes = plt.subplots(2, 3, figsize=(18, 12))  # 3 columns for DIVA mode
+        else:
+            fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+        
+        # Define rotation angles for legend
+        rotation_angles = ['0°', '15°', '30°', '45°', '60°']
+        
+        # Plot each latent space
+        latent_spaces = [
+            (zy_2d, 'Label-specific (zy)'),
+            (za_2d, 'Domain-specific (za)'),
+            (zay_2d if not self.diva else None, 'Domain-Label (zay)'),
+            (zx_2d, 'Residual (zx)')
+        ]
+        
+        for col, (space_2d, title) in enumerate(latent_spaces):
+            if space_2d is None:  # Skip zay in DIVA mode
+                continue
+                
+            # Top row: color by digit label
+            scatter1 = axes[0, col].scatter(space_2d[:, 0], space_2d[:, 1], 
+                                          c=y_labels, cmap='tab10', alpha=0.7)
+            axes[0, col].set_title(f'{title}\nColored by Digit')
+            axes[0, col].legend(*scatter1.legend_elements(), title="Digits")
+            
+            # Bottom row: color by rotation
+            scatter2 = axes[1, col].scatter(space_2d[:, 0], space_2d[:, 1], 
+                                          c=r_labels, cmap='tab10', 
+                                          vmin=0, vmax=4,  # Set the range to match our rotation indices
+                                          alpha=0.7)
+            axes[1, col].set_title(f'{title}\nColored by Rotation')
+            # Create custom legend for rotations
+            legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
+                                        markerfacecolor=plt.cm.tab10(i/4),  # Normalize to [0,1] range
+                                        label=angle, markersize=10)
+                             for i, angle in enumerate(rotation_angles)]
+            axes[1, col].legend(handles=legend_elements, title="Rotations")
+        
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, bbox_inches='tight')
+            print(f"Latent space visualization saved to {save_path}")
+        plt.close()
+
+    def visualize_disentanglement(self, dataloader, device, save_path=None):
+        """
+        Visualize disentanglement by showing how changing each latent space affects generation
+        while keeping others fixed.
+        """
+        self.eval()
+        
+        # Get a batch of data
+        x, y, c, r = next(iter(dataloader))  # Changed to unpack 4 values
+        x = x.to(device)
+        y = y.to(device)
+        r = r.to(device)  # Using r (rotation) as domain label
+        
+        # Get base latent representations
+        z_loc, _ = self.qz(x)
+        zy_base = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
+        zx_base = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
+        if self.diva:
+            zay_base = None
+        else:
+            zay_base = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
+        za_base = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
+        
+        # Create figure for visualization
+        if self.diva:
+            fig, axes = plt.subplots(3, 5, figsize=(20, 12))  # 3 rows for DIVA mode
+        else:
+            fig, axes = plt.subplots(4, 5, figsize=(20, 16))
+        
+        # For each latent space, show how changing it affects generation
+        for i in range(5):  # Show 5 variations
+            # 1. Vary zy (label-specific)
+            zy_varied = zy_base.clone()
+            zy_varied[0] = zy_varied[0] * (1 + 0.5 * (i - 2))  # Scale the first sample
+            img_zy = self.px(zy_varied, zx_base, zay_base, za_base)[0].cpu()
+            axes[0, i].imshow(img_zy.permute(1, 2, 0).detach().numpy())
+            axes[0, i].set_title(f'zy variation {i-2}')
+            axes[0, i].axis('off')
+            
+            # 2. Vary za (domain-specific)
+            za_varied = za_base.clone()
+            za_varied[0] = za_varied[0] * (1 + 0.5 * (i - 2))
+            img_za = self.px(zy_base, zx_base, zay_base, za_varied)[0].cpu()
+            axes[1, i].imshow(img_za.permute(1, 2, 0).detach().numpy())
+            axes[1, i].set_title(f'za variation {i-2}')
+            axes[1, i].axis('off')
+            
+            # 3. Vary zay (domain-label interaction)
+            if not self.diva:
+                zay_varied = zay_base.clone()
+                zay_varied[0] = zay_varied[0] * (1 + 0.5 * (i - 2))
+                img_zay = self.px(zy_base, zx_base, zay_varied, za_base)[0].cpu()
+                axes[2, i].imshow(img_zay.permute(1, 2, 0).detach().numpy())
+                axes[2, i].set_title(f'zay variation {i-2}')
+                axes[2, i].axis('off')
+            
+            # 4. Vary zx (residual)
+            zx_varied = zx_base.clone()
+            zx_varied[0] = zx_varied[0] * (1 + 0.5 * (i - 2))
+            img_zx = self.px(zy_base, zx_varied, zay_base, za_base)[0].cpu()
+            if self.diva:
+                axes[2, i].imshow(img_zx.permute(1, 2, 0).detach().numpy())
+                axes[2, i].set_title(f'zx variation {i-2}')
+                axes[2, i].axis('off')
+            else:
+                axes[3, i].imshow(img_zx.permute(1, 2, 0).detach().numpy())
+                axes[3, i].set_title(f'zx variation {i-2}')
+                axes[3, i].axis('off')
+        
+        # Add row labels
+        axes[0, 0].set_ylabel('Label-specific (zy)', size='large')
+        axes[1, 0].set_ylabel('Domain-specific (za)', size='large')
+        if not self.diva:
+            axes[2, 0].set_ylabel('Domain-Label (zay)', size='large')
+            axes[3, 0].set_ylabel('Residual (zx)', size='large')
+        else:
+            axes[2, 0].set_ylabel('Residual (zx)', size='large')
+        
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path)
+            print(f"Disentanglement visualization saved to {save_path}")
+        plt.close()
+
+    def visualize_latent_correlations(self, dataloader, device, save_path=None):
+        """
+        Visualize correlations between different latent spaces to show disentanglement
+        """
+        self.eval()
+        zy_list, za_list, zay_list, zx_list = [], [], [], []
+        
+        with torch.no_grad():
+            for x, y, c, r in dataloader:  # Changed to unpack 4 values
+                x = x.to(device)
+                z_loc, _ = self.qz(x)
+                zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
+                zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
+                if self.diva:
+                    zay = None
+                else:
+                    zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
+                za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
+                
+                zy_list.append(zy.cpu().numpy())
+                za_list.append(za.cpu().numpy())
+                if not self.diva:
+                    zay_list.append(zay.cpu().numpy())
+                zx_list.append(zx.cpu().numpy())
+        
+        # Convert to numpy arrays
+        zy = np.concatenate(zy_list, axis=0)
+        za = np.concatenate(za_list, axis=0)
+        if not self.diva:
+            zay = np.concatenate(zay_list, axis=0)
+        zx = np.concatenate(zx_list, axis=0)
+        
+        # Calculate correlations
+        corr_zy_za = np.corrcoef(zy.T, za.T)
+        corr_zy_zx = np.corrcoef(zy.T, zx.T)
+        corr_za_zx = np.corrcoef(za.T, zx.T)
+        if not self.diva:
+            corr_zy_zay = np.corrcoef(zy.T, zay.T)
+            corr_za_zay = np.corrcoef(za.T, zay.T)
+            corr_zx_zay = np.corrcoef(zx.T, zay.T)
+        
+        # Create correlation heatmaps
+        if self.diva:
+            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        else:
+            fig, axes = plt.subplots(2, 2, figsize=(15, 15))
+        
+        # Plot correlations
+        if self.diva:
+            im1 = axes[0].imshow(corr_zy_za, cmap='RdBu', vmin=-1, vmax=1)
+            axes[0].set_title('zy vs za correlation')
+            plt.colorbar(im1, ax=axes[0])
+            
+            im2 = axes[1].imshow(corr_zy_zx, cmap='RdBu', vmin=-1, vmax=1)
+            axes[1].set_title('zy vs zx correlation')
+            plt.colorbar(im2, ax=axes[1])
+            
+            im3 = axes[2].imshow(corr_za_zx, cmap='RdBu', vmin=-1, vmax=1)
+            axes[2].set_title('za vs zx correlation')
+            plt.colorbar(im3, ax=axes[2])
+        else:
+            im1 = axes[0, 0].imshow(corr_zy_za, cmap='RdBu', vmin=-1, vmax=1)
+            axes[0, 0].set_title('zy vs za correlation')
+            plt.colorbar(im1, ax=axes[0, 0])
+            
+            im2 = axes[0, 1].imshow(corr_zy_zx, cmap='RdBu', vmin=-1, vmax=1)
+            axes[0, 1].set_title('zy vs zx correlation')
+            plt.colorbar(im2, ax=axes[0, 1])
+            
+            im3 = axes[1, 0].imshow(corr_za_zx, cmap='RdBu', vmin=-1, vmax=1)
+            axes[1, 0].set_title('za vs zx correlation')
+            plt.colorbar(im3, ax=axes[1, 0])
+            
+            im4 = axes[1, 1].imshow(corr_zy_zay, cmap='RdBu', vmin=-1, vmax=1)
+            axes[1, 1].set_title('zy vs zay correlation')
+            plt.colorbar(im4, ax=axes[1, 1])
+        
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path)
+            print(f"Latent correlation visualization saved to {save_path}")
+        plt.close()
+
 
 
 #Encoder module 
@@ -353,6 +659,7 @@ class qz(NModule):
             self.zay_dim = zay_dim
             self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
 
+        # triple conv channels
         self.encoder = nn.Sequential(                                          #out dims... in dims is (N, 3, 28, 28)
             nn.Conv2d(in_channels = 3, out_channels = 32, kernel_size = 3, stride = 1, padding = 1),     #(N, 32, 28, 28) 
             nn.ReLU(),

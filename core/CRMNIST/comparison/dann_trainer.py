@@ -30,10 +30,7 @@ class DANNTrainer(Trainer):
             y_pred = torch.argmax(y_logits, dim=1)
             domain_pred = torch.argmax(domain_logits, dim=1)
 
-            y_loss = F.cross_entropy(y_logits, y)
-            domain_loss = F.cross_entropy(domain_logits, r)
-
-            loss = y_loss + domain_loss
+            loss = self.model.loss_function(y_logits, domain_logits, y, r)
             
             self.optimizer.zero_grad()
 
@@ -73,10 +70,7 @@ class DANNTrainer(Trainer):
                 y_pred = torch.argmax(y_logits, dim=1)
                 domain_pred = torch.argmax(domain_logits, dim=1)
 
-                y_loss = F.cross_entropy(y_logits, y)
-                domain_loss = F.cross_entropy(domain_logits, r)
-
-                loss = y_loss + domain_loss
+                loss = self.model.loss_function(y_logits, domain_logits, y, r)
 
                 total_loss += loss.item()
                 val_metrics_sum['y_accuracy'] += (y_pred == y).sum().item()

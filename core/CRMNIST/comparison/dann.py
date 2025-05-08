@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function
+import numpy as np
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
 
 class GradReverse(Function):
     @staticmethod
@@ -24,7 +27,7 @@ class DomainDiscriminator(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, num_r_classes),  # Output num_r_classes instead of 2
+            nn.Linear(hidden_dim, num_r_classes),  # Output num_r_classes (5 for our domains)
         )
 
     def forward(self, features, λ):
@@ -37,7 +40,7 @@ class DANN(nn.Module):
     def __init__(self, num_y_classes, num_r_classes, z_dim):
         super(DANN, self).__init__()
         self.num_y_classes = num_y_classes
-        self.num_r_classes = num_r_classes
+        self.num_r_classes = num_r_classes  # Should be 5 for our domains
         self.z_dim = z_dim
 
         # Feature extractor matching VAE encoder architecture
@@ -62,3 +65,87 @@ class DANN(nn.Module):
         y_predictions = self.classifier(features)
 
         return y_predictions, domain_predictions
+    
+    def loss_function(self, y_predictions, domain_predictions, y, r):
+        y_loss = F.cross_entropy(y_predictions, y)
+        domain_loss = F.cross_entropy(domain_predictions, r)
+        return y_loss - domain_loss 
+
+    def get_features(self, x):
+        """Extract features from the feature extractor"""
+        return self.feature_extractor(x)
+
+    def visualize_latent_space(self, dataloader, device, save_path=None):
+        """
+        Visualize the latent space using t-SNE
+        Args:
+            dataloader: DataLoader containing (x, y, c, r) tuples where:
+                x: input images
+                y: digit labels (0-9)
+                c: color labels (one-hot encoded, 5 dimensions)
+                r: rotation/domain labels (one-hot encoded, 5 dimensions)
+            device: torch device
+            save_path: Optional path to save the visualization
+        """
+        self.eval()
+        features_list = []
+        y_list = []
+        c_list = []
+        r_list = []
+        
+        with torch.no_grad():
+            for x, y, c, r in dataloader:
+                x = x.to(device)
+                features = self.get_features(x)
+                features_list.append(features.cpu().numpy())
+                y_list.append(y.cpu().numpy())
+                c_list.append(c.cpu().numpy())
+                r_list.append(r.cpu().numpy())
+        
+        features = np.concatenate(features_list, axis=0)
+        y_labels = np.concatenate(y_list, axis=0)
+        c_labels = np.concatenate(c_list, axis=0)
+        r_labels = np.concatenate(r_list, axis=0)
+        
+        # Convert one-hot encoded labels to single dimension
+        if len(c_labels.shape) > 1:
+            c_labels = np.argmax(c_labels, axis=1)
+        if len(r_labels.shape) > 1:
+            r_labels = np.argmax(r_labels, axis=1)
+        
+        # Ensure all labels are 1D arrays
+        if len(y_labels.shape) > 1:
+            y_labels = y_labels.reshape(-1)
+        
+        # Verify dimensions match
+        assert len(y_labels) == len(features), f"Label dimension mismatch: {len(y_labels)} vs {len(features)}"
+        assert len(c_labels) == len(features), f"Color label dimension mismatch: {len(c_labels)} vs {len(features)}"
+        assert len(r_labels) == len(features), f"Rotation label dimension mismatch: {len(r_labels)} vs {len(features)}"
+        
+        # Apply t-SNE
+        tsne = TSNE(n_components=2, random_state=42)
+        features_2d = tsne.fit_transform(features)
+        
+        # Create three subplots: one for task classes, one for colors, one for rotations
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
+        
+        # Plot task classes
+        scatter1 = ax1.scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='tab10')
+        ax1.set_title('Task Classes in Latent Space')
+        ax1.legend(*scatter1.legend_elements(), title="Classes")
+        
+        # Plot colors
+        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='tab10')
+        ax2.set_title('Colors in Latent Space')
+        ax2.legend(*scatter2.legend_elements(), title="Colors")
+        
+        # Plot rotations
+        scatter3 = ax3.scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='tab10')
+        ax3.set_title('Rotations in Latent Space')
+        ax3.legend(*scatter3.legend_elements(), title="Rotations")
+        
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path)
+            print(f"Latent space visualization saved to {save_path}")
+        plt.close()
