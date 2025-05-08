@@ -643,9 +643,9 @@ class qz(NModule):
                  z_total_dim, 
                  in_channels=3,
                  out_channels=32,
-                 kernel=5,  # Changed to 5x5 kernel
+                 kernel=5,
                  stride=1,
-                 padding=2,  # Adjusted padding for 5x5 kernel
+                 padding=2,
                  diva=False):
         super().__init__()
 
@@ -659,17 +659,17 @@ class qz(NModule):
             self.zay_dim = zay_dim
             self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
 
-        # Encoder architecture matching DIVA paper
+        # Encoder architecture matching DIVA paper but with 3x channels
         self.encoder = nn.Sequential(
             # Block 1
-            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(in_channels=3, out_channels=96, kernel_size=5, stride=1, padding=2),  # 32 -> 96
+            nn.BatchNorm2d(96),
             nn.ReLU(),
             # Block 2
             nn.MaxPool2d(2, 2),
             # Block 3
-            nn.Conv2d(32, 64, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(96, 192, kernel_size=5, stride=1, padding=2),  # 64 -> 192
+            nn.BatchNorm2d(192),
             nn.ReLU(),
             # Block 4
             nn.MaxPool2d(2, 2),
@@ -677,10 +677,10 @@ class qz(NModule):
         )
         
         # Block 5: Linear layers
-        self.loc = nn.Linear(64 * 7 * 7, z_total_dim)  # 7x7 after two max pools
+        self.loc = nn.Linear(192 * 7 * 7, z_total_dim)  # 64 -> 192
         self.scale = nn.Sequential(
-            nn.Linear(64 * 7 * 7, z_total_dim),
-            nn.Softplus()  # Using Softplus as in the paper
+            nn.Linear(192 * 7 * 7, z_total_dim),  # 64 -> 192
+            nn.Softplus()
         )
 
     def forward(self, x):
