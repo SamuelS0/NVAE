@@ -43,16 +43,22 @@ class DANN(nn.Module):
         self.num_r_classes = num_r_classes  # Should be 5 for our domains
         self.z_dim = z_dim
 
-        # Feature extractor matching VAE encoder architecture
+        # Feature extractor matching our VAE encoder architecture
         self.feature_extractor = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1),     #(N, 32, 28, 28) 
+            # Block 1
+            nn.Conv2d(in_channels=3, out_channels=96, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(96),
             nn.ReLU(),
-            nn.MaxPool2d(2),                                                   #(N, 32, 14, 14)
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),  #(N, 64, 14, 14) 
+            # Block 2
+            nn.MaxPool2d(2, 2),
+            # Block 3
+            nn.Conv2d(96, 192, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(192),
             nn.ReLU(),
-            nn.MaxPool2d(2),                                                   #(N, 64, 7, 7)
+            # Block 4
+            nn.MaxPool2d(2, 2),
             nn.Flatten(),
-            nn.Linear(64 * 7 * 7, z_dim)  # Project to z_dim directly
+            nn.Linear(192 * 7 * 7, z_dim)  # Project to z_dim directly
         )
 
         self.domain_discriminator = DomainDiscriminator(z_dim, num_r_classes)
