@@ -1,7 +1,10 @@
 import torch
 import os
+import matplotlib.pyplot as plt
+import numpy as np
 from typing import Dict, Tuple, Optional
 from tqdm import tqdm
+from core.CRMNIST.utils import select_diverse_sample_batch, visualize_reconstructions
 
 class Trainer:
     def __init__(
@@ -29,9 +32,16 @@ class Trainer:
         # Create output directories
         self.models_dir = os.path.join(args.out, 'models')
         os.makedirs(self.models_dir, exist_ok=True)
+        
+        # Create reconstructions directory
+        self.reconstructions_dir = os.path.join(args.out, 'reconstructions')
+        os.makedirs(self.reconstructions_dir, exist_ok=True)
     
     def train(self, train_loader, val_loader, num_epochs: int) -> torch.nn.Module:
         """Train the model with early stopping and model checkpointing."""
+        # Select a diverse sample batch for reconstruction visualization
+        sample_batch = select_diverse_sample_batch(val_loader, self.args)
+        
         for epoch in range(num_epochs):
             # Training phase
             train_loss, train_metrics = self._train_epoch(train_loader)
@@ -47,6 +57,9 @@ class Trainer:
             print(f'  Val Loss: {val_loss:.4f}')
             for k, v in val_metrics.items():
                 print(f'  Val {k}: {v:.4f}')
+            
+            # Generate and visualize reconstructions after each epoch
+            visualize_reconstructions(self.model, epoch+1, sample_batch, self.args, self.reconstructions_dir)
             
             # Early stopping check
             if self._check_early_stopping(val_loss, epoch, num_epochs, train_metrics):

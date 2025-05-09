@@ -242,10 +242,8 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
             if random.uniform(0,1) >= p:
                 subset_imgs[j] = c_transform(subset_imgs[j])
                 color = domain_data[i]['color']
-            if random.uniform(0,1) >= p:
-                subset_imgs[j] = r_transform(subset_imgs[j])
-                rotation = domain_data[i]['rotation']  # Keep as string to use with class_map
-
+            subset_imgs[j] = r_transform(subset_imgs[j])
+            rotation = domain_data[i]['rotation']  # Keep as string to use with class_map
             domain_c_labels.append(color)
             domain_r_labels.append(rotation)
 
