@@ -47,6 +47,7 @@ class VAE(NModule):
             za_dim=12,
             y_dim=10,   
             a_dim=6,    
+            in_channels=3,
             out_channels=32,
             kernel=3,
             stride=1,
@@ -132,12 +133,6 @@ class VAE(NModule):
         qz = dist.Normal(qz_loc, qz_scale)
         z = qz.rsample()
         
-        # Print shapes for debugging during first forward pass
-        if not hasattr(self, '_shape_checked'):
-            print(f"Full latent vector z shape: {z.shape}")
-            print(f"Index ranges - zy: {self.zy_index_range}, zx: {self.zx_index_range}, " 
-                  f"zay: {self.zay_index_range}, za: {self.za_index_range}")
-
         zy = z[:, self.zy_index_range[0]:self.zy_index_range[1]]
         zx = z[:, self.zx_index_range[0]:self.zx_index_range[1]]
         if self.diva:
@@ -147,11 +142,6 @@ class VAE(NModule):
 
         za = z[:, self.za_index_range[0]:self.za_index_range[1]]
         
-        if not hasattr(self, '_shape_checked'):
-            zay_shape = "None" if zay is None else zay.shape
-            print(f"Split latent vectors - zy: {zy.shape}, zx: {zx.shape}, zay: {zay_shape}, za: {za.shape}")
-            self._shape_checked = True
-
         if self.diva:
             assert z.shape[1] == self.zy_dim + self.zx_dim + self.za_dim
         else:
@@ -250,13 +240,14 @@ class VAE(NModule):
             y_hat = self.qy(zy, zay)
             return y_hat
 
-    def generate(self, y, a, num_samples=10, device=None):
+    def generate(self, y, a=None, num_samples=10, device=None):
         """
         Generate samples conditionally based on class label y and domain label a.
         
         Args:
             y: Class label (digit 0-9) to generate. Can be an integer, a tensor of integers,
                or None (which will generate one sample per class)
+            a: Domain/attribute label. If None, will randomly sample one per generated image
             num_samples: Number of samples to generate per class
             device: Device to generate samples on
                 
@@ -287,11 +278,11 @@ class VAE(NModule):
             # For zx, sample from standard normal
             zx = torch.randn(batch_size, self.zx_dim).to(device)
             
-            # sample for za and zay
-            # can change this to control specific attributes
-
-
-            if isinstance(a, int):
+            # Handle attribute labels
+            if a is None:
+                # Randomly sample attributes if not provided
+                a = torch.randint(0, self.a_dim, (batch_size,)).to(device)
+            elif isinstance(a, int):
                 a = torch.tensor([a]).repeat(num_samples).to(device)
             elif isinstance(a, torch.Tensor) and len(a.shape) == 0:
                 a = a.repeat(num_samples).to(device)
@@ -305,18 +296,8 @@ class VAE(NModule):
             pza = dist.Normal(pza_loc, pza_scale)
             za = pza.sample()
 
-            a = torch.randint(0, self.a_dim, (batch_size,)).to(device)
-            a_one_hot = F.one_hot(a, self.a_dim).float()
-
             if self.diva:
                 zay = None
-            else:
-                pza_loc, pza_scale = self.pza(a)
-                pza = dist.Normal(pza_loc, pza_scale)
-                za = pza.sample()
-            
-            if self.diva:
-                pzay_loc, pzay_scale = None, None
             else:
                 pzay_loc, pzay_scale = self.pzay(y, a)
                 pzay = dist.Normal(pzay_loc, pzay_scale)
@@ -377,28 +358,12 @@ class VAE(NModule):
         c_labels = np.concatenate(c_list, axis=0)
         r_labels = np.concatenate(r_list, axis=0)
         
-        # Print raw rotation labels for debugging
-        print("\nRaw rotation labels shape:", r_labels.shape)
-        print("Sample of raw rotation labels:", r_labels[:5])
-        print("Unique values in raw rotation labels:", np.unique(r_labels, axis=0))
-        
         # Convert one-hot encoded labels to single dimension
         if len(c_labels.shape) > 1:
             c_labels = np.argmax(c_labels, axis=1)
         if len(r_labels.shape) > 1:
             # Ensure we're working with the correct axis
-            print("\nBefore argmax - r_labels shape:", r_labels.shape)
-            print("Sample of r_labels before argmax:", r_labels[:5])
             r_labels = np.argmax(r_labels, axis=1)
-            print("\nAfter argmax - r_labels shape:", r_labels.shape)
-            print("Sample of r_labels after argmax:", r_labels[:5])
-        
-        # Print distribution of labels
-
-        print("\nUnique values in labels:")
-        print("Unique digit labels:", np.unique(y_labels))
-        print("Unique color labels:", np.unique(c_labels))
-        print("Unique rotation labels:", np.unique(r_labels))
         
         # Ensure all labels are 1D arrays
         if len(y_labels.shape) > 1:

@@ -58,7 +58,12 @@ def run_experiment(args):
     class_map = spec_data['class_map']
     
     # Choose labels subset if not already chosen
-    core.CRMNIST.utils.choose_label_subset(spec_data)
+    spec_data['y_c'], subsets = core.CRMNIST.utils.choose_label_subset(spec_data)
+    # Update domain_data with subsets
+    for i, subset in subsets.items():
+        if i in domain_data:
+            domain_data[i]['subset'] = subset
+            
     # Generate dataset
     train_dataset = generate_crmnist_dataset(spec_data, train=True)
     test_dataset = generate_crmnist_dataset(spec_data, train=False)
@@ -121,10 +126,10 @@ def run_experiment(args):
     final_test_loss, final_metrics, sample_batch = test_loss, metrics_avg, sample_batch
     
     # Generate final reconstructions
-    visualize_reconstructions('final', sample_batch)
+    visualize_reconstructions(model, 'final', sample_batch, args, reconstructions_dir)
     
     # Generate and visualize conditional samples
-    # visualize_conditional_generation(model, args.device, reconstructions_dir)
+    visualize_conditional_generation(model, args.device, reconstructions_dir)
     
     # Save training results as JSON
     results = {

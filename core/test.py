@@ -2,6 +2,10 @@ import torch
 from core.utils import calculate_metrics
 from tqdm import tqdm
 
+# Main test function that forwards to test_nvae
+def test(model, test_loader, device):
+    return test_nvae(model, test_loader, device)
+
 def test_nvae(model, test_loader, device):
     model.eval()
     test_loss = 0
