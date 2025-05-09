@@ -22,7 +22,7 @@ class Trainer:
         self.patience = patience
         
         # Early stopping setup
-        self.best_val_loss = float('inf')
+        self.best_val_accuracy = 0.0  # Changed from best_val_loss
         self.best_model_state = None
         self.patience_counter = 0
         self.epochs_trained = 0
@@ -170,9 +170,11 @@ class Trainer:
             }
     
     def _check_early_stopping(self, val_loss: float, epoch: int, num_epochs: int, batch_metrics: Dict[str, float]) -> bool:
-        """Check if early stopping criteria are met."""
-        if val_loss < self.best_val_loss:
-            self.best_val_loss = val_loss
+        """Check if early stopping criteria are met based on validation accuracy."""
+        current_val_accuracy = batch_metrics['y_accuracy']  # Use y_accuracy for early stopping
+        
+        if current_val_accuracy > self.best_val_accuracy:
+            self.best_val_accuracy = current_val_accuracy
             self.best_model_state = self.model.state_dict().copy()
             self.best_epoch = epoch
             self.patience_counter = 0
@@ -180,12 +182,12 @@ class Trainer:
             # Save best model immediately when new best is found
             best_model_path = os.path.join(self.models_dir, 'model_best.pt')
             torch.save(self.best_model_state, best_model_path)
-            print(f"  New best model saved! (Validation Loss: {self.best_val_loss:.4f})")
+            print(f"  New best model saved! (Validation Accuracy: {self.best_val_accuracy:.4f})")
             print(f"  Best model batch metrics: {self.best_batch_metrics}")
             return False
         else:
             self.patience_counter += 1
-            print(f"  No improvement in validation loss. Patience: {self.patience_counter}/{self.patience}")
+            print(f"  No improvement in validation accuracy. Patience: {self.patience_counter}/{self.patience}")
             
             # Use min(10, num_epochs // 2) as minimum epochs requirement
             min_required_epochs = min(10, num_epochs // 2)
