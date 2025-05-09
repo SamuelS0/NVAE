@@ -3,12 +3,10 @@ import numpy as np
 import torch
 import torch.utils.data as data_utils
 import random
-import torch
 from torch.utils.data import Dataset, DataLoader, ConcatDataset, Subset
 from torchvision import datasets, transforms
 from torchvision.transforms import functional, ToTensor as F, ToTensor
 from PIL import Image
-import numpy as np
 import torch.nn.functional as F
 import core.CRMNIST.utils
 
@@ -44,45 +42,15 @@ class CRMNISTDataset(Dataset):
         print(f"Debug - Rotation label sizes per domain: {r_label_sizes}, total: {sum(r_label_sizes)}")
         print(f"Debug - Y label sizes per domain: {y_label_sizes}, total: {sum(y_label_sizes)}")
 
-        # The issue is in one of the label arrays not matching the image count
         # Find any size mismatches
         for i, (img_size, c_size, r_size, y_size) in enumerate(zip(img_sizes, c_label_sizes, r_label_sizes, y_label_sizes)):
             if img_size != c_size or img_size != r_size or img_size != y_size:
                 print(f"Size mismatch in domain {i}: imgs={img_size}, c_labels={c_size}, r_labels={r_size}, y_labels={y_size}")
 
-        self.imgs = torch.cat(imgs)  # Convert list of tensors into a single tensor
+        self.imgs = torch.cat(imgs)
         self.y_labels = torch.cat(y_labels)
-        
-        # Fix issue by ensuring c_labels and r_labels match the image count for each domain
-        # We'll pad with zeros if needed
-        fixed_c_labels = []
-        fixed_r_labels = []
-        
-        for i, (img_tensor, c_tensor, r_tensor) in enumerate(zip(imgs, c_labels, r_labels)):
-            img_count = img_tensor.shape[0]
-            c_count = c_tensor.shape[0]
-            r_count = r_tensor.shape[0]
-            
-            if c_count < img_count:
-                # Pad with zeros to match image count
-                pad_size = img_count - c_count
-                padding = torch.zeros(pad_size, self.num_c_classes)
-                fixed_c_labels.append(torch.cat([c_tensor, padding]))
-                print(f"Padded c_labels in domain {i}: {c_count} -> {img_count}")
-            else:
-                fixed_c_labels.append(c_tensor[:img_count])  # Truncate if needed
-            
-            if r_count < img_count:
-                # Pad with zeros to match image count
-                pad_size = img_count - r_count
-                padding = torch.zeros(pad_size, self.num_r_classes)
-                fixed_r_labels.append(torch.cat([r_tensor, padding]))
-                print(f"Padded r_labels in domain {i}: {r_count} -> {img_count}")
-            else:
-                fixed_r_labels.append(r_tensor[:img_count])  # Truncate if needed
-        
-        self.c_labels = torch.cat(fixed_c_labels)
-        self.r_labels = torch.cat(fixed_r_labels)
+        self.c_labels = torch.cat(c_labels)
+        self.r_labels = torch.cat(r_labels)
         
         # Final check
         print(f"Final sizes: imgs={len(self.imgs)}, c_labels={len(self.c_labels)}, r_labels={len(self.r_labels)}, y_labels={len(self.y_labels)}")
@@ -143,8 +111,6 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
     else:
         mnist_data = mnist_test
         print(f"Using test dataset with {len(mnist_test)} images")
-
-    train_size, test_size = len(mnist_train), len(mnist_test)
     
     # Get images and labels - MNIST labels are already integers 0-9
     mnist_imgs = mnist_data.data.unsqueeze(1)  # Add channel dim
@@ -183,78 +149,88 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
         red_transform = core.CRMNIST.utils.make_transform(domain_data, i, 'unique_color', transform_intensity, transform_decay)
 
         labels_subset = torch.tensor(domain_data[i]['subset'])
-        subset_mask = torch.isin(mnist_labels, labels_subset)  # Cleaner mask
-        yc_mask = torch.isin(mnist_labels, torch.tensor([y_c]))
 
+        subset_mask = torch.isin(mnist_labels, labels_subset)
         subset_imgs = mnist_imgs[subset_mask]
-        non_subset_imgs = mnist_imgs[~subset_mask]
         subset_labels = mnist_labels[subset_mask]
+        non_subset_imgs = mnist_imgs[~subset_mask]
         non_subset_labels = mnist_labels[~subset_mask]
 
         yc_imgs_mask = torch.isin(non_subset_labels, torch.tensor([y_c]))
-        yc_subset_imgs = non_subset_imgs[yc_imgs_mask]
-        yc_non_subset_imgs = non_subset_imgs[~yc_imgs_mask]
-        yc_subset_labels = non_subset_labels[yc_imgs_mask]
-        yc_non_subset_labels = non_subset_labels[~yc_imgs_mask]
+        yc_non_subset_imgs = non_subset_imgs[yc_imgs_mask]
+        yc_non_subset_labels = non_subset_labels[yc_imgs_mask]
+        non_yc_non_subset_imgs = non_subset_imgs[~yc_imgs_mask]
+        non_yc_non_subset_labels = non_subset_labels[~yc_imgs_mask]
         
         print(f"\nDomain {i}:")
         print(f"  Rotation: {domain_data[i]['rotation']}°")
         print(f"  Color: {domain_data[i]['color']}")
         print(f"  Subset size: {len(subset_imgs)}")
-        print(f"  y_c images in subset: {len(yc_subset_imgs)}")
-        print(f"  y_c images not in subset: {len(yc_non_subset_imgs)}")
+        print(f"  y_c images in subset: {len(yc_non_subset_imgs)}")
+        print(f"  y_c images not in subset: {len(non_yc_non_subset_imgs)}")
 
         # Get unique color - handle if it's a list
         unique_color_val = unique_color[0] if isinstance(unique_color, list) else unique_color
 
-        # Apply transformations
-        domain_c_labels = []
-        domain_r_labels = []
+        # Initialize label arrays with exact known lengths
+        total_domain_images = len(subset_imgs) + len(yc_non_subset_imgs) + len(non_yc_non_subset_imgs)
+        domain_c_labels = [None] * total_domain_images
+        domain_r_labels = [None] * total_domain_images
         
         # Track red images in this domain
         domain_red_count = 0
+        
+        # Track current index for proper label assignment
+        current_idx = 0
 
-        # Process y_c images
-        for j in range(len(yc_subset_imgs)):
-            color, rotation = None, None
-            if random.uniform(0,1) >= p:
-                yc_subset_imgs[j] = red_transform(yc_subset_imgs[j])
+        # Process y_c images - apply color transformations
+        for j in range(len(yc_non_subset_imgs)):
+            color = None
+            # Fix probability logic: apply transformation when random < p
+            if random.uniform(0,1) < p:
+                yc_non_subset_imgs[j] = red_transform(yc_non_subset_imgs[j])
                 color = unique_color_val
                 domain_red_count += 1
                 total_red_images += 1
                 if domain_red_count <= 5:  # Print details for first 5 red images in this domain
-                    print(f"  Created red image with digit {yc_subset_labels[j].item()} in domain {i}")
-            if random.uniform(0,1) >= p:
-                yc_subset_imgs[j] = r_transform(yc_subset_imgs[j])
-                rotation = domain_data[i]['rotation']  # Keep as string to use with class_map
-
-            domain_c_labels.append(color)
-            domain_r_labels.append(rotation)
+                    print(f"  Created red image with digit {yc_non_subset_labels[j].item()} in domain {i}")
             
-        # Add labels for non-transformed yc images
-        for _ in range(len(yc_non_subset_imgs)):
-            domain_c_labels.append(None)  # No color transform
-            domain_r_labels.append(None)  # No rotation transform
+            domain_c_labels[current_idx + j] = color
         
-        # Process subset images
+        current_idx += len(yc_non_subset_imgs)
+        
+        # Add labels for non-y_c images
+        for j in range(len(non_yc_non_subset_imgs)):
+            domain_c_labels[current_idx + j] = None  # No color transform
+            
+        current_idx += len(non_yc_non_subset_imgs)
+        
+        # Process subset images - apply color transformations
         for j in range(len(subset_imgs)):
-            color, rotation = None, None
-            if random.uniform(0,1) >= p:
+            color = None
+
+            if random.uniform(0,1) < p:
                 subset_imgs[j] = c_transform(subset_imgs[j])
                 color = domain_data[i]['color']
-            subset_imgs[j] = r_transform(subset_imgs[j])
-            rotation = domain_data[i]['rotation']  # Keep as string to use with class_map
-            domain_c_labels.append(color)
-            domain_r_labels.append(rotation)
-
+            
+            domain_c_labels[current_idx + j] = color
 
         red_images_per_domain[i] = domain_red_count
         print(f"  Red images created in this domain: {domain_red_count}")
-
-        # Concatenate all images from this domain
-        domain_imgs = torch.cat([subset_imgs, yc_subset_imgs, yc_non_subset_imgs])
-        domain_y_labels = torch.cat([subset_labels, yc_subset_labels, yc_non_subset_labels])
         
+        # Concatenate all images from this domain
+        domain_imgs = torch.cat([yc_non_subset_imgs, non_yc_non_subset_imgs, subset_imgs])
+        domain_y_labels = torch.cat([yc_non_subset_labels, non_yc_non_subset_labels, subset_labels])
+        
+        rotation_value = domain_data[i]['rotation']
+        for j in range(len(domain_imgs)):
+            domain_imgs[j] = r_transform(domain_imgs[j])
+            domain_r_labels[j] = rotation_value
+        
+        # Verification step to ensure label arrays match image count
+        assert len(domain_c_labels) == len(domain_imgs), f"Color labels mismatch in domain {i}: {len(domain_c_labels)} vs {len(domain_imgs)}"
+        assert len(domain_r_labels) == len(domain_imgs), f"Rotation labels mismatch in domain {i}: {len(domain_r_labels)} vs {len(domain_imgs)}"
+                
         # Initialize tensors to store indices instead of one-hot directly
         domain_c_indices = torch.full((len(domain_c_labels),), -1, dtype=torch.long)
         domain_r_indices = torch.full((len(domain_r_labels),), -1, dtype=torch.long)
@@ -264,16 +240,28 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
                 domain_c_indices[idx] = class_map[color]
                 
         for idx, rotation in enumerate(domain_r_labels):
-            if rotation is not None and rotation in class_map:
+            # All rotation values should be valid now
+            if rotation in class_map:
                 domain_r_indices[idx] = class_map[rotation]
+            else:
+                print(f"Warning: Invalid rotation value '{rotation}' - assigning domain rotation {domain_data[i]['rotation']}")
+                # Fallback to domain rotation if for some reason the value is invalid
+                domain_r_indices[idx] = class_map[domain_data[i]['rotation']]
         
         # Convert valid indices to one-hot, handling -1 (no transform) cases
         valid_c_mask = domain_c_indices >= 0
-        valid_r_mask = domain_r_indices >= 0
+        valid_r_mask = domain_r_indices >= 0  # All rotations should be valid now
         
         # Get number of classes from the highest indices in class_map
         num_c_classes = max([v for k, v in class_map.items() if not k.isdigit()]) + 1
         num_r_classes = max([v for k, v in class_map.items() if k.isdigit()]) + 1
+        
+        # Verify all rotation indices are valid
+        if not valid_r_mask.all():
+            invalid_count = (~valid_r_mask).sum().item()
+            print(f"Warning: {invalid_count} rotation indices in domain {i} are invalid. Fixing...")
+            domain_r_indices[~valid_r_mask] = class_map[domain_data[i]['rotation']]
+            valid_r_mask = domain_r_indices >= 0  # Update mask after fixing
         
         domain_c_labels_tensor = torch.zeros(len(domain_c_labels), num_c_classes)
         domain_r_labels_tensor = torch.zeros(len(domain_r_labels), num_r_classes)

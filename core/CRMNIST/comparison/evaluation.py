@@ -23,7 +23,7 @@ import os
 
     To run the script, use the following command:
 
-    python -m core.CRMNIST.comparison.evalutation --config conf/crmnist.json --out results/ --cuda
+    python -m core.CRMNIST.comparison.evaluation --config conf/crmnist.json --out results/ --cuda
 """
 
 device = None 

@@ -188,13 +188,15 @@ def choose_label_subset(spec_data, chosen=False):
 
     if not chosen:
         y_c = random.choice(range(10))
+        spec_data['y_c'] = y_c
+
         all_labels = list(range(10))
         if y_c in all_labels:
             all_labels.remove(y_c)
-        
+
+        spec_data['y_c'] = y_c
         subsets = {}
-        subsets[0] = [0,1,2,3,4,5,6,7,8,9]
-        for i in range(1,len(domain_data)):
+        for i in range(0,len(domain_data)):
             subsets[i] = random.sample(all_labels, 5)
             domain_data[i]['subset'] = subsets[i]
 
@@ -310,8 +312,12 @@ def select_diverse_sample_batch(loader, args, samples_per_domain=10):
             if torch.max(r[i]) > 0:  # If there's a valid rotation assignment
                 rotation_idx = torch.argmax(r[i]).item()
                 
-                # Store this sample in its rotation domain
-                rotation_samples[rotation_idx].append((x[i], y[i], c[i], r[i]))
+                # Verify this is a valid domain index
+                if rotation_idx < 6:  # We have 6 rotation domains (0-5)
+                    # Store this sample in its rotation domain
+                    rotation_samples[rotation_idx].append((x[i], y[i], c[i], r[i]))
+                else:
+                    print(f"Warning: Invalid rotation domain index {rotation_idx} found. Skipping sample.")
             
             # Also check if it's a red image (these might overlap with rotation domains)
             if torch.max(c[i]) > 0 and torch.argmax(c[i]).item() == 6:  # Red is index 6
@@ -338,9 +344,12 @@ def select_diverse_sample_batch(loader, args, samples_per_domain=10):
     selected_x, selected_y, selected_c, selected_r = [], [], [], []
     
     for domain in range(6):
+        domain_count = len(rotation_samples[domain])
+        print(f"Domain {domain}: Selecting {samples_per_domain} samples from {domain_count} available")
+        
         # Randomly sample without replacement
-        if len(rotation_samples[domain]) > samples_per_domain:
-            selected_indices = random.sample(range(len(rotation_samples[domain])), samples_per_domain)
+        if domain_count > samples_per_domain:
+            selected_indices = random.sample(range(domain_count), samples_per_domain)
             selected_samples = [rotation_samples[domain][i] for i in selected_indices]
         else:
             # If we don't have enough, use what we have
@@ -359,8 +368,15 @@ def select_diverse_sample_batch(loader, args, samples_per_domain=10):
     selected_c = torch.stack(selected_c)
     selected_r = torch.stack(selected_r)
     
+    # Verify selection has the right distribution
+    rotation_counts = {}
+    for i in range(len(selected_r)):
+        rot_idx = torch.argmax(selected_r[i]).item()
+        rotation_counts[rot_idx] = rotation_counts.get(rot_idx, 0) + 1
+    
     # Print final counts
-    print(f"Final selection: {len(selected_x)} total images, {samples_per_domain} per rotation domain")
+    print(f"Final selection: {len(selected_x)} total images")
+    print(f"Domain distribution in selected batch: {rotation_counts}")
     
     return (selected_x, selected_y, selected_c, selected_r)
 
