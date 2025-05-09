@@ -58,11 +58,11 @@ class DANN(nn.Module):
             # Block 4
             nn.MaxPool2d(2, 2),
             nn.Flatten(),
-            nn.Linear(192 * 7 * 7, z_dim)  # Project to z_dim directly
+            nn.Linear(192 * 7 * 7, self.z_dim)  # Project to z_dim directly
         )
 
-        self.domain_discriminator = DomainDiscriminator(z_dim, num_r_classes)
-        self.classifier = nn.Linear(z_dim, num_y_classes)
+        self.domain_discriminator = DomainDiscriminator(self.z_dim, self.num_r_classes)
+        self.classifier = nn.Linear(self.z_dim, self.num_y_classes)
 
     def forward(self, x, y, r):
         features = self.feature_extractor(x)
@@ -82,6 +82,8 @@ class DANN(nn.Module):
             r: True domain labels
         Returns:
             total_loss: Weighted sum of classification and domain losses
+            y_loss: Classification loss
+            domain_loss: Domain classification loss
         """
         # Classification loss (digit prediction)
         y_loss = F.cross_entropy(y_predictions, y)
@@ -91,11 +93,10 @@ class DANN(nn.Module):
         
         # Total loss is the sum of both losses
         # We want to minimize classification error while maximizing domain confusion
-      
         λ = 1.0  # Weight for domain loss
-        total_loss = torch.max(y_loss - λ * domain_loss, torch.tensor(0.0))
+        total_loss = y_loss - λ * domain_loss
         
-        return total_loss, y_loss, domain_loss  # Return all losses for monitoring
+        return total_loss, y_loss, domain_loss
 
     def get_features(self, x):
         """Extract features from the feature extractor"""
