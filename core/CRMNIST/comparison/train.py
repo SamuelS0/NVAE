@@ -45,7 +45,7 @@ def train_nvae(args, spec_data, train_loader, test_loader, models_dir):
 def train_diva(args, spec_data, train_loader, test_loader, models_dir):
     print("Training DIVA...")
     print(f"args zy_dim: {args.zy_dim}")
-    diva = VAE(class_map=class_map,
+    diva = VAE(class_map=spec_data['class_map'],
                zy_dim=args.zy_dim,
                zx_dim=args.zx_dim,
                zay_dim=args.zay_dim,

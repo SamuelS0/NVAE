@@ -34,6 +34,8 @@ def test_nvae(model, test_loader, device):
 def test_dann(model, test_loader, device):
     model.eval()
     test_loss = 0
+    test_y_loss = 0
+    test_domain_loss = 0
     metrics_sum = {'y_accuracy': 0, 'discriminator_accuracy': 0}
 
     test_pbar = tqdm(enumerate(test_loader), total=len(test_loader), desc="Final evaluation")
@@ -42,10 +44,18 @@ def test_dann(model, test_loader, device):
         for batch_idx, (x, y, c, r) in test_pbar:
             x, y, c, r = x.to(device), y.to(device), c.to(device), r.to(device)
             
+            # Convert one-hot encoded labels to class indices
+            if len(y.shape) > 1 and y.shape[1] > 1:
+                y = torch.argmax(y, dim=1)
+            if len(r.shape) > 1 and r.shape[1] > 1:
+                r = torch.argmax(r, dim=1)
+            
             y_predictions, domain_predictions = model(x, y, r)
 
-            loss = model.loss_function(y_predictions, domain_predictions, y, r)
+            loss, y_loss, domain_loss = model.loss_function(y_predictions, domain_predictions, y, r)
             test_loss += loss.item()
+            test_y_loss += y_loss.item()
+            test_domain_loss += domain_loss.item()
             
             y_pred = torch.argmax(y_predictions, dim=1)
             domain_pred = torch.argmax(domain_predictions, dim=1)
@@ -56,7 +66,11 @@ def test_dann(model, test_loader, device):
             test_pbar.set_postfix(loss=loss.item())
 
     test_loss /= len(test_loader)
+    test_y_loss /= len(test_loader)
+    test_domain_loss /= len(test_loader)
     metrics_avg = {k: v / len(test_loader) for k, v in metrics_sum.items()}
+    metrics_avg['y_loss'] = test_y_loss
+    metrics_avg['domain_loss'] = test_domain_loss
 
     return test_loss, metrics_avg
     

@@ -7,6 +7,8 @@ from torchsummary import summary
 import numpy as np
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
+from joblib import Parallel, delayed
+from tqdm import tqdm
 
 #consider implementing a sparsity penalty
 
@@ -308,26 +310,40 @@ class VAE(NModule):
             
             return generated_images, y
 
-    def visualize_latent_spaces(self, dataloader, device, save_path=None):
+    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=5000):
         """
         Visualize all latent spaces using t-SNE
         Args:
-            dataloader: DataLoader containing (x, y, c, r) tuples where:
-                x: input images
-                y: digit labels (0-9)
-                c: color labels (one-hot encoded)
-                r: rotation/domain labels (one-hot encoded,)
+            dataloader: DataLoader containing (x, y, c, r) tuples
             device: torch device
             save_path: Optional path to save the visualization
+            max_samples: Maximum number of samples to use for visualization
         """
         self.eval()
         zy_list, za_list, zay_list, zx_list = [], [], [], []
         y_list, c_list, r_list = [], [], []
         
+        # Initialize counters for each rotation domain
+        rotation_counts = {i: 0 for i in range(5)}  # 5 rotation domains (0-4)
+        
+        # Collect data in batches
         with torch.no_grad():
-            for x, y, c, r in dataloader:
+            for i, (x, y, c, r) in enumerate(dataloader):
                 x = x.to(device)
-  
+                y = y.to(device)
+                c = c.to(device)
+                r = r.to(device)
+
+                # if i <= 5:
+                #     print("rotation labels before one-hot to single dimension in visualize_latent_spaces:")
+                #     print(r[:5])
+                
+                # Count images in each rotation domain
+                for i in range(len(r)):
+                    if len(r[i].shape) > 0:  # Check if r[i] is not empty
+                        rotation_idx = torch.argmax(r[i]).item()
+                        rotation_counts[rotation_idx] += 1
+                
                 # Get latent representations
                 z_loc, _ = self.qz(x)
                 zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
@@ -339,92 +355,141 @@ class VAE(NModule):
                 za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
                 
                 # Store latent vectors and labels
-                zy_list.append(zy.cpu().numpy())
-                za_list.append(za.cpu().numpy())
+                zy_list.append(zy)
+                za_list.append(za)
                 if not self.diva:
-                    zay_list.append(zay.cpu().numpy())
-                zx_list.append(zx.cpu().numpy())
-                y_list.append(y.cpu().numpy())
-                c_list.append(c.cpu().numpy())
-                r_list.append(r.cpu().numpy())
+                    zay_list.append(zay)
+                zx_list.append(zx)
+                y_list.append(y)
+                c_list.append(c)
+                r_list.append(r)
+                
+                # Break if we have enough samples
+                if sum(len(z) for z in zy_list) >= max_samples:
+                    break
         
-        # Convert to numpy arrays
-        zy = np.concatenate(zy_list, axis=0)
-        za = np.concatenate(za_list, axis=0)
+        # Print rotation domain counts
+        print("\nNumber of images in each rotation domain:")
+        for domain, count in rotation_counts.items():
+            print(f"Rotation {domain*15}°: {count} images")
+        
+        # Concatenate tensors on GPU
+        zy = torch.cat(zy_list, dim=0)
+        za = torch.cat(za_list, dim=0)
         if not self.diva:
-            zay = np.concatenate(zay_list, axis=0)
-        zx = np.concatenate(zx_list, axis=0)
-        y_labels = np.concatenate(y_list, axis=0)
-        c_labels = np.concatenate(c_list, axis=0)
-        r_labels = np.concatenate(r_list, axis=0)
+            zay = torch.cat(zay_list, dim=0)
+        zx = torch.cat(zx_list, dim=0)
+        y_labels = torch.cat(y_list, dim=0)
+        c_labels = torch.cat(c_list, dim=0)
+        r_labels = torch.cat(r_list, dim=0)
+
         
         # Convert one-hot encoded labels to single dimension
         if len(c_labels.shape) > 1:
-            c_labels = np.argmax(c_labels, axis=1)
+            c_labels = torch.argmax(c_labels, dim=1)
         if len(r_labels.shape) > 1:
-            # Ensure we're working with the correct axis
-            r_labels = np.argmax(r_labels, axis=1)
+            r_labels = torch.argmax(r_labels, dim=1)
         
         # Ensure all labels are 1D arrays
         if len(y_labels.shape) > 1:
             y_labels = y_labels.reshape(-1)
         
-        # Verify dimensions match
-        assert len(y_labels) == len(zy), f"Label dimension mismatch: {len(y_labels)} vs {len(zy)}"
-        assert len(c_labels) == len(za), f"Color label dimension mismatch: {len(c_labels)} vs {len(za)}"
-        assert len(r_labels) == len(za), f"Rotation label dimension mismatch: {len(r_labels)} vs {len(za)}"
-        
-        # Apply t-SNE to each latent space
-        tsne = TSNE(n_components=2, random_state=42)
-        zy_2d = tsne.fit_transform(zy)
-        za_2d = tsne.fit_transform(za)
+        # Move to CPU for t-SNE and plotting
+        zy = zy.cpu().numpy()
+        za = za.cpu().numpy()
         if not self.diva:
-            zay_2d = tsne.fit_transform(zay)
-        zx_2d = tsne.fit_transform(zx)
+            zay = zay.cpu().numpy()
+        zx = zx.cpu().numpy()
+        y_labels = y_labels.cpu().numpy()
+        c_labels = c_labels.cpu().numpy()
+        r_labels = r_labels.cpu().numpy()
+
+
         
-        # Create figure with 2 rows (digit labels and rotation labels) and 4 columns (zy, za, zay, zx)
+        # Apply t-SNE to each latent space in parallel
+        def run_tsne(data, labels):
+            # Reduce number of samples if too large
+            if len(data) > 5000:
+                print("Reducing number of samples to 5000")
+                indices = np.random.choice(len(data), 5000, replace=False)
+                data = data[indices]
+                labels = labels[indices]
+
+                return TSNE(n_components=2, random_state=42, n_jobs=-1, 
+                           perplexity=30,  # Reduced perplexity for faster computation
+                           n_iter=1000).fit_transform(data), labels
+            return TSNE(n_components=2, random_state=42, n_jobs=-1).fit_transform(data), labels
+        
+        # Run t-SNE in parallel
+        latent_spaces = [(zy, y_labels), (za, r_labels)]
+        if not self.diva:
+            latent_spaces.append((zay, y_labels))  # Using y_labels for zay visualization
+        latent_spaces.append((zx, y_labels))
+        
+        print("\nRunning t-SNE (this may take a few minutes)...")
+        print("Using up to 5000 samples per latent space for faster computation")
+        
+        # Create progress bar for each latent space
+        tsne_results = []
+        for i, (space, labels) in enumerate(tqdm(latent_spaces, desc="Computing t-SNE", unit="space")):
+            space_2d, sampled_labels = run_tsne(space, labels)
+            tsne_results.append((space_2d, sampled_labels))
+        
+        # Unpack results
+        zy_2d, y_labels = tsne_results[0]
+        za_2d, r_labels = tsne_results[1]
+        if not self.diva:
+            zay_2d, zay_labels = tsne_results[2]
+            zx_2d, zx_labels = tsne_results[3]
+        else:
+            zx_2d, zx_labels = tsne_results[2]
+        
+        # Create figure with 2 rows (digit labels and rotation labels)
+        # For DIVA: 3 columns (zy, za, zx)
+        # For non-DIVA: 4 columns (zy, za, zay, zx)
         if self.diva:
             fig, axes = plt.subplots(2, 3, figsize=(18, 12))  # 3 columns for DIVA mode
+            latent_spaces = [
+                (zy_2d, y_labels, 'Label-specific (zy)'),
+                (za_2d, r_labels, 'Domain-specific (za)'),
+                (zx_2d, zx_labels, 'Residual (zx)')
+            ]
         else:
-            fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+            fig, axes = plt.subplots(2, 4, figsize=(20, 10))  # 4 columns for non-DIVA mode
+            latent_spaces = [
+                (zy_2d, y_labels, 'Label-specific (zy)'),
+                (za_2d, r_labels, 'Domain-specific (za)'),
+                (zay_2d, zay_labels, 'Domain-Label (zay)'),
+                (zx_2d, zx_labels, 'Residual (zx)')
+            ]
         
         # Define rotation angles for legend
         rotation_angles = ['0°', '15°', '30°', '45°', '60°']
         
         # Plot each latent space
-        latent_spaces = [
-            (zy_2d, 'Label-specific (zy)'),
-            (za_2d, 'Domain-specific (za)'),
-            (zay_2d if not self.diva else None, 'Domain-Label (zay)'),
-            (zx_2d, 'Residual (zx)')
-        ]
-        
-        for col, (space_2d, title) in enumerate(latent_spaces):
-            if space_2d is None:  # Skip zay in DIVA mode
-                continue
-                
+        for col_idx, (space_2d, labels, title) in enumerate(latent_spaces):
             # Top row: color by digit label
-            scatter1 = axes[0, col].scatter(space_2d[:, 0], space_2d[:, 1], 
-                                          c=y_labels, cmap='tab10', alpha=0.7)
-            axes[0, col].set_title(f'{title}\nColored by Digit')
-            axes[0, col].legend(*scatter1.legend_elements(), title="Digits")
+            scatter1 = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1], 
+                                          c=labels, cmap='tab10', alpha=0.7)
+            axes[0, col_idx].set_title(f'{title}\nColored by Digit')
+            axes[0, col_idx].legend(*scatter1.legend_elements(), title="Digits")
             
             # Bottom row: color by rotation
-            scatter2 = axes[1, col].scatter(space_2d[:, 0], space_2d[:, 1], 
+            scatter2 = axes[1, col_idx].scatter(space_2d[:, 0], space_2d[:, 1], 
                                           c=r_labels, cmap='tab10', 
                                           vmin=0, vmax=4,  # Set the range to match our rotation indices
                                           alpha=0.7)
-            axes[1, col].set_title(f'{title}\nColored by Rotation')
+            axes[1, col_idx].set_title(f'{title}\nColored by Rotation')
             # Create custom legend for rotations
             legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
                                         markerfacecolor=plt.cm.tab10(i/4),  # Normalize to [0,1] range
                                         label=angle, markersize=10)
                              for i, angle in enumerate(rotation_angles)]
-            axes[1, col].legend(handles=legend_elements, title="Rotations")
+            axes[1, col_idx].legend(handles=legend_elements, title="Rotations")
         
         plt.tight_layout()
         if save_path:
-            plt.savefig(save_path, bbox_inches='tight')
+            plt.savefig(save_path, bbox_inches='tight', dpi=100)  # Reduced DPI for faster saving
             print(f"Latent space visualization saved to {save_path}")
         plt.close()
 

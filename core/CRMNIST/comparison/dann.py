@@ -73,9 +73,29 @@ class DANN(nn.Module):
         return y_predictions, domain_predictions
     
     def loss_function(self, y_predictions, domain_predictions, y, r):
+        """
+        Compute the DANN loss as a weighted sum of classification and domain losses.
+        Args:
+            y_predictions: Predictions for digit classification
+            domain_predictions: Predictions for domain classification
+            y: True digit labels
+            r: True domain labels
+        Returns:
+            total_loss: Weighted sum of classification and domain losses
+        """
+        # Classification loss (digit prediction)
         y_loss = F.cross_entropy(y_predictions, y)
+        
+        # Domain loss (rotation prediction)
         domain_loss = F.cross_entropy(domain_predictions, r)
-        return y_loss - domain_loss 
+        
+        # Total loss is the sum of both losses
+        # We want to minimize classification error while maximizing domain confusion
+      
+        λ = 1.0  # Weight for domain loss
+        total_loss = torch.max(y_loss - λ * domain_loss, torch.tensor(0.0))
+        
+        return total_loss, y_loss, domain_loss  # Return all losses for monitoring
 
     def get_features(self, x):
         """Extract features from the feature extractor"""

@@ -35,6 +35,7 @@ def evaluate_models(nvae, diva, dann, test_loader, test_domain=None, path=None):
     Args:
         nvae: NVAE model
         diva: DIVA model
+        dann: DANN model
         test_loader: DataLoader for test set
         test_domain: Optional domain to evaluate on (0-4 for rotations)
     """
@@ -196,11 +197,8 @@ def run_holdout_evaluation(args, train_loader, test_loader, class_map, spec_data
     Returns:
         Dictionary containing results for each holdout domain
     """
-    num_y_classes = spec_data['num_y_classes']
-    num_r_classes = spec_data['num_r_classes']
-    num_domains = num_r_classes
-
-    holdout_results = {'nvae': {}, 'diva': {}}
+    num_domains = 5  # 5 rotation domains
+    holdout_results = {'nvae': {}, 'diva': {}, 'dann': {}}
     
     # For each domain, hold it out and train/test
     for holdout_domain in range(num_domains):
@@ -247,6 +245,57 @@ def run_holdout_evaluation(args, train_loader, test_loader, class_map, spec_data
     
     return holdout_results
 
+def analyze_domain_distribution(train_loader, test_loader):
+    """
+    Analyze and print the distribution of images across domains in both training and test sets.
+    """
+    # Initialize counters for each domain (0-5)
+    train_domain_counts = {i: 0 for i in range(6)}  # Changed from 5 to 6 domains
+    test_domain_counts = {i: 0 for i in range(6)}   # Changed from 5 to 6 domains
+    
+    print("\nAnalyzing domain distribution...")
+    
+    # Count training set distribution
+    print("\nCounting training set distribution...")
+    for x, y, c, r in train_loader:
+        # Convert one-hot encoded labels to indices if needed
+        if len(r.shape) > 1:
+            domain_indices = torch.argmax(r, dim=1)
+        else:
+            domain_indices = r
+            
+        for domain_idx in domain_indices:
+            train_domain_counts[domain_idx.item()] += 1
+    
+    # Count test set distribution
+    print("\nCounting test set distribution...")
+    for x, y, c, r in test_loader:
+        # Convert one-hot encoded labels to indices if needed
+        if len(r.shape) > 1:
+            domain_indices = torch.argmax(r, dim=1)
+        else:
+            domain_indices = r
+            
+        for domain_idx in domain_indices:
+            test_domain_counts[domain_idx.item()] += 1
+    
+    # Print results
+    print("\nDomain Distribution:")
+    print("Domain | Training Count | Training % | Test Count | Test %")
+    print("-" * 60)
+    
+    total_train = sum(train_domain_counts.values())
+    total_test = sum(test_domain_counts.values())
+    
+    for domain in range(6):  # Changed from 5 to 6 domains
+        train_count = train_domain_counts[domain]
+        test_count = test_domain_counts[domain]
+        train_percent = (train_count / total_train) * 100
+        test_percent = (test_count / total_test) * 100
+        print(f"{domain:6d} | {train_count:13d} | {train_percent:9.2f}% | {test_count:10d} | {test_percent:6.2f}%")
+    
+    return train_domain_counts, test_domain_counts
+
 def run_experiment(args):
     global device
     device = args.device
@@ -288,8 +337,12 @@ def run_experiment(args):
                             num_workers=args.num_workers,
                             pin_memory=True)
     
+    # Analyze domain distribution
+    train_domain_counts, test_domain_counts = analyze_domain_distribution(train_loader, test_loader)
+    
+    
     nvae, training_results_nvae = train_nvae(args, spec_data, train_loader, test_loader, models_dir)
-    diva, training_results_diva = train_diva(args, spec_data ,train_loader, test_loader, models_dir)
+    diva, training_results_diva = train_diva(args, spec_data, train_loader, test_loader, models_dir)
     dann, training_results_dann = train_dann(args, spec_data, train_loader, test_loader, models_dir)
 
     print("NVAE training results:")
@@ -311,7 +364,7 @@ def run_experiment(args):
     dann.visualize_latent_space(test_loader, device, os.path.join(args.out, 'dann_latent_space'))
 
     # Run cross-domain evaluation
-    cross_domain_results = run_cross_domain_evaluation(args, nvae, None, None, test_loader, spec_data)
+    cross_domain_results = run_cross_domain_evaluation(args, nvae, diva, dann, test_loader)
     
     # Run holdout evaluation
     holdout_results = run_holdout_evaluation(args, train_loader, test_loader, class_map, spec_data)
