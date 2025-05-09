@@ -280,7 +280,7 @@ mnist = load_mnist()
 def select_diverse_sample_batch(loader, args, samples_per_domain=10):
     """
     Select a diverse batch of samples with equal representation from each domain.
-    Returns exactly 10 samples per rotation domain (0-4).
+    Returns exactly 10 samples per rotation domain (0-5).
     
     Args:
         loader: DataLoader to select samples from
@@ -291,7 +291,7 @@ def select_diverse_sample_batch(loader, args, samples_per_domain=10):
         Tuple of (images, labels, color_labels, rotation_labels)
     """
     # Initialize dictionaries to store samples for each rotation domain
-    rotation_samples = {i: [] for i in range(5)}  # 5 rotation domains (0-4)
+    rotation_samples = {i: [] for i in range(6)}  # 6 rotation domains (0-5)
     red_samples = []  # Track red images separately
     
     # Initialize lists to store all samples
@@ -314,7 +314,7 @@ def select_diverse_sample_batch(loader, args, samples_per_domain=10):
                 rotation_samples[rotation_idx].append((x[i], y[i], c[i], r[i]))
             
             # Also check if it's a red image (these might overlap with rotation domains)
-            if torch.max(c[i]) > 0 and torch.argmax(c[i]).item() == 5:  # Red is index 5
+            if torch.max(c[i]) > 0 and torch.argmax(c[i]).item() == 6:  # Red is index 6
                 red_samples.append((x[i], y[i], c[i], r[i]))
         
         # Print counts for debugging
@@ -337,7 +337,7 @@ def select_diverse_sample_batch(loader, args, samples_per_domain=10):
     # Randomly select exactly samples_per_domain samples from each domain
     selected_x, selected_y, selected_c, selected_r = [], [], [], []
     
-    for domain in range(5):
+    for domain in range(6):
         # Randomly sample without replacement
         if len(rotation_samples[domain]) > samples_per_domain:
             selected_indices = random.sample(range(len(rotation_samples[domain])), samples_per_domain)
@@ -394,17 +394,17 @@ def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_di
     rotation_indices = torch.argmax(r, dim=1).cpu().numpy() if torch.max(r) > 0 else np.zeros(len(x))
     
     # Create a figure with subplots for each domain
-    num_domains = 5  # 5 rotation domains
+    num_domains = 6  # 6 rotation domains
     samples_per_domain = 10  # 10 samples per domain
     
-    # Create a figure with 5 domains, each with 2 rows (original & reconstruction) and 10 columns (samples)
+    # Create a figure with 6 domains, each with 2 rows (original & reconstruction) and 10 columns (samples)
     fig, axes = plt.subplots(num_domains * 2, samples_per_domain, figsize=(20, 4 * num_domains))
     
     # Get rotation angles for titles
-    rotation_angles = ['0°', '15°', '30°', '45°', '60°']
+    rotation_angles = ['0°', '15°', '30°', '45°', '60°', '75°']
     
     # Color mapping for labels
-    color_map = {0: 'blue', 1: 'green', 2: 'yellow', 3: 'cyan', 4: 'magenta', 5: 'red'}
+    color_map = {0: 'blue', 1: 'green', 2: 'yellow', 3: 'cyan', 4: 'magenta', 5: 'orange', 6: 'red'}
     
     # Organize images by domain
     domain_images = {i: [] for i in range(num_domains)}
@@ -514,19 +514,19 @@ def save_domain_samples_visualization(x, y, c, r, epoch, output_dir):
         output_dir: Directory to save the visualization
     """
     # Create a figure with subplots for each domain plus red images
-    num_domains = 5  # 5 rotation domains
+    num_domains = 6  # 6 rotation domains
     samples_per_domain = 10  # Fixed number for consistent layout
     
     # Add an extra row for red images
-    fig, axes = plt.subplots(num_domains + 1, samples_per_domain, figsize=(20, 12))
+    fig, axes = plt.subplots(num_domains + 1, samples_per_domain, figsize=(20, 14))
     
     # Get rotation angles for titles
-    rotation_angles = ['0°', '15°', '30°', '45°', '60°']
+    rotation_angles = ['0°', '15°', '30°', '45°', '60°', '75°']
     
     # First, display red images in the top row if any
     red_images_found = 0
     for i in range(len(x)):
-        if torch.max(c[i]) > 0 and torch.argmax(c[i]).item() == 5:  # Red is index 5
+        if torch.max(c[i]) > 0 and torch.argmax(c[i]).item() == 6:  # Red is index 6
             if red_images_found < samples_per_domain:
                 img = x[i].cpu().detach().permute(1, 2, 0).numpy()
                 img = np.clip(img, 0, 1)
@@ -553,7 +553,7 @@ def save_domain_samples_visualization(x, y, c, r, epoch, output_dir):
                     
                     # Get color information
                     color_idx = torch.argmax(c[i]).item() if torch.max(c[i]) > 0 else -1
-                    color_map = {0: 'blue', 1: 'green', 2: 'yellow', 3: 'cyan', 4: 'magenta', 5: 'red'}
+                    color_map = {0: 'blue', 1: 'green', 2: 'yellow', 3: 'cyan', 4: 'magenta', 5: 'orange', 6: 'red'}
                     color = color_map.get(color_idx, 'none')
                     
                     axes[domain + 1, domain_images_found].imshow(img)
