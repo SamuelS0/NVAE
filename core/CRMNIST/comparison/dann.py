@@ -27,7 +27,7 @@ class DomainDiscriminator(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, num_r_classes),  # Output num_r_classes (5 for our domains)
+            nn.Linear(hidden_dim, num_r_classes),  # Output num_r_classes
         )
 
     def forward(self, features, λ):
@@ -37,10 +37,10 @@ class DomainDiscriminator(nn.Module):
 
 
 class DANN(nn.Module):
-    def __init__(self, num_y_classes, num_r_classes, z_dim):
+    def __init__(self, spec_data, z_dim):
         super(DANN, self).__init__()
-        self.num_y_classes = num_y_classes
-        self.num_r_classes = num_r_classes  # Should be 5 for our domains
+        self.num_y_classes = spec_data['num_y_classes']
+        self.num_r_classes = spec_data['num_r_classes'] 
         self.z_dim = z_dim
 
         # Feature extractor matching our VAE encoder architecture
@@ -88,8 +88,8 @@ class DANN(nn.Module):
             dataloader: DataLoader containing (x, y, c, r) tuples where:
                 x: input images
                 y: digit labels (0-9)
-                c: color labels (one-hot encoded, 5 dimensions)
-                r: rotation/domain labels (one-hot encoded, 5 dimensions)
+                c: color labels (one-hot encoded)
+                r: rotation/domain labels (one-hot encoded)
             device: torch device
             save_path: Optional path to save the visualization
         """

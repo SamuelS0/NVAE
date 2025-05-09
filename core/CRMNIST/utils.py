@@ -87,7 +87,8 @@ class AddColor:
             'blue': [2],
             'yellow': [0, 1],
             'magenta': [0, 2],
-            'cyan': [1, 2]
+            'cyan': [1, 2],
+            'orange': []
         }
 
         if self.color not in self.channel_map:
@@ -137,8 +138,18 @@ class AddColor:
         for channel in range(3):
             if channel in self.channel_map[self.color]:
                 np_img[..., channel] *= self.intensity
+
+            elif self.color == 'orange':
+                # Create orange by using different intensities for R, G, B channels
+                if channel == 0:  # Red channel
+                    np_img[..., channel] *= self.intensity * 1.0  # Full red
+                elif channel == 1:  # Green channel
+                    np_img[..., channel] *= self.intensity * 0.6  # Medium green
+                else:  # Blue channel
+                    np_img[..., channel] *= self.intensity * 0.1  # Very low blue
             else:
                 np_img[..., channel] *= 0.5
+
                 
         np_img = np.clip(np_img, 0, 1)
         colored_img = Image.fromarray((np_img * 255).astype(np.uint8))
@@ -182,10 +193,11 @@ def choose_label_subset(spec_data, chosen=False):
             all_labels.remove(y_c)
         
         subsets = {}
-        for i in range(len(domain_data)):
+        subsets[0] = [0,1,2,3,4,5,6,7,8,9]
+        for i in range(1,len(domain_data)):
             subsets[i] = random.sample(all_labels, 5)
             domain_data[i]['subset'] = subsets[i]
-        
+
         return y_c, subsets
     else:
         # If already chosen, just return the existing y_c

@@ -44,6 +44,14 @@
             "name": "domain4",
             "number": 4,
             "subset": []
+        },
+        "5": {
+            "rotation": "75",
+            "color": "orange",
+            "intensity": 1.5,
+            "name": "domain5",
+            "number": 5,
+            "subset": []
         }
     },
     "class_map": {
@@ -52,11 +60,15 @@
         "yellow": 2,
         "cyan": 3,
         "magenta": 4,
-        "red": 5,
+        "orange": 5,
+        "red": 6,
         "0": 0,
         "15": 1,
         "30": 2,
         "45": 3,
         "60": 4
-    }
+    },
+    "num_y_classes": 10,
+    "num_r_classes": 6,
+    "num_c_classes": 7
 }

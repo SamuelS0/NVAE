@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import os
 import random
 import core.CRMNIST.utils
-from core.CRMNIST.data_generation import generate_crmnist_dataset, CRMNIST
+from core.CRMNIST.data_generation import generate_crmnist_dataset
 from core.CRMNIST.model import VAE
 from core.train import train
 from core.CRMNIST.utils import select_diverse_sample_batch, visualize_reconstructions, visualize_conditional_generation
@@ -58,27 +58,19 @@ def run_experiment(args):
     class_map = spec_data['class_map']
     
     # Choose labels subset if not already chosen
-    y_c, subsets = core.CRMNIST.utils.choose_label_subset(spec_data)
-    spec_data['y_c'] = y_c
-    
+    core.CRMNIST.utils.choose_label_subset(spec_data)
     # Generate dataset
-    train_dataset = CRMNIST(spec_data, train=True, 
-                           transform_intensity=args.intensity,
-                           transform_decay=args.intensity_decay)
-    
-    test_dataset = CRMNIST(spec_data, train=False,
-                          transform_intensity=args.intensity,
-                          transform_decay=args.intensity_decay)
-    
+    train_dataset = generate_crmnist_dataset(spec_data, train=True)
+    test_dataset = generate_crmnist_dataset(spec_data, train=False)
     # Create data loaders
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
     
     # Get dataset dimensions
-    num_y_classes = train_dataset.dataset.num_y_classes
-    num_r_classes = train_dataset.dataset.num_r_classes
-    
-    print(f"Dataset dimensions: y_dim={num_y_classes}, r_dim={num_r_classes}")
+    num_y_classes = spec_data['num_y_classes']
+    num_r_classes = spec_data['num_r_classes']
+
+    print(f"Dataset dimensions: y_dim={num_y_classes}, r_dim=num_domains={num_r_classes}")
     
     # Initialize model
     model = VAE(class_map=class_map,

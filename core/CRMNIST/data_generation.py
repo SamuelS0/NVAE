@@ -15,16 +15,6 @@ import core.CRMNIST.utils
 data_path = os.path.join('.','data')
 crmnist_path = os.path.join(data_path,'crmnist')
 
-class CRMNIST(torch.utils.data.Dataset):
-    def __init__(self, spec_data, train=True, transform_intensity=1.5, transform_decay=1, p=0.5):
-        self.dataset = generate_crmnist_dataset(spec_data, train, transform_intensity, transform_decay, p)
-        
-    def __len__(self):
-        return len(self.dataset)
-    
-    def __getitem__(self, idx):
-        return self.dataset[idx]
-
 
 class CRMNISTDataset(Dataset):
     def __init__(self, imgs, y_labels, c_labels, r_labels, transform=None, convert_y_to_one_hot=False):
@@ -123,15 +113,14 @@ class CRMNISTDataset(Dataset):
 
 
 
-def generate_crmnist_dataset(spec_data, train=True, transform_intensity=1.5, transform_decay=1, p=0.5):
+def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transform_decay=1, p=0.5):
     """
     Generates CRMNIST dataset.
     
     Args:
         domain_data (dict[int, dict]): Contains domain information in dict with keys: "rotation", "color"
-                                    "intensity", "name", "number", "y_c", "subset.
-        subsets (list): Subset of labels between 0 and 9 which are to be rotated and colored
-                         in correspondence with each domain.
+                                    "intensity", "name", "number", "y_c", "subset"
+        train (bool): Whether to generate training or test dataset
         transform_intensity (float): intensity of transform
         transform_decay (float): decay of transform
         p: probability with which an image which may be colored is colored
@@ -155,8 +144,7 @@ def generate_crmnist_dataset(spec_data, train=True, transform_intensity=1.5, tra
         mnist_data = mnist_test
         print(f"Using test dataset with {len(mnist_test)} images")
 
-    train_size = len(mnist_train)
-    test_size = len(mnist_test)
+    train_size, test_size = len(mnist_train), len(mnist_test)
     
     # Get images and labels - MNIST labels are already integers 0-9
     mnist_imgs = mnist_data.data.unsqueeze(1)  # Add channel dim
@@ -226,19 +214,6 @@ def generate_crmnist_dataset(spec_data, train=True, transform_intensity=1.5, tra
         # Track red images in this domain
         domain_red_count = 0
 
-        # Process subset images
-        for j in range(len(subset_imgs)):
-            color, rotation = None, None
-            if random.uniform(0,1) >= p:
-                subset_imgs[j] = c_transform(subset_imgs[j])
-                color = domain_data[i]['color']
-            if random.uniform(0,1) >= p:
-                subset_imgs[j] = r_transform(subset_imgs[j])
-                rotation = domain_data[i]['rotation']  # Keep as string to use with class_map
-
-            domain_c_labels.append(color)
-            domain_r_labels.append(rotation)
-
         # Process y_c images
         for j in range(len(yc_subset_imgs)):
             color, rotation = None, None
@@ -257,11 +232,24 @@ def generate_crmnist_dataset(spec_data, train=True, transform_intensity=1.5, tra
             domain_r_labels.append(rotation)
             
         # Add labels for non-transformed yc images
-        # This was missing and causing the mismatch
-        for j in range(len(yc_non_subset_imgs)):
+        for _ in range(len(yc_non_subset_imgs)):
             domain_c_labels.append(None)  # No color transform
             domain_r_labels.append(None)  # No rotation transform
         
+        # Process subset images
+        for j in range(len(subset_imgs)):
+            color, rotation = None, None
+            if random.uniform(0,1) >= p:
+                subset_imgs[j] = c_transform(subset_imgs[j])
+                color = domain_data[i]['color']
+            if random.uniform(0,1) >= p:
+                subset_imgs[j] = r_transform(subset_imgs[j])
+                rotation = domain_data[i]['rotation']  # Keep as string to use with class_map
+
+            domain_c_labels.append(color)
+            domain_r_labels.append(rotation)
+
+
         red_images_per_domain[i] = domain_red_count
         print(f"  Red images created in this domain: {domain_red_count}")
 

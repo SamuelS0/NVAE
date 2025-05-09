@@ -45,9 +45,8 @@ class VAE(NModule):
             zx_dim= 12,
             zay_dim = 12,
             za_dim=12,
-            y_dim=10,   # 10 for MNIST's 10 digit classes (0-9)
-            a_dim=5,    # Updated to 5 for exactly 5 attribute classes (0-4)
-            in_channels = 3,
+            y_dim=10,   
+            a_dim=6,    
             out_channels=32,
             kernel=3,
             stride=1,
@@ -335,8 +334,8 @@ class VAE(NModule):
             dataloader: DataLoader containing (x, y, c, r) tuples where:
                 x: input images
                 y: digit labels (0-9)
-                c: color labels (one-hot encoded, 5 dimensions)
-                r: rotation/domain labels (one-hot encoded, 5 dimensions)
+                c: color labels (one-hot encoded)
+                r: rotation/domain labels (one-hot encoded,)
             device: torch device
             save_path: Optional path to save the visualization
         """
