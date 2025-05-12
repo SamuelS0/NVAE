@@ -396,16 +396,26 @@ def run_experiment(args):
 
         return
     
-    # load models
-    if setting == 'cross-domain':
-        nvae = torch.load(os.path.join(models_dir, 'nvae_checkpoint.pt'))
-        diva = torch.load(os.path.join(models_dir, 'diva_checkpoint.pt'))
-        dann = torch.load(os.path.join(models_dir, 'dann_checkpoint.pt'))
-    elif setting == 'holdout':
-        nvae = torch.load(os.path.join(models_dir, 'nvae_checkpoint.pt'))
-        diva = torch.load(os.path.join(models_dir, 'diva_checkpoint.pt'))
-        dann = torch.load(os.path.join(models_dir, 'dann_checkpoint.pt'))
-    
+    # Load models
+    nvae_state = torch.load(os.path.join(models_dir, 'nvae_checkpoint.pt'))
+    diva_state = torch.load(os.path.join(models_dir, 'diva_checkpoint.pt'))
+    dann_state = torch.load(os.path.join(models_dir, 'dann_checkpoint.pt'))
+
+    # Create model instances
+    nvae = NVAE(spec_data, z_dim=args.z_dim).to(device)
+    diva = DIVA(spec_data, z_dim=args.z_dim).to(device)
+    dann = DANN(spec_data, z_dim=args.z_dim).to(device)
+
+    # Load state dictionaries
+    nvae.load_state_dict(nvae_state)
+    diva.load_state_dict(diva_state)
+    dann.load_state_dict(dann_state)
+
+    # Set models to eval mode
+    nvae.eval()
+    diva.eval()
+    dann.eval()
+
     if setting == 'cross-domain' and mode == 'test':
         # Run cross-domain evaluation
         cross_domain_results = run_cross_domain_evaluation(args, nvae, diva, dann, test_loader, spec_data)
