@@ -409,15 +409,15 @@ class VAE(NModule):
         # Apply t-SNE to each latent space in parallel
         def run_tsne(data, labels):
             # Reduce number of samples if too large
-            if len(data) > 5000:
-                print("Reducing number of samples to 5000")
-                indices = np.random.choice(len(data), 5000, replace=False)
-                data = data[indices]
-                labels = labels[indices]
+            # if len(data) > 5000:
+            #     print("Reducing number of samples to 5000")
+            #     indices = np.random.choice(len(data), 5000, replace=False)
+            #     data = data[indices]
+            #     labels = labels[indices]
 
-                return TSNE(n_components=2, random_state=42, n_jobs=-1, 
-                           perplexity=30,  # Reduced perplexity for faster computation
-                           n_iter=1000).fit_transform(data), labels
+            #     return TSNE(n_components=2, random_state=42, n_jobs=-1, 
+            #                perplexity=30,  # Reduced perplexity for faster computation
+            #                n_iter=1000).fit_transform(data), labels
             return TSNE(n_components=2, random_state=42, n_jobs=-1).fit_transform(data), labels
         
         # Run t-SNE in parallel
