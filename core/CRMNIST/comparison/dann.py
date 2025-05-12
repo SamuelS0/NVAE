@@ -65,6 +65,8 @@ class DANN(nn.Module):
         self.classifier = nn.Linear(self.z_dim, self.num_y_classes)
 
     def forward(self, x, y, r):
+        # Ensure input is float type
+        x = x.float()
         features = self.feature_extractor(x)
         reversed_features = grad_reverse(features)
         domain_predictions = self.domain_discriminator(reversed_features, 1.0)

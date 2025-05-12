@@ -37,7 +37,7 @@ def train_nvae(args, spec_data, train_loader, test_loader, models_dir):
         nvae.load_state_dict(training_metrics['best_model_state'])
         print("Loaded best model for final evaluation")
     
-    final_model_path = os.path.join(models_dir, f"nvae_model_checkpoint_epoch_{training_metrics['best_model_epoch']}.pt")
+    final_model_path = os.path.join(models_dir, f"nvae_checkpoint.pt")
     torch.save(nvae.state_dict(), final_model_path)
 
     return nvae, training_metrics
@@ -69,7 +69,7 @@ def train_diva(args, spec_data, train_loader, test_loader, models_dir):
         diva.load_state_dict(training_metrics['best_model_state'])
         print("Loaded best model for final evaluation")
     
-    final_model_path = os.path.join(models_dir, f"diva_model_checkpoint_epoch_{training_metrics['best_model_epoch']}.pt")
+    final_model_path = os.path.join(models_dir, f"diva_checkpoint.pt")
     torch.save(diva.state_dict(), final_model_path)
 
     return diva, training_metrics
@@ -85,5 +85,12 @@ def train_dann(args, spec_data, train_loader, test_loader, models_dir):
     optimizer = optim.Adam(dann.parameters(), lr=args.learning_rate)
     patience = 5
     training_metrics = train(args, dann, optimizer, train_loader, test_loader, args.device, patience, DANNTrainer)
+
+    if training_metrics['best_model_state'] is not None:
+        dann.load_state_dict(training_metrics['best_model_state'])
+        print("Loaded best model for final evaluation")
+    
+    final_model_path = os.path.join(models_dir, f"dann_checkpoint.pt")
+    torch.save(dann.state_dict(), final_model_path)
 
     return dann, training_metrics

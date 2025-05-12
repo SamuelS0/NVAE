@@ -168,7 +168,7 @@ def run_cross_domain_evaluation(args, nvae, diva, dann, test_loader, spec_data):
     Returns:
         Dictionary containing mean and std of metrics across domains
     """
-    num_domains = spec_data['num_domains']
+    num_domains = spec_data['num_r_classes'] 
     cross_domain_results = {'nvae': {}, 'diva': {}, 'dann': {}}
     
     # Evaluate on each domain
@@ -296,18 +296,7 @@ def analyze_domain_distribution(train_loader, test_loader):
     
     return train_domain_counts, test_domain_counts
 
-def run_experiment(args):
-    global device
-    device = args.device
-    print(f"Using device: {device}")
-    
-    # Load configuration from JSON
-    with open(args.config, 'r') as file:
-        spec_data = json.load(file)
-    
-    models_dir = os.path.join(args.out, 'comparison_models')
-    os.makedirs(models_dir, exist_ok=True)
-        
+def prep_domain_data(spec_data):
     # Prepare domain data
     domain_data = {int(key): value for key, value in spec_data['domain_data'].items()}
     spec_data['domain_data'] = domain_data
@@ -316,6 +305,35 @@ def run_experiment(args):
     # Choose labels subset if not already chosen
     y_c, subsets = core.CRMNIST.utils.choose_label_subset(spec_data)
     spec_data['y_c'] = y_c
+
+    return spec_data, class_map
+
+def run_experiment(args):
+    global device
+    device = args.device
+    print(f"Using device: {device}")
+    mode = args.mode
+    print(f"Running in {mode} mode")
+    setting = args.setting
+    print(f"Running in {setting} setting")
+    
+    # Load configuration from JSON
+    with open(args.config, 'r') as file:
+        spec_data = json.load(file)
+    
+    models_dir = os.path.join(args.out, 'comparison_models')
+    os.makedirs(models_dir, exist_ok=True)
+
+    if setting == 'cross-domain':
+        # results/comparison_models/cross-domain
+        models_dir = os.path.join(models_dir, 'cross-domain')
+        os.makedirs(models_dir, exist_ok=True)
+    else:
+        # results/comparison_models/holdout
+        models_dir = os.path.join(models_dir, 'holdout')
+        os.makedirs(models_dir, exist_ok=True)
+    spec_data, class_map = prep_domain_data(spec_data)
+
 
     train_dataset = generate_crmnist_dataset(spec_data, train=True, 
                            transform_intensity=args.intensity,
@@ -340,49 +358,87 @@ def run_experiment(args):
     # Analyze domain distribution
     train_domain_counts, test_domain_counts = analyze_domain_distribution(train_loader, test_loader)
     
-    
-    nvae, training_results_nvae = train_nvae(args, spec_data, train_loader, test_loader, models_dir)
-    diva, training_results_diva = train_diva(args, spec_data, train_loader, test_loader, models_dir)
-    dann, training_results_dann = train_dann(args, spec_data, train_loader, test_loader, models_dir)
+    if setting == 'cross-domain' and mode == 'train':
+        
+        nvae, training_results_nvae = train_nvae(args, spec_data, train_loader, test_loader, models_dir)
+        diva, training_results_diva = train_diva(args, spec_data, train_loader, test_loader, models_dir)
+        dann, training_results_dann = train_dann(args, spec_data, train_loader, test_loader, models_dir)
 
-    print("NVAE training results:")
-    print(f"Best model epoch: {training_results_nvae['best_model_epoch']}\nBest validation loss: {training_results_nvae['best_validation_loss']}\nBest batch metrics: {training_results_nvae['best_batch_metrics']}")
-    nvae.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'nvae_latent_space'))
-    nvae.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'nvae_disentanglement'))
-    nvae.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'nvae_latent_correlations'))
-    print("--------------------------------")
+        print("--------------------------------")
+        print("NVAE training results:")
+        print(f"Best model epoch: {training_results_nvae['best_model_epoch']}\nBest validation loss: {training_results_nvae['best_validation_loss']}\nBest batch metrics: {training_results_nvae['best_batch_metrics']}")
 
-    print("DIVA training results:")
-    print(f"Best model epoch: {training_results_diva['best_model_epoch']}\nBest validation loss: {training_results_diva['best_validation_loss']}\nBest batch metrics: {training_results_diva['best_batch_metrics']}")
-    diva.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'diva_latent_space'))
-    diva.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'diva_disentanglement'))
-    diva.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'diva_latent_correlations'))
+        print("--------------------------------")
 
-    print("--------------------------------")
-    print("DANN training results:")
-    print(f"Best model epoch: {training_results_dann['best_model_epoch']}\nBest validation loss: {training_results_dann['best_validation_loss']}\nBest batch metrics: {training_results_dann['best_batch_metrics']}")
-    dann.visualize_latent_space(test_loader, device, os.path.join(args.out, 'dann_latent_space'))
+        print("DIVA training results:")
+        print(f"Best model epoch: {training_results_diva['best_model_epoch']}\nBest validation loss: {training_results_diva['best_validation_loss']}\nBest batch metrics: {training_results_diva['best_batch_metrics']}")
 
-    # Run cross-domain evaluation
-    cross_domain_results = run_cross_domain_evaluation(args, nvae, diva, dann, test_loader)
-    
-    # Run holdout evaluation
-    holdout_results = run_holdout_evaluation(args, train_loader, test_loader, class_map, spec_data)
+        print("--------------------------------")
 
-    # Print summary of results
-    print_results(cross_domain_results, holdout=False)
-    print_results(holdout_results, holdout=True)
+        print("DANN training results:")
+        print(f"Best model epoch: {training_results_dann['best_model_epoch']}\nBest validation loss: {training_results_dann['best_validation_loss']}\nBest batch metrics: {training_results_dann['best_batch_metrics']}")
+
+        print("--------------------------------")
+        print("Finished training models")
+
+        return
     
+    if setting == 'holdout' and (mode == 'train' or mode == 'test'):
+        # Run holdout evaluation
+        holdout_results = run_holdout_evaluation(args, train_loader, test_loader, class_map, spec_data)
+        print_results(holdout_results, holdout=True)
+
+        results_path = os.path.join(args.out, 'evaluation_results_holdout.json')
+        with open(results_path, 'w') as f:
+            json.dump(holdout_results, f, indent=2)
+        
+        print(f"\nResults saved to {results_path}")
+
+        return
     
-    # Save results
-    results_path = os.path.join(args.out, 'evaluation_results.json')
-    with open(results_path, 'w') as f:
-        json.dump({
-            'cross_domain_results': cross_domain_results,
-            'holdout_results': holdout_results
-        }, f, indent=2)
+    # load models
+    if setting == 'cross-domain':
+        nvae = torch.load(os.path.join(models_dir, 'nvae_checkpoint.pt'))
+        diva = torch.load(os.path.join(models_dir, 'diva_checkpoint.pt'))
+        dann = torch.load(os.path.join(models_dir, 'dann_checkpoint.pt'))
+    elif setting == 'holdout':
+        nvae = torch.load(os.path.join(models_dir, 'nvae_checkpoint.pt'))
+        diva = torch.load(os.path.join(models_dir, 'diva_checkpoint.pt'))
+        dann = torch.load(os.path.join(models_dir, 'dann_checkpoint.pt'))
     
-    print(f"\nResults saved to {results_path}")
+    if setting == 'cross-domain' and mode == 'test':
+        # Run cross-domain evaluation
+        cross_domain_results = run_cross_domain_evaluation(args, nvae, diva, dann, test_loader, spec_data)
+        print_results(cross_domain_results, holdout=False)
+
+        results_path = os.path.join(args.out, 'evaluation_results_cross_domain.json')
+        with open(results_path, 'w') as f:
+            json.dump(cross_domain_results, f, indent=2)
+        
+        print(f"\nResults saved to {results_path}")
+        return
+    
+    if mode == 'visualize':
+
+        # visualize latent spaces
+
+        nvae.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'nvae_latent_space'))
+        nvae.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'nvae_disentanglement'))
+        nvae.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'nvae_latent_correlations'))
+
+        diva.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'diva_latent_space'))
+        diva.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'diva_disentanglement'))
+        diva.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'diva_latent_correlations'))
+
+        dann.visualize_latent_space(test_loader, device, os.path.join(args.out, 'dann_latent_space'))
+
+        # visualize reconstruction
+
+        # nvae.visualize_reconstruction(test_loader, device, os.path.join(args.out, 'nvae_reconstruction'))
+        # diva.visualize_reconstruction(test_loader, device, os.path.join(args.out, 'diva_reconstruction'))
+        # dann.visualize_reconstruction(test_loader, device, os.path.join(args.out, 'dann_reconstruction'))
+
+    
 
 if __name__ == "__main__":
     parser = core.utils.get_parser('CRMNIST')
@@ -400,6 +456,8 @@ if __name__ == "__main__":
     parser.add_argument('--beta_4', type=float, default=1.0)
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
+    parser.add_argument('--setting', type=str, default='cross-domain', choices=['holdout', 'cross-domain'])
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'test', 'visualize', 'all'])
     
     args = parser.parse_args()
     
