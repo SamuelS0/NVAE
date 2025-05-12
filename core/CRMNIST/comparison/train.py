@@ -37,8 +37,26 @@ def train_nvae(args, spec_data, train_loader, test_loader, models_dir):
         nvae.load_state_dict(training_metrics['best_model_state'])
         print("Loaded best model for final evaluation")
     
-    final_model_path = os.path.join(models_dir, f"nvae_checkpoint.pt")
-    torch.save(nvae.state_dict(), final_model_path)
+    # Save both model parameters and state dict
+    model_params = {
+        'class_map': spec_data['class_map'],
+        'zy_dim': args.zy_dim,
+        'zx_dim': args.zx_dim,
+        'zay_dim': args.zay_dim,
+        'za_dim': args.za_dim,
+        'y_dim': spec_data['num_y_classes'],
+        'a_dim': spec_data['num_r_classes'],
+        'beta_1': args.beta_1,
+        'beta_2': args.beta_2,
+        'beta_3': args.beta_3,
+        'beta_4': args.beta_4,
+        'diva': False
+    }
+    
+    torch.save({
+        'params': model_params,
+        'state_dict': nvae.state_dict()
+    }, os.path.join(models_dir, "nvae_checkpoint.pt"))
 
     return nvae, training_metrics
 
@@ -69,8 +87,26 @@ def train_diva(args, spec_data, train_loader, test_loader, models_dir):
         diva.load_state_dict(training_metrics['best_model_state'])
         print("Loaded best model for final evaluation")
     
-    final_model_path = os.path.join(models_dir, f"diva_checkpoint.pt")
-    torch.save(diva.state_dict(), final_model_path)
+    # Save both model parameters and state dict
+    model_params = {
+        'class_map': spec_data['class_map'],
+        'zy_dim': args.zy_dim,
+        'zx_dim': args.zx_dim,
+        'zay_dim': args.zay_dim,
+        'za_dim': args.za_dim,
+        'y_dim': spec_data['num_y_classes'],
+        'a_dim': spec_data['num_r_classes'],
+        'beta_1': args.beta_1,
+        'beta_2': args.beta_2,
+        'beta_3': args.beta_3,
+        'beta_4': args.beta_4,
+        'diva': True
+    }
+    
+    torch.save({
+        'params': model_params,
+        'state_dict': diva.state_dict()
+    }, os.path.join(models_dir, "diva_checkpoint.pt"))
 
     return diva, training_metrics
 
@@ -90,7 +126,15 @@ def train_dann(args, spec_data, train_loader, test_loader, models_dir):
         dann.load_state_dict(training_metrics['best_model_state'])
         print("Loaded best model for final evaluation")
     
-    final_model_path = os.path.join(models_dir, f"dann_checkpoint.pt")
-    torch.save(dann.state_dict(), final_model_path)
+    # Save both model parameters and state dict
+    model_params = {
+        'spec_data': spec_data,
+        'z_dim': z_dim
+    }
+    
+    torch.save({
+        'params': model_params,
+        'state_dict': dann.state_dict()
+    }, os.path.join(models_dir, "dann_checkpoint.pt"))
 
     return dann, training_metrics

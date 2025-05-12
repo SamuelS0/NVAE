@@ -1,6 +1,7 @@
 from core.train import train
 from core.test import test_nvae, test_dann
 from core.CRMNIST.model import VAE
+from core.CRMNIST.comparison.dann import DANN
 import torch
 from core.CRMNIST.data_generation import generate_crmnist_dataset
 from core.CRMNIST.comparison.train import train_nvae, train_diva, train_dann
@@ -397,19 +398,19 @@ def run_experiment(args):
         return
     
     # Load models
-    nvae_state = torch.load(os.path.join(models_dir, 'nvae_checkpoint.pt'))
-    diva_state = torch.load(os.path.join(models_dir, 'diva_checkpoint.pt'))
-    dann_state = torch.load(os.path.join(models_dir, 'dann_checkpoint.pt'))
+    nvae_checkpoint = torch.load(os.path.join(models_dir, 'nvae_checkpoint.pt'), map_location=device)
+    diva_checkpoint = torch.load(os.path.join(models_dir, 'diva_checkpoint.pt'), map_location=device)
+    dann_checkpoint = torch.load(os.path.join(models_dir, 'dann_checkpoint.pt'), map_location=device)
 
-    # Create model instances
-    nvae = NVAE(spec_data, z_dim=args.z_dim).to(device)
-    diva = DIVA(spec_data, z_dim=args.z_dim).to(device)
-    dann = DANN(spec_data, z_dim=args.z_dim).to(device)
+    # Create models with saved parameters
+    nvae = VAE(**nvae_checkpoint['params']).to(device)
+    diva = VAE(**diva_checkpoint['params']).to(device)
+    dann = DANN(**dann_checkpoint['params']).to(device)
 
     # Load state dictionaries
-    nvae.load_state_dict(nvae_state)
-    diva.load_state_dict(diva_state)
-    dann.load_state_dict(dann_state)
+    nvae.load_state_dict(nvae_checkpoint['state_dict'])
+    diva.load_state_dict(diva_checkpoint['state_dict'])
+    dann.load_state_dict(dann_checkpoint['state_dict'])
 
     # Set models to eval mode
     nvae.eval()
