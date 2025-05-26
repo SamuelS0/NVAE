@@ -29,7 +29,7 @@ def train(args, model, optimizer, train_loader, val_loader, device, patience):
 
     # Return training statistics
     return {
-        'best_validation_loss': trainer.best_val_loss,
+        'best_val_accuracy': trainer.best_val_acc,
         'total_epochs_trained': trainer.epochs_trained,
         'best_model_epoch': trainer.best_epoch + 1,  
         'best_model_state': trainer.best_model_state

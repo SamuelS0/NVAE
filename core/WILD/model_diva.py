@@ -3,14 +3,14 @@ import torch.nn as nn
 from torch.nn import functional as F
 import torch.distributions as dist
 
-from ..diva.pixel_cnn_utils import log_mix_dep_Logistic_256
-from ..resnet_blocks_batchnorm import *
+from diva.pixel_cnn_utils import log_mix_dep_Logistic_256
+from diva.resnet_blocks_batchnorm import *
 
 
 # Decoders
-class px(nn.Module):
+class px_64(nn.Module):
     def __init__(self, d_dim, x_dim, y_dim, z_dim):
-        super(px, self).__init__()
+        super(px_64, self).__init__()
 
         self.fc1 = nn.Sequential(nn.Linear(z_dim, 64*4*4, bias=False), nn.BatchNorm1d(64*4*4))
         self.rn1 = IdResidualConvTBlockBNIdentity(64, 64, 3, padding=1, output_padding=0, nonlin=nn.LeakyReLU)
@@ -47,11 +47,55 @@ class px(nn.Module):
 
         return loc_img
 
+class px_96(nn.Module):
+    def __init__(self, d_dim, x_dim, y_dim, z_dim):
+        super(px_96, self).__init__()
+
+        # Start from 6x6 to reach 96x96 through upsampling
+        self.fc1 = nn.Sequential(nn.Linear(z_dim, 64*6*6, bias=False), nn.BatchNorm1d(64*6*6))
+        
+        # Upsampling path: 6x6 -> 12x12 -> 24x24 -> 48x48 -> 96x96
+        self.rn1 = IdResidualConvTBlockBNIdentity(64, 64, 3, padding=1, output_padding=0, nonlin=nn.LeakyReLU)
+        self.rn2 = IdResidualConvTBlockBNResize(64, 64, 3, padding=1, output_padding=1, nonlin=nn.LeakyReLU)  # 6->12
+        self.rn3 = IdResidualConvTBlockBNIdentity(64, 64, 3, padding=1, output_padding=0, nonlin=nn.LeakyReLU)
+        self.rn4 = IdResidualConvTBlockBNResize(64, 32, 3, padding=1, output_padding=1, nonlin=nn.LeakyReLU)  # 12->24
+        self.rn5 = IdResidualConvTBlockBNIdentity(32, 32, 3, padding=1, output_padding=0, nonlin=nn.LeakyReLU)
+        self.rn6 = IdResidualConvTBlockBNResize(32, 32, 3, padding=1, output_padding=1, nonlin=nn.LeakyReLU)  # 24->48
+        self.rn7 = IdResidualConvTBlockBNIdentity(32, 32, 3, padding=1, output_padding=0, nonlin=nn.LeakyReLU)
+        self.rn8 = IdResidualConvTBlockBNResize(32, 32, 3, padding=1, output_padding=1, nonlin=nn.LeakyReLU)  # 48->96
+        
+        # Final layers for mixture of logistics
+        self.conv1 = nn.Conv2d(32, 100, 3, padding=1)
+        self.conv2 = nn.Conv2d(100, 100, 1, padding=0)
+
+        torch.nn.init.xavier_uniform_(self.fc1[0].weight)
+        torch.nn.init.xavier_uniform_(self.conv1.weight)
+        self.conv1.bias.data.zero_()
+        torch.nn.init.xavier_uniform_(self.conv2.weight)
+        self.conv2.bias.data.zero_()
+
+    def forward(self, z):
+        h = self.fc1(z)
+        h = h.view(-1, 64, 6, 6)
+        h = self.rn1(h)
+        h = self.rn2(h)  # 6->12
+        h = self.rn3(h)
+        h = self.rn4(h)  # 12->24
+        h = self.rn5(h)
+        h = self.rn6(h)  # 24->48
+        h = self.rn7(h)
+        h = self.rn8(h)  # 48->96
+        h = F.leaky_relu(h)
+        h = self.conv1(h)
+        loc_img = self.conv2(h)
+
+        return loc_img
+
 
 # Encoders
-class qz(nn.Module):
+class qz_64(nn.Module):
     def __init__(self, d_dim, x_dim, y_dim, z_dim):
-        super(qz, self).__init__()
+        super(qz_64, self).__init__()
 
         self.conv1 = nn.Conv2d(3, 32, 3, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(32)
@@ -95,6 +139,51 @@ class qz(nn.Module):
 
         return zd_loc, zd_scale
 
+class qz_96(nn.Module):
+    def __init__(self, d_dim, x_dim, y_dim, z_dim):
+        super(qz_96, self).__init__()
+
+        self.conv1 = nn.Conv2d(3, 32, 3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(32)
+
+        self.rn1 = IdResidualConvBlockBNResize(32, 32, 3, padding=1, nonlin=nn.LeakyReLU)
+        self.rn2 = IdResidualConvBlockBNIdentity(32, 32, 3, padding=1, nonlin=nn.LeakyReLU)
+        self.rn3 = IdResidualConvBlockBNResize(32, 64, 3, padding=1, nonlin=nn.LeakyReLU)
+        self.rn4 = IdResidualConvBlockBNIdentity(64, 64, 3, padding=1, nonlin=nn.LeakyReLU)
+        self.rn5 = IdResidualConvBlockBNResize(64, 64, 3, padding=1, nonlin=nn.LeakyReLU)
+        self.rn6 = IdResidualConvBlockBNIdentity(64, 64, 3, padding=1, nonlin=nn.LeakyReLU)
+        self.rn7 = IdResidualConvBlockBNResize(64, 64, 3, padding=1, nonlin=nn.LeakyReLU)
+
+        self.fc11 = nn.Sequential(nn.Linear(64 * 6 * 6, z_dim))
+        self.fc12 = nn.Sequential(nn.Linear(64 * 6 * 6, z_dim), nn.Softplus())
+
+        torch.nn.init.xavier_uniform_(self.conv1.weight)
+        self.bn1.weight.data.fill_(1)
+        self.bn1.bias.data.zero_()
+        torch.nn.init.xavier_uniform_(self.fc11[0].weight)
+        self.fc11[0].bias.data.zero_()
+        torch.nn.init.xavier_uniform_(self.fc12[0].weight)
+        self.fc12[0].bias.data.zero_()
+
+    def forward(self, x):
+        h = self.conv1(x)
+        h = self.bn1(h)
+        # activation function is inside of IdResidualConvBlockBN
+
+        h = self.rn1(h)
+        h = self.rn2(h)
+        h = self.rn3(h)
+        h = self.rn4(h)
+        h = self.rn5(h)
+        h = self.rn6(h)
+        h = self.rn7(h)
+        h = F.leaky_relu(h)
+
+        h = h.view(-1, 64 * 6 * 6)
+        zd_loc = self.fc11(h)
+        zd_scale = self.fc12(h) + 1e-7
+
+        return zd_loc, zd_scale
 
 # Auxiliary tasks
 class qd(nn.Module):
@@ -131,17 +220,17 @@ class qy(nn.Module):
         return loc_y
 
 
-class VAE(nn.Module):
+class DIVA_VAE(nn.Module):
     def __init__(self, args):
-        super(VAE, self).__init__()
+        super(DIVA_VAE, self).__init__()
         self.z_dim = args.z_dim
         self.d_dim = args.d_dim
         self.x_dim = args.x_dim
         self.y_dim = args.y_dim
 
-        self.px = px(self.d_dim, self.x_dim, self.y_dim, self.z_dim)
+        self.px = px_96(self.d_dim, self.x_dim, self.y_dim, self.z_dim)
 
-        self.qz = qz(self.d_dim, self.x_dim, self.y_dim, self.z_dim)
+        self.qz = qz_96(self.d_dim, self.x_dim, self.y_dim, self.z_dim)
 
         self.qd = qd(self.d_dim, self.x_dim, self.y_dim, self.z_dim)
         self.qy = qy(self.d_dim, self.x_dim, self.y_dim, self.z_dim)
@@ -183,11 +272,23 @@ class VAE(nn.Module):
         CE_x = -log_mix_dep_Logistic_256(x, x_recon, average=False, n_comps=10)
 
         KL_z = torch.sum(pz.log_prob(z_q) - qz.log_prob(z_q))
-
-        _, d_target = d.max(dim=1)
+        if len(y.shape) > 1 and y.shape[1] > 1:
+            # One-hot encoded
+            _, y_target = y.max(dim=1)
+        else:
+            # Index tensor
+            y_target = y.long()
+        
+        # Handle a label - could be index or one-hot
+        if len(d.shape) > 1 and d.shape[1] > 1:
+            # One-hot encoded
+            _, d_target = d.max(dim=1)
+        else:
+            # Index tensor
+            d_target = d.long()
+        
         CE_d = F.cross_entropy(d_hat, d_target, reduction='sum')
 
-        _, y_target = y.max(dim=1)
         CE_y = F.cross_entropy(y_hat, y_target, reduction='sum')
 
         return CE_x - self.beta * KL_z + self.aux_loss_multiplier_d * CE_d + self.aux_loss_multiplier_y * CE_y, CE_y

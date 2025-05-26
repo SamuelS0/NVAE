@@ -8,6 +8,7 @@ import torchvision.transforms as transforms
 from wilds import get_dataset
 from wilds.common.data_loaders import get_train_loader, get_eval_loader
 from model_wild import VAE
+from diva.pixel_cnn_utils import log_mix_dep_Logistic_256
 #from model_diva import DIVA_VAE
 
 def select_diverse_sample_batch(loader, data_type = 'id_val', samples_per_domain=10):
@@ -85,7 +86,10 @@ def visualize_reconstructions(model, epoch, batch_data, image_dir, args):
     
     model.eval()
     with torch.no_grad():
-        x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(hospital_id, x, y)
+        #if args.model == 'vae':
+        x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model.forward(hospital_id, x, y)
+        ''' elif args.model == 'diva':
+            x_recon, d_hat, y_hat, qz, pz, z_q = model.forward(hospital_id, x, y)'''
     
     # Get labels in the right format
     if len(y.shape) > 1 and y.shape[1] > 1:
@@ -256,11 +260,13 @@ def save_domain_samples_visualization(x, y, metadata, epoch, output_dir):
 
     print(f"Saved domain samples visualization for epoch {epoch}")
 
-def generate_images_latent(model, device, data_type, output_dir, x, y, metadata, mode, args):
+def generate_images_latent(model, device, data_type, output_dir, batch_data, mode, args):
     """Generate and visualize reconstructions using different latent spaces from forward pass"""
     os.makedirs(output_dir, exist_ok=True)
     model.eval()
     
+    x, y, metadata = batch_data
+
     hospital_id = metadata[:, 0]
     
     # Move to device
@@ -272,49 +278,79 @@ def generate_images_latent(model, device, data_type, output_dir, x, y, metadata,
     with torch.no_grad():
         if args.model == 'vae':
             x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model.forward(hospital_id, x, y)
-        elif args.model == 'diva':
-            x_recon, d_hat, y_hat, qz, pz, z_q = model.forward(hospital_id, x, y)
+            
+            if mode == 'only':
+                # Generate different reconstructions by zeroing out different latent variables
+                zy_only = model.px(zy, torch.zeros_like(zx), torch.zeros_like(zay), torch.zeros_like(za))
+                zx_only = model.px(torch.zeros_like(zy), zx, torch.zeros_like(zay), torch.zeros_like(za))
+                zay_only = model.px(torch.zeros_like(zy), torch.zeros_like(zx), zay, torch.zeros_like(za))
+                za_only = model.px(torch.zeros_like(zy), torch.zeros_like(zx), torch.zeros_like(zay), za)
+                y_only = model.px(zy, torch.zeros_like(zx), zay, torch.zeros_like(za))
+                a_only = model.px(torch.zeros_like(zy), torch.zeros_like(zx), zay, za)
+                
+                latent_names = [
+                    'Original Image',
+                    'Full Reconstruction\n(all latents)',
+                    'Label Space (zy)\ncaptures tumor/normal',
+                    'Content Space (zx)\ncaptures image details',
+                    'Label-Hospital Space (zay)\ncaptures class-domain interaction',
+                    'Hospital Space (za)\ncaptures domain style',
+                    'zy + zay\ncaptures label',
+                    'za + zay\ncaptures domain style'
+                ]
+                images_list = [x, x_recon, zy_only, zx_only, zay_only, za_only, y_only, a_only]
+            elif mode == 'without':
+                # Generate different reconstructions by zeroing out different latent variables
+                no_zy_only = model.px(torch.zeros_like(zy), zx, zay, za)
+                no_zx_only = model.px(zy, torch.zeros_like(zx), zay, za)
+                no_zay_only = model.px(zy, zx, torch.zeros_like(zay), za)
+                no_za_only = model.px(zy, zx, zay, torch.zeros_like(za))
+                no_y_only = model.px(torch.zeros_like(zy), zx, torch.zeros_like(zay), za)
+                no_a_only = model.px(zy, zx, torch.zeros_like(zay), torch.zeros_like(za))
+                
+                latent_names = [
+                    'Original Image',
+                    'Full Reconstruction (all latents)',
+                    'no (zy)\ncaptures tumor/normal',
+                    'no (zx)\ncaptures image details',
+                    'no (zay)\ncaptures class-domain interaction',
+                    'no (za)\ncaptures domain style',
+                    'no (zy + zay)\nno label',
+                    'no (za + zay)\nno domain'
+                ]
+                images_list = [x, x_recon, no_zy_only, no_zx_only, no_zay_only, no_za_only, no_y_only, no_a_only]
         
-        if mode == 'only':
-            # Generate different reconstructions by zeroing out different latent variables
-            zy_only = model.px(zy, torch.zeros_like(zx), torch.zeros_like(zay), torch.zeros_like(za))
-            zx_only = model.px(torch.zeros_like(zy), zx, torch.zeros_like(zay), torch.zeros_like(za))
-            zay_only = model.px(torch.zeros_like(zy), torch.zeros_like(zx), zay, torch.zeros_like(za))
-            za_only = model.px(torch.zeros_like(zy), torch.zeros_like(zx), torch.zeros_like(zay), za)
-            y_only = model.px(zy, torch.zeros_like(zx), zay, torch.zeros_like(za))
-            a_only = model.px(torch.zeros_like(zy), torch.zeros_like(zx), zay, za)
+        elif args.model == 'diva':
+            x_recon, z, qz, pzy, pzx, pza, _, y_hat, a_hat, zy, zx, _, za = model.forward(hospital_id, x, y)
             
-            latent_names = [
-                'Original Image',
-                'Full Reconstruction\n(all latents)',
-                'Label Space (zy)\ncaptures tumor/normal',
-                'Content Space (zx)\ncaptures image details',
-                'Label-Hospital Space (zay)\ncaptures class-domain interaction',
-                'Hospital Space (za)\ncaptures domain style',
-                'y only\ncaptures label',
-                'a only\ncaptures domain style'
-            ]
-            images_list = [x, x_recon, zy_only, zx_only, zay_only, za_only, y_only, a_only]
-        elif mode == 'without':
-            # Generate different reconstructions by zeroing out different latent variables
-            no_zy_only = model.px(torch.zeros_like(zy), zx, zay, za)
-            no_zx_only = model.px(zy, torch.zeros_like(zx), zay, za)
-            no_zay_only = model.px(zy, zx, torch.zeros_like(zay), za)
-            no_za_only = model.px(zy, zx, zay, torch.zeros_like(za))
-            no_y_only = model.px(torch.zeros_like(zy), zx, torch.zeros_like(zay), za)
-            no_a_only = model.px(zy, zx, torch.zeros_like(zay), torch.zeros_like(za))
-            
-            latent_names = [
-                'Original Image',
-                'Full Reconstruction (all latents)',
-                'no (zy)\ncaptures tumor/normal',
-                'no (zx)\ncaptures image details',
-                'no (zay)\ncaptures class-domain interaction',
-                'no (za)\ncaptures domain style',
-                'no y\nno label',
-                'no a\nno domain'
-            ]
-            images_list = [x, x_recon, no_zy_only, no_zx_only, no_zay_only, no_za_only, no_y_only, no_a_only]
+            if mode == 'only':
+                # Generate different reconstructions by zeroing out different latent variables
+                zy_only = model.px(zy, torch.zeros_like(zx), None, torch.zeros_like(za))
+                zx_only = model.px(torch.zeros_like(zy), zx, None, torch.zeros_like(za))
+                za_only = model.px(torch.zeros_like(zy), torch.zeros_like(zx), None, za)
+                
+                latent_names = [
+                    'Original Image',
+                    'Full Reconstruction\n(all latents)',
+                    'Label Space (zy)\ncaptures tumor/normal',
+                    'Content Space (zx)\ncaptures image details',
+                    'Hospital Space (za)\ncaptures domain style',
+                ]
+                images_list = [x, x_recon, zy_only, zx_only, za_only]
+            elif mode == 'without':
+                # Generate different reconstructions by zeroing out different latent variables
+                no_zy_only = model.px(torch.zeros_like(zy), zx, None, za)
+                no_zx_only = model.px(zy, torch.zeros_like(zx), None, za)
+                no_za_only = model.px(zy, zx, None, torch.zeros_like(za))
+                
+                latent_names = [
+                    'Original Image',
+                    'Full Reconstruction (all latents)',
+                    'no (zy)\ncaptures tumor/normal',
+                    'no (zx)\ncaptures image details',
+                    'no (za)\ncaptures domain style',
+                ]
+                images_list = [x, x_recon, no_zy_only, no_zx_only, no_za_only]
     
     fig_width = x.size(0) * 3 + 3  # Add extra width for the label column
     fig_height = len(images_list) * 2  # Each row gets 2 units of height
@@ -350,7 +386,7 @@ def generate_images_latent(model, device, data_type, output_dir, x, y, metadata,
 
     # Save the figure
     save_dir = os.path.join(output_dir, f'latent_reconstructions_{data_type}_{mode}.png')
-    plt.suptitle(f"Visualizing Different Latent Space Contributions ({mode})", y=1.02, fontsize=16)
+    plt.suptitle(f"Visualizing Different Latent Space Contributions {args.model} ({mode})", y=1.02, fontsize=16)
     plt.subplots_adjust(left=0.2)
     plt.savefig(save_dir, bbox_inches='tight', dpi=300)
     plt.close()
@@ -364,10 +400,13 @@ def prepare_data(dataset, args):
          transforms.ToTensor()]
     )'''
 
+    '''transform = transforms.Compose(
+        [transforms.Resize((64, 64)),
+         transforms.ToTensor()]
+    )'''
     transform = transforms.Compose(
         [transforms.ToTensor()]
     )
-    
     
     
     train_data = dataset.get_subset("train", transform=transform)
@@ -406,17 +445,21 @@ def prepare_data(dataset, args):
 def calculate_metrics(model, y, x, hospital_id, args):
     """Calculate additional metrics beyond just loss"""
     with torch.no_grad():
-        if args.model == 'vae':
+        '''if args.model == 'vae':
             x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(hospital_id, x, y)
             _, a_pred = a_hat.max(1)
             a_accuracy = (a_pred == hospital_id).float().mean().item()
+            recon_mse = torch.nn.functional.mse_loss(x_recon, x).item()
         elif args.model == 'diva':
             x_recon, d_hat, y_hat, qz, pz, z_q = model.forward(hospital_id, x, y)
             _, a_pred = d_hat.max(1)
             a_accuracy = (a_pred == hospital_id).float().mean().item()
         
+            recon_mse = -log_mix_dep_Logistic_256(x, x_recon, average=False, n_comps=10)'''
+        x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(hospital_id, x, y)
+        _, a_pred = a_hat.max(1)
+        a_accuracy = (a_pred == hospital_id).float().mean().item()
         recon_mse = torch.nn.functional.mse_loss(x_recon, x).item()
-        
         _, y_pred = y_hat.max(1)
         y_true = y.long() if len(y.shape) == 1 or y.shape[1] == 1 else y.max(1)[1]
         y_accuracy = (y_pred == y_true).float().mean().item()

@@ -15,7 +15,7 @@ def test(model, device, test_loader, args):
             slide_id = metadata[:, 1]
             x, y, hospital_id = x.to(device), y.to(device), hospital_id.to(device)
             
-            loss, _ = model.loss_function(hospital_id, x, y)
+            loss, _ = model.loss_function(hospital_id, x, y, current_beta = args.beta_scale)
             test_loss += loss.item()
             
             # Calculate additional metrics

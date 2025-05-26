@@ -20,7 +20,7 @@ from wilds.common.data_loaders import get_train_loader, get_eval_loader
 import torchvision.transforms as transforms
 import matplotlib.gridspec as gridspec
 import sys
-#from model_diva import DIVA_VAE
+from model_diva import DIVA_VAE
 from utils_wild import (
     prepare_data, 
     visualize_reconstructions,
@@ -48,6 +48,8 @@ command: python -B WILD/run_wild.py --out results_low_res_vae/ --batch_size 128 
 """
 
 def run_experiment(dataset, args):
+    #print all the arguments
+    print('args: ', args)
     # Create output directories
     os.makedirs(args.out, exist_ok=True)
     reconstructions_dir = os.path.join(args.out, 'reconstructions')
@@ -89,44 +91,24 @@ def run_experiment(dataset, args):
     # Save the best model
     final_model_path = os.path.join(models_dir, f"model_checkpoint_epoch_{training_metrics['best_model_epoch']}.pt")
     torch.save(model.state_dict(), final_model_path)
+    
     # Load best model for final evaluation
-    
-    
     if training_metrics['best_model_state'] is not None:
         model.load_state_dict(training_metrics['best_model_state'])
         print("Loaded best model for final evaluation")
     
-    # Final evaluation
-    print("\nEvaluating model on test set...")
-    
-    # Add tqdm progress bar for final evaluation
-    #model.eval()
-    test_loss = 0
-    metrics_sum = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
-    
-    # Select a diverse sample batch with images from all domains
-    test_sample_batch = select_diverse_sample_batch(test_loader, data_type = 'test', samples_per_domain=10)
-    
-    test_loss, metrics_avg = test(model,args.device, test_loader, args)
-    
-    print(f'Test Loss: {test_loss:.4f}')
-    for k, v in metrics_avg.items():
-        print(f'Test {k}: {v:.4f}')
-    
-    final_test_loss, final_metrics, test_sample_batch = test_loss, metrics_avg, test_sample_batch
-    
-    # Generate final reconstructions
-    image_dir = os.path.join(reconstructions_dir, f'test_reconstructions.png')
-    visualize_reconstructions(model, 'test', test_sample_batch, image_dir=image_dir, args=args)
-
-    # Generate and visualize conditional samples
-    # visualize_conditional_generation(model, args.device, reconstructions_dir)
+    # Run final evaluation on both validation and test sets
+    print("\nRunning final evaluation...")
+    val_loss, val_metrics = run_evaluation(model, args, dataset, args.out, eval_type='id_val')
+    test_loss, test_metrics = run_evaluation(model, args, dataset, args.out, eval_type='test')
     
     # Save training results as JSON
     results = {
-        'final_test_loss': final_test_loss,
-        'final_metrics': final_metrics,
-        'best_validation_loss': training_metrics['best_validation_loss'],
+        'final_val_loss': val_loss,
+        'final_val_metrics': val_metrics,
+        'final_test_loss': test_loss,
+        'final_test_metrics': test_metrics,
+        'best_validation_accuracy': training_metrics['best_val_accuracy'],
         'total_epochs_trained': training_metrics['total_epochs_trained']
     }
     
@@ -143,6 +125,65 @@ def run_experiment(dataset, args):
     
     return model
 
+def run_evaluation(model, args, dataset, output_dir, eval_type='test'):
+    """
+    Run evaluation on a trained model using either validation or test data.
+    
+    Args:
+        model: Trained VAE model
+        args: Command line arguments
+        dataset: WILDS dataset
+        eval_type: Type of evaluation ('test' or 'id_val')
+    """
+    print(f"\nEvaluating model on {eval_type} set...")
+    
+    # Create output directories if they don't exist
+    eval_dir = os.path.join(output_dir, f'{eval_type}_evaluation')
+    os.makedirs(eval_dir, exist_ok=True)
+    
+    # Prepare data loader
+    transform = transforms.Compose([transforms.ToTensor()])
+    eval_data = dataset.get_subset(eval_type, transform=transform)
+    eval_loader = get_train_loader("standard", eval_data, batch_size=args.batch_size)
+    
+    # Select diverse sample batch for visualization
+    eval_sample_batch = select_diverse_sample_batch(eval_loader, data_type=eval_type, samples_per_domain=10)
+    
+    # Run evaluation
+    eval_loss, metrics_avg = test(model, args.device, eval_loader, args)
+    
+    # Print results
+    print(f'{eval_type.capitalize()} Loss: {eval_loss:.4f}')
+    for k, v in metrics_avg.items():
+        print(f'{eval_type.capitalize()} {k}: {v:.4f}')
+    
+    # Generate reconstructions
+    recon_dir = os.path.join(eval_dir, 'reconstructions')
+    os.makedirs(recon_dir, exist_ok=True)
+    image_path = os.path.join(recon_dir, f'{eval_type}_reconstructions.png')
+    visualize_reconstructions(model, eval_type, eval_sample_batch, image_dir=image_path, args=args)
+    
+    # Generate latent space visualizations
+    latent_recon_dir = os.path.join(eval_dir, 'latent_recon')
+    os.makedirs(latent_recon_dir, exist_ok=True)
+    generate_images_latent(model, args.device, eval_type, latent_recon_dir, eval_sample_batch, mode='without', args=args)
+    generate_images_latent(model, args.device, eval_type, latent_recon_dir, eval_sample_batch, mode='only', args=args)
+    
+    # Save evaluation results
+    results = {
+        'eval_loss': float(eval_loss),
+        'metrics': {k: float(v) for k, v in metrics_avg.items()},
+        'eval_type': eval_type
+    }
+    
+    results_path = os.path.join(eval_dir, 'results.json')
+    with open(results_path, 'w') as f:
+        json.dump(results, f, indent=2)
+    
+    print(f"Evaluation results saved to {results_path}")
+    
+    return eval_loss, metrics_avg
+
 def get_args():
     # Base argument parser (common arguments)
     parser = ArgumentParser(description='WILD VAE Training')
@@ -154,21 +195,23 @@ def get_args():
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate')
     parser.add_argument('--cuda', action='store_true', default=True, help='Enable CUDA training')
     parser.add_argument('--out', type=str, default='results', help='Output directory')
-    parser.add_argument('--resolution', type=str, default='high', choices=['high', 'low'],
+    parser.add_argument('--out_1', type=str, default='results_1', help='Output directory')
+    parser.add_argument('--out_2', type=str, default='results_2', help='Output directory')
+    parser.add_argument('--resolution', type=str, default='low', choices=['high', 'low'],
                         help='Image resolution: high or low')
     parser.add_argument('--val_type', type=str, default='id_val', help='Validation type: id_val or val')
 
     # Model-specific arguments
     parser.add_argument('--zy_dim', type=int, default=128, help='Latent dimension for zy (VAE only)')
     parser.add_argument('--zx_dim', type=int, default=128, help='Latent dimension for zx (VAE only)')
-    parser.add_argument('--zay_dim', type=int, default=64, help='Latent dimension for zay (VAE only)')
-    parser.add_argument('--za_dim', type=int, default=64, help='Latent dimension for za (VAE only)')
+    parser.add_argument('--zay_dim', type=int, default=129, help='Latent dimension for zay (VAE only)')
+    parser.add_argument('--za_dim', type=int, default=128, help='Latent dimension for za (VAE only)')
     parser.add_argument('--beta_1', type=float, default=1.0, help='Beta 1 for VAE loss')
     parser.add_argument('--beta_2', type=float, default=1.0, help='Beta 2 for VAE loss')
     parser.add_argument('--beta_3', type=float, default=1.0, help='Beta 3 for VAE loss')
     parser.add_argument('--beta_4', type=float, default=1.0, help='Beta 4 for VAE loss')
-    parser.add_argument('--alpha_1', type=float, default=1.0, help='Alpha 1 for VAE loss')
-    parser.add_argument('--alpha_2', type=float, default=1.0, help='Alpha 2 for VAE loss')
+    parser.add_argument('--alpha_1', type=float, default=1.0, help='y label loss multiplier')
+    parser.add_argument('--alpha_2', type=float, default=1.0, help='domain label loss multiplier')
     parser.add_argument('--recon_weight', type=float, default=1.0, help='Weight for reconstruction loss (VAE only)')
     parser.add_argument('--d_dim', type=int, default=5, help='Domain dimension for DIVA_VAE')
     parser.add_argument('--y_dim', type=int, default=2, help='Class dimension for DIVA_VAE')
@@ -180,45 +223,31 @@ def get_args():
                         help='Multiplier for auxiliary loss on y (DIVA_VAE only)')
     parser.add_argument('--aux_loss_multiplier_d', type=float, default=100000,
                         help='Multiplier for auxiliary loss on d (DIVA_VAE only)')
-    parser.add_argument('--beta', type=float, default=1.0, help='Beta for KL divergence in DIVA_VAE')
-
+    parser.add_argument('--beta_scale', type=float, default=1.0, help='Beta for KL divergence')
+    #beta annealingstore true, when --beta_annealing it is true
+    parser.add_argument('--beta_annealing', action='store_true', help='Beta annealing')
     return parser.parse_args()
 
 def initialize_model(args, num_classes, num_domains):
-    if args.model == 'vae':
-        if args.resolution == 'high':
-            model = VAE(class_map=None,
-                        zy_dim=args.zy_dim,
-                        zx_dim=args.zx_dim,
-                        zay_dim=args.zay_dim,
-                        za_dim=args.za_dim,
-                        y_dim=num_classes,
-                        a_dim=num_domains,
-                        beta_1=args.beta_1,
-                        beta_2=args.beta_2,
-                        beta_3=args.beta_3,
-                        beta_4=args.beta_4,
-                        alpha_1=args.alpha_1,
-                        alpha_2=args.alpha_2,
-                        device=args.device)
-        else:
-            # Use low-resolution model
-            model = VAE_LowRes(class_map=None,
-                        zy_dim=args.zy_dim,
-                        zx_dim=args.zx_dim,
-                        zay_dim=args.zay_dim,
-                        za_dim=args.za_dim,
-                        y_dim=num_classes,
-                        a_dim=num_domains,
-                        beta_1=args.beta_1,
-                        beta_2=args.beta_2,
-                        beta_3=args.beta_3,
-                        beta_4=args.beta_4,
-                        alpha_1=args.alpha_1,
-                        alpha_2=args.alpha_2,
-                        device=args.device)
-    elif args.model == 'diva':
-        model = DIVA_VAE(args)
+    
+    model = VAE(class_map=None,
+                zy_dim=args.zy_dim,
+                zx_dim=args.zx_dim,
+                zay_dim=args.zay_dim,
+                za_dim=args.za_dim,
+                y_dim=num_classes,
+                a_dim=num_domains,
+                beta_1=args.beta_1,
+                beta_2=args.beta_2,
+                beta_3=args.beta_3,
+                beta_4=args.beta_4,
+                alpha_1=args.alpha_1,
+                alpha_2=args.alpha_2,
+                recon_weight=args.recon_weight,
+                device=args.device, 
+                resolution=args.resolution, 
+                model=args.model)
+    
     return model
 
 
@@ -228,7 +257,6 @@ if __name__ == "__main__":
     args = get_args()
     args.cuda = args.cuda and torch.cuda.is_available()
     args.device = torch.device("cuda" if args.cuda else "cpu")
-    #run_experiment(args)
 
     dataset = get_dataset(
             dataset="camelyon17", 
@@ -238,90 +266,14 @@ if __name__ == "__main__":
         )
     # Run experiment
     model = run_experiment(dataset, args)
-    
-    model.eval()
-
-    transform = transforms.Compose(
-        [transforms.ToTensor()]
-    )
-    final_val_data = dataset.get_subset(args.val_type, transform=transform)
-    val_loader = get_train_loader("standard", final_val_data, batch_size=10)
-    val_x, val_y, val_metadata = next(iter(val_loader))
-    
-    latent_recon_dir = os.path.join(args.out, 'latent_recon')
-    generate_images_latent(model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='without', args=args)
-    generate_images_latent(model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='only', args=args)
-
-
-
-    '''num_classes = 2
+    num_classes = 2
     num_domains = 5
-    model = VAE(class_map=None,  
-            zy_dim=args.zy_dim,
-            zx_dim=args.zx_dim,
-            zay_dim=args.zay_dim,
-            za_dim=args.za_dim,
-            y_dim=num_classes,
-            a_dim=num_domains,
-            beta_1=args.beta_1,
-            beta_2=args.beta_2,
-            beta_3=args.beta_3,
-            beta_4=args.beta_4,
-            device=args.device)
-    model_dir = os.path.join(args.out, 'models')
-    model.load_state_dict(torch.load( os.path.join(model_dir, 'model_best.pt')))
-# Move model to device
-    if args.cuda:
-        model = model.to(args.device)
-    #visualize_conditional_generation(model, args.device, 'con_recon_0')
-    latent_recon_dir = os.path.join(args.out, 'latent_recon')
-    
-    labeled_dataset = get_dataset(dataset="camelyon17", download=False, root_dir='/midtier/cocolab/scratch/ofn9004/WILD', unlabeled=False)
-    train_data = labeled_dataset.get_subset('train', transform=transforms.Compose([
-        transforms.Resize((448, 448)), transforms.ToTensor()
-    ]))
+    run_evaluation(model, args, dataset, args.out, 'id_val')
+    run_evaluation(model, args, dataset, args.out, 'test')
+   
 
-    train_loader = get_train_loader("standard", train_data, batch_size=10)
-    train_x, train_y, train_metadata = next(iter(train_loader))
-    generate_images_latent(model, args.device, 'train', latent_recon_dir, train_x, train_y, train_metadata, mode='without')
-    generate_images_latent(model, args.device, 'train', latent_recon_dir, train_x, train_y, train_metadata, mode='only')
-    
-    
-    train_data = labeled_dataset.get_subset('id_val', transform=transforms.Compose([
-        transforms.Resize((448, 448)), transforms.ToTensor()
-    ]))
-    val_loader = get_train_loader("standard", train_data, batch_size=10)
-    val_x, val_y, val_metadata = next(iter(val_loader))
-    
-    generate_images_latent(model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='without')
-    generate_images_latent(model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='only')'''
-    
-    
-    
-    '''domain_samples_dir = os.path.join(args.out, 'domain_samples')
-    os.makedirs(domain_samples_dir, exist_ok=True)
-
-
-
-    labeled_dataset = get_dataset(dataset="camelyon17", download=False, root_dir='/midtier/cocolab/scratch/ofn9004/WILD',unlabeled=False)
-
-    val_data = labeled_dataset.get_subset(
-    "test",  # or "val" for OOD validation
-    transform=transforms.Compose(
-        [transforms.Resize((448, 448)), transforms.ToTensor()]
-    ))
-
-# Prepare data loaders
-    val_loader = get_train_loader("standard", val_data, batch_size=args.batch_size)  # Use get_eval_loader for validation
-    val_sample_batch = select_diverse_sample_batch(val_loader, args, samples_per_domain=10)
-        # Save domain samples visualization
-
-    save_domain_samples_visualization(*val_sample_batch, 10+1, domain_samples_dir)
-    
-    # Visualize reconstructions
-    visualize_reconstructions(10+1, val_sample_batch)'''
-
-
+    #python -B WILD/run_wild.py --out test_vae --batch_size 256 --model vae --resolution low --epochs 20 --recon_weight 10 --alpha_1 100 --alpha_2 100 --beta_scale 2 --zy_dim 64 --zx_dim 64 --zay_dim 10 --za_dim 64 --beta_annealing
+    #python -B WILD/run_wild.py --out test_diva --batch_size 256 --model diva --resolution low --epochs 20 --recon_weight 10 --alpha_1 100 --alpha_2 100 --beta_scale 2 --zy_dim 64 --zx_dim 64 --zay_dim 10 --za_dim 64 --beta_annealing
 
 
 
