@@ -23,6 +23,7 @@ class Trainer:
         
         # Early stopping setup
         self.best_val_loss = float('inf')
+        self.best_val_accuracy = 0.0  # Track best accuracy for early stopping
         self.best_model_state = None
         self.patience_counter = 0
         self.epochs_trained = 0
@@ -40,7 +41,7 @@ class Trainer:
     def train(self, train_loader, val_loader, num_epochs: int) -> torch.nn.Module:
         """Train the model with early stopping and model checkpointing."""
         # Select a diverse sample batch for reconstruction visualization
-        sample_batch = select_diverse_sample_batch(val_loader, self.args)
+        # sample_batch = select_diverse_sample_batch(val_loader, self.args)
         
         for epoch in range(num_epochs):
             # Training phase
@@ -59,10 +60,12 @@ class Trainer:
                 print(f'  Val {k}: {v:.4f}')
             
             # Generate and visualize reconstructions after each epoch
-            visualize_reconstructions(self.model, epoch+1, sample_batch, self.args, self.reconstructions_dir)
+            # Skip for DANN models which don't do reconstructions
+            # if not isinstance(self.model, DANN):
+            #     visualize_reconstructions(self.model, epoch+1, sample_batch, self.args, self.reconstructions_dir)
             
             # Early stopping check
-            if self._check_early_stopping(val_loss, epoch, num_epochs, train_metrics):
+            if self._check_early_stopping(val_loss, epoch, num_epochs, val_metrics):
                 print(f"Early stopping triggered after {epoch+1} epochs")
                 break
         
@@ -170,8 +173,12 @@ class Trainer:
             }
     
     def _check_early_stopping(self, val_loss: float, epoch: int, num_epochs: int, batch_metrics: Dict[str, float]) -> bool:
-        """Check if early stopping criteria are met."""
-        if val_loss < self.best_val_loss:
+        """Check if early stopping criteria are met based on validation accuracy."""
+        current_val_accuracy = batch_metrics['y_accuracy']
+        
+        # Early stopping based on validation accuracy
+        if current_val_accuracy > self.best_val_accuracy:
+            self.best_val_accuracy = current_val_accuracy
             self.best_val_loss = val_loss
             self.best_model_state = self.model.state_dict().copy()
             self.best_epoch = epoch
@@ -180,12 +187,12 @@ class Trainer:
             # Save best model immediately when new best is found
             best_model_path = os.path.join(self.models_dir, 'model_best.pt')
             torch.save(self.best_model_state, best_model_path)
-            print(f"  New best model saved! (Validation Loss: {self.best_val_loss:.4f})")
+            print(f"  New best model saved! (Validation Accuracy: {self.best_val_accuracy:.4f}, Loss: {val_loss:.4f})")
             print(f"  Best model batch metrics: {self.best_batch_metrics}")
             return False
         else:
             self.patience_counter += 1
-            print(f"  No improvement in validation loss. Patience: {self.patience_counter}/{self.patience}")
+            print(f"  No improvement in validation accuracy. Patience: {self.patience_counter}/{self.patience}")
             
             # Use min(10, num_epochs // 2) as minimum epochs requirement
             min_required_epochs = min(10, num_epochs // 2)

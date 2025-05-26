@@ -58,13 +58,15 @@ class DANN(nn.Module):
             # Block 4
             nn.MaxPool2d(2, 2),
             nn.Flatten(),
-            nn.Linear(192 * 7 * 7, z_dim)  # Project to z_dim directly
+            nn.Linear(192 * 7 * 7, self.z_dim)  # Project to z_dim directly
         )
 
-        self.domain_discriminator = DomainDiscriminator(z_dim, num_r_classes)
-        self.classifier = nn.Linear(z_dim, num_y_classes)
+        self.domain_discriminator = DomainDiscriminator(self.z_dim, self.num_r_classes)
+        self.classifier = nn.Linear(self.z_dim, self.num_y_classes)
 
     def forward(self, x, y, r):
+        # Ensure input is float type
+        x = x.float()
         features = self.feature_extractor(x)
         reversed_features = grad_reverse(features)
         domain_predictions = self.domain_discriminator(reversed_features, 1.0)
@@ -73,9 +75,30 @@ class DANN(nn.Module):
         return y_predictions, domain_predictions
     
     def loss_function(self, y_predictions, domain_predictions, y, r):
+        """
+        Compute the DANN loss as a weighted sum of classification and domain losses.
+        Args:
+            y_predictions: Predictions for digit classification
+            domain_predictions: Predictions for domain classification
+            y: True digit labels
+            r: True domain labels
+        Returns:
+            total_loss: Weighted sum of classification and domain losses
+            y_loss: Classification loss
+            domain_loss: Domain classification loss
+        """
+        # Classification loss (digit prediction)
         y_loss = F.cross_entropy(y_predictions, y)
+        
+        # Domain loss (rotation prediction)
         domain_loss = F.cross_entropy(domain_predictions, r)
-        return y_loss - domain_loss 
+        
+        # Total loss is the sum of both losses
+        # We want to minimize classification error while maximizing domain confusion
+        λ = 1.0  # Weight for domain loss
+        total_loss = y_loss - λ * domain_loss
+        
+        return total_loss, y_loss, domain_loss
 
     def get_features(self, x):
         """Extract features from the feature extractor"""
