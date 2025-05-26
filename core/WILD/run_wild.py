@@ -178,6 +178,12 @@ def get_args():
     parser.add_argument('--resolution', type=str, default='high', choices=['high', 'low'],
                         help='Image resolution: high or low')
     parser.add_argument('--val_type', type=str, default='id_val', help='Validation type: id_val or val')
+    
+    # Data arguments
+    parser.add_argument('--data_dir', type=str, default=None, 
+                        help='Directory to store/load dataset (default: ~/data/wilds)')
+    parser.add_argument('--download', action='store_true', default=True,
+                        help='Download dataset if not found locally')
 
     # Model-specific arguments
     parser.add_argument('--zy_dim', type=int, default=128, help='Latent dimension for zy (VAE only)')
@@ -254,17 +260,57 @@ if __name__ == "__main__":
     args.cuda = args.cuda and torch.cuda.is_available()
     args.device = torch.device("cuda" if args.cuda else "cpu")
     
+    # Setup data directory
+    if args.data_dir is None:
+        # Use default data directory in user's home folder
+        args.data_dir = os.path.expanduser("~/data/wilds")
+    
+    # Create data directory if it doesn't exist
+    print(f"📁 Data directory: {args.data_dir}")
+    os.makedirs(args.data_dir, exist_ok=True)
+    
+    # Check if dataset exists locally
+    dataset_path = os.path.join(args.data_dir, "camelyon17_v1.0")
+    dataset_exists = os.path.exists(dataset_path)
+    
+    if not dataset_exists and args.download:
+        print("⚠️  Dataset not found locally. Will download (~10GB) - this may take a while...")
+        print("☕ Grab a coffee! First download can take 30+ minutes depending on your connection.")
+    elif not dataset_exists and not args.download:
+        print("❌ Dataset not found and download is disabled.")
+        print(f"   Please download manually or use --download flag")
+        print(f"   Expected location: {dataset_path}")
+        exit(1)
+    elif dataset_exists:
+        print("✅ Dataset found locally, skipping download.")
+    
     # Dataset loading with progress
-    print("\n📦 Loading Camelyon17 dataset...")
+    print(f"\n📦 Loading Camelyon17 dataset from {args.data_dir}...")
     with tqdm(total=1, desc="Dataset", unit="dataset") as pbar:
-        pbar.set_postfix_str("Loading from WILDS")
-        dataset = get_dataset(
-                dataset="camelyon17", 
-                download=False, 
-                root_dir='/midtier/cocolab/scratch/ofn9004/WILD',
-                unlabeled=False
-            )
-        pbar.update(1)
+        if dataset_exists:
+            pbar.set_postfix_str("Loading from local cache")
+        else:
+            pbar.set_postfix_str("Downloading and loading (this will take a while)")
+        
+        try:
+            dataset = get_dataset(
+                    dataset="camelyon17", 
+                    download=args.download, 
+                    root_dir=args.data_dir,
+                    unlabeled=False
+                )
+            pbar.update(1)
+        except Exception as e:
+            pbar.close()
+            print(f"❌ Error loading dataset: {e}")
+            print("\n🔧 Troubleshooting tips:")
+            print("1. Check your internet connection")
+            print("2. Ensure you have enough disk space (~10GB)")
+            print("3. Try a different data directory with --data_dir /path/to/data")
+            print("4. Check write permissions for the data directory")
+            exit(1)
+    
+    print("✅ Dataset loaded successfully!")
     
     # Run main experiment
     print("\n🎯 Running main experiment...")
@@ -298,6 +344,7 @@ if __name__ == "__main__":
     
     print("\n🎉 Training and analysis complete!")
     print(f"📁 All results saved to: {args.out}")
+    print(f"💾 Dataset cached at: {args.data_dir}")
     print("=" * 50)
 
 
