@@ -210,30 +210,32 @@ def run_holdout_evaluation(args, train_loader, test_loader, class_map, spec_data
         
         # Train models on filtered training data
 
+        holdout_test_loader = filter_domain_loader(test_loader, holdout_domain)
+
         
         nvae, training_results_nvae = train_nvae(args, spec_data,
-                                                filtered_train_loader, test_loader, args.out)
+                                                filtered_train_loader, holdout_test_loader, args.out)
         print(f"NVAE training results: \n"
               f"Best model epoch: {training_results_nvae['best_model_epoch']}\n"
               f"Best validation loss: {training_results_nvae['best_validation_loss']}\n"
               f"Best batch metrics: {training_results_nvae['best_batch_metrics']}")  
           
         diva, training_results_diva = train_diva(args, spec_data, 
-                                               filtered_train_loader, test_loader, args.out)
+                                               filtered_train_loader, holdout_test_loader, args.out)
         print(f"DIVA training results: \n"
               f"Best model epoch: {training_results_diva['best_model_epoch']}\n"
               f"Best validation loss: {training_results_diva['best_validation_loss']}\n"
               f"Best batch metrics: {training_results_diva['best_batch_metrics']}")
         
         dann, training_results_dann = train_dann(args, spec_data,
-                                               filtered_train_loader, test_loader, args.out)
+                                               filtered_train_loader, holdout_test_loader, args.out)
         print(f"DANN training results: \n"
               f"Best model epoch: {training_results_dann['best_model_epoch']}\n"
               f"Best validation loss: {training_results_dann['best_validation_loss']}\n"
               f"Best batch metrics: {training_results_dann['best_batch_metrics']}")
         
-        # Test on holdout domain
-        holdout_test_loader = filter_domain_loader(test_loader, holdout_domain)
+
+        
         results = evaluate_models(nvae, diva, dann, holdout_test_loader, path=os.path.join(args.out, f'holdout_domain_{holdout_domain}'))
         
         # Store results
@@ -434,12 +436,12 @@ def run_experiment(args):
         # visualize latent spaces
 
         nvae.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'nvae_latent_space'))
-        nvae.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'nvae_disentanglement'))
-        nvae.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'nvae_latent_correlations'))
+        # nvae.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'nvae_disentanglement'))
+        # nvae.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'nvae_latent_correlations'))
 
         diva.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'diva_latent_space'))
-        diva.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'diva_disentanglement'))
-        diva.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'diva_latent_correlations'))
+        # diva.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'diva_disentanglement'))
+        # diva.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'diva_latent_correlations'))
 
         dann.visualize_latent_space(test_loader, device, os.path.join(args.out, 'dann_latent_space'))
 

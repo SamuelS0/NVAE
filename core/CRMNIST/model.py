@@ -323,8 +323,15 @@ class VAE(NModule):
         zy_list, za_list, zay_list, zx_list = [], [], [], []
         y_list, c_list, r_list = [], [], []
         
-        # Initialize counters for each rotation domain
-        rotation_counts = {i: 0 for i in range(5)}  # 5 rotation domains (0-4)
+        # Initialize counters for each combination
+        counts = {
+            'digit': {i: 0 for i in range(10)},  # 10 digits
+            'rotation': {i: 0 for i in range(6)},  # 6 rotations
+            'color': {i: 0 for i in range(7)}  # 7 colors
+        }
+        
+        # Target samples per category
+        target_samples = 200
         
         # Collect data in batches
         with torch.no_grad():
@@ -333,16 +340,44 @@ class VAE(NModule):
                 y = y.to(device)
                 c = c.to(device)
                 r = r.to(device)
-
-                # if i <= 5:
-                #     print("rotation labels before one-hot to single dimension in visualize_latent_spaces:")
-                #     print(r[:5])
                 
-                # Count images in each rotation domain
-                for i in range(len(r)):
-                    if len(r[i].shape) > 0:  # Check if r[i] is not empty
-                        rotation_idx = torch.argmax(r[i]).item()
-                        rotation_counts[rotation_idx] += 1
+                # Convert to indices if one-hot encoded
+                if len(y.shape) > 1:
+                    y = torch.argmax(y, dim=1)
+                if len(c.shape) > 1:
+                    c = torch.argmax(c, dim=1)
+                if len(r.shape) > 1:
+                    r = torch.argmax(r, dim=1)
+                
+                # Create mask for samples we want to keep
+                keep_mask = torch.ones(len(y), dtype=torch.bool, device=device)
+                
+                # Check each sample
+                for j in range(len(y)):
+                    digit = y[j].item()
+                    color = c[j].item()
+                    rotation = r[j].item()
+                    
+                    # Only keep if we need more samples for this combination
+                    # and haven't exceeded target for any category
+                    if (counts['digit'][digit] < target_samples and 
+                        counts['rotation'][rotation] < target_samples and 
+                        counts['color'][color] < target_samples):
+                        keep_mask[j] = True
+                        counts['digit'][digit] += 1
+                        counts['rotation'][rotation] += 1
+                        counts['color'][color] += 1
+                    else:
+                        keep_mask[j] = False
+                
+                # Apply mask to get only samples we want to keep
+                x = x[keep_mask]
+                y = y[keep_mask]
+                c = c[keep_mask]
+                r = r[keep_mask]
+                
+                if len(x) == 0:  # Skip if no samples to keep
+                    continue
                 
                 # Get latent representations
                 z_loc, _ = self.qz(x)
@@ -364,14 +399,29 @@ class VAE(NModule):
                 c_list.append(c)
                 r_list.append(r)
                 
-                # Break if we have enough samples
-                if sum(len(z) for z in zy_list) >= max_samples:
+                # Check if we have enough samples for all categories
+                if all(count >= target_samples for count in counts['digit'].values()) and \
+                   all(count >= target_samples for count in counts['rotation'].values()) and \
+                   all(count >= target_samples for count in counts['color'].values()):
                     break
         
-        # Print rotation domain counts
-        print("\nNumber of images in each rotation domain:")
-        for domain, count in rotation_counts.items():
-            print(f"Rotation {domain*15}°: {count} images")
+        # Print sample counts
+        print("\nNumber of samples per category:")
+        print("\nDigits:")
+        for digit, count in counts['digit'].items():
+            print(f"Digit {digit}: {count} samples")
+        print("\nRotations:")
+        for rot, count in counts['rotation'].items():
+            print(f"Rotation {rot*15}°: {count} samples")
+        print("\nColors:")
+        color_names = ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red']
+        for color, count in counts['color'].items():
+            print(f"{color_names[color]}: {count} samples")
+        
+        # Calculate total samples
+        total_samples = sum(counts['digit'].values())
+        print(f"\nTotal samples: {total_samples}")
+        print(f"Average samples per category: {total_samples / (10 + 6 + 7):.1f}")
         
         # Concatenate tensors on GPU
         zy = torch.cat(zy_list, dim=0)
@@ -427,7 +477,7 @@ class VAE(NModule):
         latent_spaces.append((zx, y_labels))
         
         print("\nRunning t-SNE (this may take a few minutes)...")
-        print("Using up to 5000 samples per latent space for faster computation")
+        # print("Using up to 5000 samples per latent space for faster computation")
         
         # Create progress bar for each latent space
         tsne_results = []
@@ -444,18 +494,22 @@ class VAE(NModule):
         else:
             zx_2d, zx_labels = tsne_results[2]
         
-        # Create figure with 2 rows (digit labels and rotation labels)
+        # Define rotation angles for legend
+        rotation_angles = ['0°', '15°', '30°', '45°', '60°', '75°']
+        color_labels = ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red']
+        
+        # Create figure with 3 rows (digit labels, rotation labels, and color labels)
         # For DIVA: 3 columns (zy, za, zx)
         # For non-DIVA: 4 columns (zy, za, zay, zx)
         if self.diva:
-            fig, axes = plt.subplots(2, 3, figsize=(18, 12))  # 3 columns for DIVA mode
+            fig, axes = plt.subplots(3, 3, figsize=(18, 18))  # 3 columns for DIVA mode
             latent_spaces = [
                 (zy_2d, y_labels, 'Label-specific (zy)'),
                 (za_2d, r_labels, 'Domain-specific (za)'),
                 (zx_2d, zx_labels, 'Residual (zx)')
             ]
         else:
-            fig, axes = plt.subplots(2, 4, figsize=(20, 10))  # 4 columns for non-DIVA mode
+            fig, axes = plt.subplots(3, 4, figsize=(20, 15))  # 4 columns for non-DIVA mode
             latent_spaces = [
                 (zy_2d, y_labels, 'Label-specific (zy)'),
                 (za_2d, r_labels, 'Domain-specific (za)'),
@@ -463,29 +517,80 @@ class VAE(NModule):
                 (zx_2d, zx_labels, 'Residual (zx)')
             ]
         
-        # Define rotation angles for legend
-        rotation_angles = ['0°', '15°', '30°', '45°', '60°']
-        
         # Plot each latent space
         for col_idx, (space_2d, labels, title) in enumerate(latent_spaces):
             # Top row: color by digit label
             scatter1 = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1], 
-                                          c=labels, cmap='tab10', alpha=0.7)
+                                          c=y_labels, cmap='tab10', alpha=0.7)
             axes[0, col_idx].set_title(f'{title}\nColored by Digit')
             axes[0, col_idx].legend(*scatter1.legend_elements(), title="Digits")
             
-            # Bottom row: color by rotation
+            # Middle row: color by rotation
             scatter2 = axes[1, col_idx].scatter(space_2d[:, 0], space_2d[:, 1], 
                                           c=r_labels, cmap='tab10', 
-                                          vmin=0, vmax=4,  # Set the range to match our rotation indices
+                                          vmin=0, vmax=5,  # Updated to match 6 rotation angles
                                           alpha=0.7)
             axes[1, col_idx].set_title(f'{title}\nColored by Rotation')
             # Create custom legend for rotations
             legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
-                                        markerfacecolor=plt.cm.tab10(i/4),  # Normalize to [0,1] range
+                                        markerfacecolor=plt.cm.tab10(i/5),  # Updated to match 6 rotation angles
                                         label=angle, markersize=10)
                              for i, angle in enumerate(rotation_angles)]
             axes[1, col_idx].legend(handles=legend_elements, title="Rotations")
+            
+            # Bottom row: color by RGB color
+            # Convert one-hot color labels to RGB values
+            if len(c_labels.shape) > 1:
+                rgb_colors = c_labels  # Already in RGB format
+            else:
+                # If labels are indices, convert to RGB
+                rgb_colors = np.zeros((len(c_labels), 3))
+                
+                # Define color mappings
+                color_mappings = {
+                    0: {'name': 'Blue', 'rgb': [0, 0, 1]},
+                    1: {'name': 'Green', 'rgb': [0, 1, 0]},
+                    2: {'name': 'Yellow', 'rgb': [1, 1, 0]},
+                    3: {'name': 'Cyan', 'rgb': [0, 1, 1]},
+                    4: {'name': 'Magenta', 'rgb': [1, 0, 1]},
+                    5: {'name': 'Orange', 'rgb': [1, 0.5, 0]},
+                    6: {'name': 'Red', 'rgb': [1, 0, 0]}
+                }
+                
+                # Print color distribution for verification
+                color_counts = {i: 0 for i in range(7)}
+                for color_idx in c_labels:
+                    color_counts[color_idx] += 1
+                
+                print("\nColor distribution in visualization:")
+                for idx, count in color_counts.items():
+                    print(f"{color_mappings[idx]['name']}: {count} samples")
+                
+                # Map colors
+                for i, color_idx in enumerate(c_labels):
+                    rgb_colors[i] = color_mappings[color_idx]['rgb']
+            
+            scatter3 = axes[2, col_idx].scatter(space_2d[:, 0], space_2d[:, 1], 
+                                          c=rgb_colors, alpha=0.7)
+            axes[2, col_idx].set_title(f'{title}\nColored by RGB')
+            # Create custom legend for colors
+            color_elements = [
+                plt.Line2D([0], [0], marker='o', color='w', 
+                          markerfacecolor='blue', label='Blue', markersize=10),
+                plt.Line2D([0], [0], marker='o', color='w', 
+                          markerfacecolor='green', label='Green', markersize=10),
+                plt.Line2D([0], [0], marker='o', color='w', 
+                          markerfacecolor='yellow', label='Yellow', markersize=10),
+                plt.Line2D([0], [0], marker='o', color='w', 
+                          markerfacecolor='cyan', label='Cyan', markersize=10),
+                plt.Line2D([0], [0], marker='o', color='w', 
+                          markerfacecolor='magenta', label='Magenta', markersize=10),
+                plt.Line2D([0], [0], marker='o', color='w', 
+                          markerfacecolor='orange', label='Orange', markersize=10),
+                plt.Line2D([0], [0], marker='o', color='w', 
+                          markerfacecolor='red', label='Red', markersize=10)
+            ]
+            axes[2, col_idx].legend(handles=color_elements, title="Colors")
         
         plt.tight_layout()
         if save_path:
@@ -493,172 +598,172 @@ class VAE(NModule):
             print(f"Latent space visualization saved to {save_path}")
         plt.close()
 
-    def visualize_disentanglement(self, dataloader, device, save_path=None):
-        """
-        Visualize disentanglement by showing how changing each latent space affects generation
-        while keeping others fixed.
-        """
-        self.eval()
+    # def visualize_disentanglement(self, dataloader, device, save_path=None):
+    #     """
+    #     Visualize disentanglement by showing how changing each latent space affects generation
+    #     while keeping others fixed.
+    #     """
+    #     self.eval()
         
-        # Get a batch of data
-        x, y, c, r = next(iter(dataloader))  # Changed to unpack 4 values
-        x = x.to(device)
-        y = y.to(device)
-        r = r.to(device)  # Using r (rotation) as domain label
+    #     # Get a batch of data
+    #     x, y, c, r = next(iter(dataloader))  # Changed to unpack 4 values
+    #     x = x.to(device)
+    #     y = y.to(device)
+    #     r = r.to(device)  # Using r (rotation) as domain label
         
-        # Get base latent representations
-        z_loc, _ = self.qz(x)
-        zy_base = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
-        zx_base = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
-        if self.diva:
-            zay_base = None
-        else:
-            zay_base = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
-        za_base = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
+    #     # Get base latent representations
+    #     z_loc, _ = self.qz(x)
+    #     zy_base = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
+    #     zx_base = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
+    #     if self.diva:
+    #         zay_base = None
+    #     else:
+    #         zay_base = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
+    #     za_base = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
         
-        # Create figure for visualization
-        if self.diva:
-            fig, axes = plt.subplots(3, 5, figsize=(20, 12))  # 3 rows for DIVA mode
-        else:
-            fig, axes = plt.subplots(4, 5, figsize=(20, 16))
+    #     # Create figure for visualization
+    #     if self.diva:
+    #         fig, axes = plt.subplots(3, 5, figsize=(20, 12))  # 3 rows for DIVA mode
+    #     else:
+    #         fig, axes = plt.subplots(4, 5, figsize=(20, 16))
         
-        # For each latent space, show how changing it affects generation
-        for i in range(5):  # Show 5 variations
-            # 1. Vary zy (label-specific)
-            zy_varied = zy_base.clone()
-            zy_varied[0] = zy_varied[0] * (1 + 0.5 * (i - 2))  # Scale the first sample
-            img_zy = self.px(zy_varied, zx_base, zay_base, za_base)[0].cpu()
-            axes[0, i].imshow(img_zy.permute(1, 2, 0).detach().numpy())
-            axes[0, i].set_title(f'zy variation {i-2}')
-            axes[0, i].axis('off')
+    #     # For each latent space, show how changing it affects generation
+    #     for i in range(5):  # Show 5 variations
+    #         # 1. Vary zy (label-specific)
+    #         zy_varied = zy_base.clone()
+    #         zy_varied[0] = zy_varied[0] * (1 + 0.5 * (i - 2))  # Scale the first sample
+    #         img_zy = self.px(zy_varied, zx_base, zay_base, za_base)[0].cpu()
+    #         axes[0, i].imshow(img_zy.permute(1, 2, 0).detach().numpy())
+    #         axes[0, i].set_title(f'zy variation {i-2}')
+    #         axes[0, i].axis('off')
             
-            # 2. Vary za (domain-specific)
-            za_varied = za_base.clone()
-            za_varied[0] = za_varied[0] * (1 + 0.5 * (i - 2))
-            img_za = self.px(zy_base, zx_base, zay_base, za_varied)[0].cpu()
-            axes[1, i].imshow(img_za.permute(1, 2, 0).detach().numpy())
-            axes[1, i].set_title(f'za variation {i-2}')
-            axes[1, i].axis('off')
+    #         # 2. Vary za (domain-specific)
+    #         za_varied = za_base.clone()
+    #         za_varied[0] = za_varied[0] * (1 + 0.5 * (i - 2))
+    #         img_za = self.px(zy_base, zx_base, zay_base, za_varied)[0].cpu()
+    #         axes[1, i].imshow(img_za.permute(1, 2, 0).detach().numpy())
+    #         axes[1, i].set_title(f'za variation {i-2}')
+    #         axes[1, i].axis('off')
             
-            # 3. Vary zay (domain-label interaction)
-            if not self.diva:
-                zay_varied = zay_base.clone()
-                zay_varied[0] = zay_varied[0] * (1 + 0.5 * (i - 2))
-                img_zay = self.px(zy_base, zx_base, zay_varied, za_base)[0].cpu()
-                axes[2, i].imshow(img_zay.permute(1, 2, 0).detach().numpy())
-                axes[2, i].set_title(f'zay variation {i-2}')
-                axes[2, i].axis('off')
+    #         # 3. Vary zay (domain-label interaction)
+    #         if not self.diva:
+    #             zay_varied = zay_base.clone()
+    #             zay_varied[0] = zay_varied[0] * (1 + 0.5 * (i - 2))
+    #             img_zay = self.px(zy_base, zx_base, zay_varied, za_base)[0].cpu()
+    #             axes[2, i].imshow(img_zay.permute(1, 2, 0).detach().numpy())
+    #             axes[2, i].set_title(f'zay variation {i-2}')
+    #             axes[2, i].axis('off')
             
-            # 4. Vary zx (residual)
-            zx_varied = zx_base.clone()
-            zx_varied[0] = zx_varied[0] * (1 + 0.5 * (i - 2))
-            img_zx = self.px(zy_base, zx_varied, zay_base, za_base)[0].cpu()
-            if self.diva:
-                axes[2, i].imshow(img_zx.permute(1, 2, 0).detach().numpy())
-                axes[2, i].set_title(f'zx variation {i-2}')
-                axes[2, i].axis('off')
-            else:
-                axes[3, i].imshow(img_zx.permute(1, 2, 0).detach().numpy())
-                axes[3, i].set_title(f'zx variation {i-2}')
-                axes[3, i].axis('off')
+    #         # 4. Vary zx (residual)
+    #         zx_varied = zx_base.clone()
+    #         zx_varied[0] = zx_varied[0] * (1 + 0.5 * (i - 2))
+    #         img_zx = self.px(zy_base, zx_varied, zay_base, za_base)[0].cpu()
+    #         if self.diva:
+    #             axes[2, i].imshow(img_zx.permute(1, 2, 0).detach().numpy())
+    #             axes[2, i].set_title(f'zx variation {i-2}')
+    #             axes[2, i].axis('off')
+    #         else:
+    #             axes[3, i].imshow(img_zx.permute(1, 2, 0).detach().numpy())
+    #             axes[3, i].set_title(f'zx variation {i-2}')
+    #             axes[3, i].axis('off')
         
-        # Add row labels
-        axes[0, 0].set_ylabel('Label-specific (zy)', size='large')
-        axes[1, 0].set_ylabel('Domain-specific (za)', size='large')
-        if not self.diva:
-            axes[2, 0].set_ylabel('Domain-Label (zay)', size='large')
-            axes[3, 0].set_ylabel('Residual (zx)', size='large')
-        else:
-            axes[2, 0].set_ylabel('Residual (zx)', size='large')
+    #     # Add row labels
+    #     axes[0, 0].set_ylabel('Label-specific (zy)', size='large')
+    #     axes[1, 0].set_ylabel('Domain-specific (za)', size='large')
+    #     if not self.diva:
+    #         axes[2, 0].set_ylabel('Domain-Label (zay)', size='large')
+    #         axes[3, 0].set_ylabel('Residual (zx)', size='large')
+    #     else:
+    #         axes[2, 0].set_ylabel('Residual (zx)', size='large')
         
-        plt.tight_layout()
-        if save_path:
-            plt.savefig(save_path)
-            print(f"Disentanglement visualization saved to {save_path}")
-        plt.close()
+    #     plt.tight_layout()
+    #     if save_path:
+    #         plt.savefig(save_path)
+    #         print(f"Disentanglement visualization saved to {save_path}")
+    #     plt.close()
 
-    def visualize_latent_correlations(self, dataloader, device, save_path=None):
-        """
-        Visualize correlations between different latent spaces to show disentanglement
-        """
-        self.eval()
-        zy_list, za_list, zay_list, zx_list = [], [], [], []
+    # def visualize_latent_correlations(self, dataloader, device, save_path=None):
+    #     """
+    #     Visualize correlations between different latent spaces to show disentanglement
+    #     """
+    #     self.eval()
+    #     zy_list, za_list, zay_list, zx_list = [], [], [], []
         
-        with torch.no_grad():
-            for x, y, c, r in dataloader:  # Changed to unpack 4 values
-                x = x.to(device)
-                z_loc, _ = self.qz(x)
-                zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
-                zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
-                if self.diva:
-                    zay = None
-                else:
-                    zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
-                za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
+    #     with torch.no_grad():
+    #         for x, y, c, r in dataloader:  # Changed to unpack 4 values
+    #             x = x.to(device)
+    #             z_loc, _ = self.qz(x)
+    #             zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
+    #             zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
+    #             if self.diva:
+    #                 zay = None
+    #             else:
+    #                 zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
+    #             za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
                 
-                zy_list.append(zy.cpu().numpy())
-                za_list.append(za.cpu().numpy())
-                if not self.diva:
-                    zay_list.append(zay.cpu().numpy())
-                zx_list.append(zx.cpu().numpy())
+    #             zy_list.append(zy.cpu().numpy())
+    #             za_list.append(za.cpu().numpy())
+    #             if not self.diva:
+    #                 zay_list.append(zay.cpu().numpy())
+    #             zx_list.append(zx.cpu().numpy())
         
-        # Convert to numpy arrays
-        zy = np.concatenate(zy_list, axis=0)
-        za = np.concatenate(za_list, axis=0)
-        if not self.diva:
-            zay = np.concatenate(zay_list, axis=0)
-        zx = np.concatenate(zx_list, axis=0)
+    #     # Convert to numpy arrays
+    #     zy = np.concatenate(zy_list, axis=0)
+    #     za = np.concatenate(za_list, axis=0)
+    #     if not self.diva:
+    #         zay = np.concatenate(zay_list, axis=0)
+    #     zx = np.concatenate(zx_list, axis=0)
         
-        # Calculate correlations
-        corr_zy_za = np.corrcoef(zy.T, za.T)
-        corr_zy_zx = np.corrcoef(zy.T, zx.T)
-        corr_za_zx = np.corrcoef(za.T, zx.T)
-        if not self.diva:
-            corr_zy_zay = np.corrcoef(zy.T, zay.T)
-            corr_za_zay = np.corrcoef(za.T, zay.T)
-            corr_zx_zay = np.corrcoef(zx.T, zay.T)
+    #     # Calculate correlations
+    #     corr_zy_za = np.corrcoef(zy.T, za.T)
+    #     corr_zy_zx = np.corrcoef(zy.T, zx.T)
+    #     corr_za_zx = np.corrcoef(za.T, zx.T)
+    #     if not self.diva:
+    #         corr_zy_zay = np.corrcoef(zy.T, zay.T)
+    #         corr_za_zay = np.corrcoef(za.T, zay.T)
+    #         corr_zx_zay = np.corrcoef(zx.T, zay.T)
         
-        # Create correlation heatmaps
-        if self.diva:
-            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-        else:
-            fig, axes = plt.subplots(2, 2, figsize=(15, 15))
+    #     # Create correlation heatmaps
+    #     if self.diva:
+    #         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    #     else:
+    #         fig, axes = plt.subplots(2, 2, figsize=(15, 15))
         
-        # Plot correlations
-        if self.diva:
-            im1 = axes[0].imshow(corr_zy_za, cmap='RdBu', vmin=-1, vmax=1)
-            axes[0].set_title('zy vs za correlation')
-            plt.colorbar(im1, ax=axes[0])
+    #     # Plot correlations
+    #     if self.diva:
+    #         im1 = axes[0].imshow(corr_zy_za, cmap='RdBu', vmin=-1, vmax=1)
+    #         axes[0].set_title('zy vs za correlation')
+    #         plt.colorbar(im1, ax=axes[0])
             
-            im2 = axes[1].imshow(corr_zy_zx, cmap='RdBu', vmin=-1, vmax=1)
-            axes[1].set_title('zy vs zx correlation')
-            plt.colorbar(im2, ax=axes[1])
+    #         im2 = axes[1].imshow(corr_zy_zx, cmap='RdBu', vmin=-1, vmax=1)
+    #         axes[1].set_title('zy vs zx correlation')
+    #         plt.colorbar(im2, ax=axes[1])
             
-            im3 = axes[2].imshow(corr_za_zx, cmap='RdBu', vmin=-1, vmax=1)
-            axes[2].set_title('za vs zx correlation')
-            plt.colorbar(im3, ax=axes[2])
-        else:
-            im1 = axes[0, 0].imshow(corr_zy_za, cmap='RdBu', vmin=-1, vmax=1)
-            axes[0, 0].set_title('zy vs za correlation')
-            plt.colorbar(im1, ax=axes[0, 0])
+    #         im3 = axes[2].imshow(corr_za_zx, cmap='RdBu', vmin=-1, vmax=1)
+    #         axes[2].set_title('za vs zx correlation')
+    #         plt.colorbar(im3, ax=axes[2])
+    #     else:
+    #         im1 = axes[0, 0].imshow(corr_zy_za, cmap='RdBu', vmin=-1, vmax=1)
+    #         axes[0, 0].set_title('zy vs za correlation')
+    #         plt.colorbar(im1, ax=axes[0, 0])
             
-            im2 = axes[0, 1].imshow(corr_zy_zx, cmap='RdBu', vmin=-1, vmax=1)
-            axes[0, 1].set_title('zy vs zx correlation')
-            plt.colorbar(im2, ax=axes[0, 1])
+    #         im2 = axes[0, 1].imshow(corr_zy_zx, cmap='RdBu', vmin=-1, vmax=1)
+    #         axes[0, 1].set_title('zy vs zx correlation')
+    #         plt.colorbar(im2, ax=axes[0, 1])
             
-            im3 = axes[1, 0].imshow(corr_za_zx, cmap='RdBu', vmin=-1, vmax=1)
-            axes[1, 0].set_title('za vs zx correlation')
-            plt.colorbar(im3, ax=axes[1, 0])
+    #         im3 = axes[1, 0].imshow(corr_za_zx, cmap='RdBu', vmin=-1, vmax=1)
+    #         axes[1, 0].set_title('za vs zx correlation')
+    #         plt.colorbar(im3, ax=axes[1, 0])
             
-            im4 = axes[1, 1].imshow(corr_zy_zay, cmap='RdBu', vmin=-1, vmax=1)
-            axes[1, 1].set_title('zy vs zay correlation')
-            plt.colorbar(im4, ax=axes[1, 1])
+    #         im4 = axes[1, 1].imshow(corr_zy_zay, cmap='RdBu', vmin=-1, vmax=1)
+    #         axes[1, 1].set_title('zy vs zay correlation')
+    #         plt.colorbar(im4, ax=axes[1, 1])
         
-        plt.tight_layout()
-        if save_path:
-            plt.savefig(save_path)
-            print(f"Latent correlation visualization saved to {save_path}")
-        plt.close()
+    #     plt.tight_layout()
+    #     if save_path:
+    #         plt.savefig(save_path)
+    #         print(f"Latent correlation visualization saved to {save_path}")
+    #     plt.close()
 
 
 
