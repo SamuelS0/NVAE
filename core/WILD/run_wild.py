@@ -20,6 +20,7 @@ from wilds.common.data_loaders import get_train_loader, get_eval_loader
 import torchvision.transforms as transforms
 import matplotlib.gridspec as gridspec
 import sys
+import time
 #from model_diva import DIVA_VAE
 from utils_wild import (
     prepare_data, 
@@ -48,98 +49,118 @@ command: python -B WILD/run_wild.py --out results_low_res_vae/ --batch_size 128 
 """
 
 def run_experiment(dataset, args):
-    # Create output directories
-    os.makedirs(args.out, exist_ok=True)
+    # Create output directories with progress indication
+    print("🚀 Setting up experiment...")
+    setup_tasks = [
+        ("Creating output directories", lambda: os.makedirs(args.out, exist_ok=True)),
+        ("Creating reconstructions directory", lambda: os.makedirs(os.path.join(args.out, 'reconstructions'), exist_ok=True)),
+        ("Creating models directory", lambda: os.makedirs(os.path.join(args.out, 'models'), exist_ok=True))
+    ]
+    
+    for desc, task in tqdm(setup_tasks, desc="Setup", unit="task"):
+        task()
+        time.sleep(0.1)  # Small delay for visual feedback
+    
     reconstructions_dir = os.path.join(args.out, 'reconstructions')
-    os.makedirs(reconstructions_dir, exist_ok=True)
     models_dir = os.path.join(args.out, 'models')
-    os.makedirs(models_dir, exist_ok=True)
     
     # Log some information
-    print(f"Starting WILD VAE training...")
-    #print(f"Config file: {args.config}")
-    print(f"Output directory: {args.out}")
-    print(f"Batch size: {args.batch_size}")
-    print(f"Learning rate: {args.learning_rate}")
-    print(f"Epochs: {args.epochs}")
-    print(f"Device: {args.device}")
+    print(f"\n📊 Experiment Configuration:")
+    print(f"  Output directory: {args.out}")
+    print(f"  Batch size: {args.batch_size}")
+    print(f"  Learning rate: {args.learning_rate}")
+    print(f"  Epochs: {args.epochs}")
+    print(f"  Resolution: {args.resolution}")
+    print(f"  Model: {args.model}")
+    print(f"  Device: {args.device}")
     
-    train_loader, val_loader, test_loader = prepare_data(dataset, args)
+    # Data preparation with progress bar
+    print("\n📁 Preparing datasets...")
+    with tqdm(total=3, desc="Data Prep", unit="dataset") as pbar:
+        pbar.set_postfix_str("Loading train/val/test loaders")
+        train_loader, val_loader, test_loader = prepare_data(dataset, args)
+        pbar.update(3)
 
     num_classes = 2
     num_domains = 5
-    print(f"Dataset dimensions: y_dim={num_classes}, r_dim={num_domains}")
+    print(f"\n🏥 Dataset dimensions: y_dim={num_classes}, domains={num_domains}")
 
-    
-    # Initialize model
-    model = initialize_model(args, num_classes, num_domains)
-    
-    # Move model to device
-    if args.cuda:
-        model = model.to(args.device)
-    
-    # Setup optimizer
-    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+    # Model initialization with progress bar
+    print("\n🧠 Initializing model...")
+    with tqdm(total=3, desc="Model Init", unit="step") as pbar:
+        pbar.set_postfix_str("Creating model architecture")
+        model = initialize_model(args, num_classes, num_domains)
+        pbar.update(1)
+        
+        pbar.set_postfix_str("Moving to device")
+        if args.cuda:
+            model = model.to(args.device)
+        pbar.update(1)
+        
+        pbar.set_postfix_str("Setting up optimizer")
+        optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+        pbar.update(1)
     
     # Early stopping setup
     patience = 10  # Number of epochs to wait for improvement
-
+    
+    print(f"\n🎯 Starting training for {args.epochs} epochs with patience={patience}...")
     training_metrics = train(args, model, optimizer, train_loader, val_loader, args.device, patience)
      
     # Save the best model
+    print("\n💾 Saving final model...")
     final_model_path = os.path.join(models_dir, f"model_checkpoint_epoch_{training_metrics['best_model_epoch']}.pt")
     torch.save(model.state_dict(), final_model_path)
-    # Load best model for final evaluation
-    
     
     if training_metrics['best_model_state'] is not None:
         model.load_state_dict(training_metrics['best_model_state'])
-        print("Loaded best model for final evaluation")
+        print("✅ Loaded best model for final evaluation")
     
-    # Final evaluation
-    print("\nEvaluating model on test set...")
-    
-    # Add tqdm progress bar for final evaluation
-    #model.eval()
-    test_loss = 0
-    metrics_sum = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
+    # Final evaluation with progress indication
+    print("\n🧪 Evaluating model on test set...")
     
     # Select a diverse sample batch with images from all domains
-    test_sample_batch = select_diverse_sample_batch(test_loader, data_type = 'test', samples_per_domain=10)
+    print("  📊 Selecting diverse test samples...")
+    test_sample_batch = select_diverse_sample_batch(test_loader, data_type='test', samples_per_domain=10)
     
-    test_loss, metrics_avg = test(model,args.device, test_loader, args)
+    print("  🔍 Running test evaluation...")
+    test_loss, metrics_avg = test(model, args.device, test_loader, args)
     
-    print(f'Test Loss: {test_loss:.4f}')
+    print(f'\n📈 Final Test Results:')
+    print(f'  Test Loss: {test_loss:.4f}')
     for k, v in metrics_avg.items():
-        print(f'Test {k}: {v:.4f}')
+        print(f'  Test {k}: {v:.4f}')
     
     final_test_loss, final_metrics, test_sample_batch = test_loss, metrics_avg, test_sample_batch
     
-    # Generate final reconstructions
-    image_dir = os.path.join(reconstructions_dir, f'test_reconstructions.png')
-    visualize_reconstructions(model, 'test', test_sample_batch, image_dir=image_dir, args=args)
-
-    # Generate and visualize conditional samples
-    # visualize_conditional_generation(model, args.device, reconstructions_dir)
-    
-    # Save training results as JSON
-    results = {
-        'final_test_loss': final_test_loss,
-        'final_metrics': final_metrics,
-        'best_validation_loss': training_metrics['best_validation_loss'],
-        'total_epochs_trained': training_metrics['total_epochs_trained']
-    }
-    
-    results_path = os.path.join(args.out, 'results.json')
-    with open(results_path, 'w') as f:
-        # Convert values to strings since some may not be JSON serializable
-        serializable_results = {
-            k: str(v) if not isinstance(v, dict) else {k2: str(v2) for k2, v2 in v.items()}
-            for k, v in results.items()
+    # Generate final reconstructions with progress
+    print("\n🎨 Generating visualizations...")
+    with tqdm(total=2, desc="Visualizations", unit="plot") as pbar:
+        pbar.set_postfix_str("Test reconstructions")
+        image_dir = os.path.join(reconstructions_dir, f'test_reconstructions.png')
+        visualize_reconstructions(model, 'test', test_sample_batch, image_dir=image_dir, args=args)
+        pbar.update(1)
+        
+        pbar.set_postfix_str("Saving results")
+        # Save training results as JSON
+        results = {
+            'final_test_loss': final_test_loss,
+            'final_metrics': final_metrics,
+            'best_validation_loss': training_metrics['best_validation_loss'],
+            'total_epochs_trained': training_metrics['total_epochs_trained']
         }
-        json.dump(serializable_results, f, indent=2)
+        
+        results_path = os.path.join(args.out, 'results.json')
+        with open(results_path, 'w') as f:
+            # Convert values to strings since some may not be JSON serializable
+            serializable_results = {
+                k: str(v) if not isinstance(v, dict) else {k2: str(v2) for k2, v2 in v.items()}
+                for k, v in results.items()
+            }
+            json.dump(serializable_results, f, indent=2)
+        pbar.update(1)
     
-    print(f"Results saved to {results_path}")
+    print(f"💾 Results saved to {results_path}")
     
     return model
 
@@ -225,101 +246,59 @@ def initialize_model(args, num_classes, num_domains):
 
 
 if __name__ == "__main__":
+    print("🔬 WILD VAE Training Pipeline")
+    print("=" * 50)
+    
+    # Parse arguments
     args = get_args()
     args.cuda = args.cuda and torch.cuda.is_available()
     args.device = torch.device("cuda" if args.cuda else "cpu")
-    #run_experiment(args)
-
-    dataset = get_dataset(
-            dataset="camelyon17", 
-            download=False, 
-            root_dir='/midtier/cocolab/scratch/ofn9004/WILD',
-            unlabeled=False
-        )
-    # Run experiment
+    
+    # Dataset loading with progress
+    print("\n📦 Loading Camelyon17 dataset...")
+    with tqdm(total=1, desc="Dataset", unit="dataset") as pbar:
+        pbar.set_postfix_str("Loading from WILDS")
+        dataset = get_dataset(
+                dataset="camelyon17", 
+                download=False, 
+                root_dir='/midtier/cocolab/scratch/ofn9004/WILD',
+                unlabeled=False
+            )
+        pbar.update(1)
+    
+    # Run main experiment
+    print("\n🎯 Running main experiment...")
     model = run_experiment(dataset, args)
     
+    # Post-training analysis with progress bars
+    print("\n🔬 Running post-training analysis...")
+    
     model.eval()
-
-    transform = transforms.Compose(
-        [transforms.ToTensor()]
-    )
+    
+    # Prepare validation data for latent analysis
+    print("  📊 Preparing validation data for latent analysis...")
+    transform = transforms.Compose([transforms.ToTensor()])
     final_val_data = dataset.get_subset(args.val_type, transform=transform)
     val_loader = get_train_loader("standard", final_val_data, batch_size=10)
     val_x, val_y, val_metadata = next(iter(val_loader))
     
+    # Generate latent space analysis with progress
     latent_recon_dir = os.path.join(args.out, 'latent_recon')
-    generate_images_latent(model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='without', args=args)
-    generate_images_latent(model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='only', args=args)
-
-
-
-    '''num_classes = 2
-    num_domains = 5
-    model = VAE(class_map=None,  
-            zy_dim=args.zy_dim,
-            zx_dim=args.zx_dim,
-            zay_dim=args.zay_dim,
-            za_dim=args.za_dim,
-            y_dim=num_classes,
-            a_dim=num_domains,
-            beta_1=args.beta_1,
-            beta_2=args.beta_2,
-            beta_3=args.beta_3,
-            beta_4=args.beta_4,
-            device=args.device)
-    model_dir = os.path.join(args.out, 'models')
-    model.load_state_dict(torch.load( os.path.join(model_dir, 'model_best.pt')))
-# Move model to device
-    if args.cuda:
-        model = model.to(args.device)
-    #visualize_conditional_generation(model, args.device, 'con_recon_0')
-    latent_recon_dir = os.path.join(args.out, 'latent_recon')
+    os.makedirs(latent_recon_dir, exist_ok=True)
     
-    labeled_dataset = get_dataset(dataset="camelyon17", download=False, root_dir='/midtier/cocolab/scratch/ofn9004/WILD', unlabeled=False)
-    train_data = labeled_dataset.get_subset('train', transform=transforms.Compose([
-        transforms.Resize((448, 448)), transforms.ToTensor()
-    ]))
-
-    train_loader = get_train_loader("standard", train_data, batch_size=10)
-    train_x, train_y, train_metadata = next(iter(train_loader))
-    generate_images_latent(model, args.device, 'train', latent_recon_dir, train_x, train_y, train_metadata, mode='without')
-    generate_images_latent(model, args.device, 'train', latent_recon_dir, train_x, train_y, train_metadata, mode='only')
+    latent_analysis_tasks = [
+        ("Latent analysis (without components)", lambda: generate_images_latent(
+            model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='without', args=args)),
+        ("Latent analysis (individual components)", lambda: generate_images_latent(
+            model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='only', args=args))
+    ]
     
+    for desc, task in tqdm(latent_analysis_tasks, desc="Latent Analysis", unit="analysis"):
+        task()
     
-    train_data = labeled_dataset.get_subset('id_val', transform=transforms.Compose([
-        transforms.Resize((448, 448)), transforms.ToTensor()
-    ]))
-    val_loader = get_train_loader("standard", train_data, batch_size=10)
-    val_x, val_y, val_metadata = next(iter(val_loader))
-    
-    generate_images_latent(model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='without')
-    generate_images_latent(model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='only')'''
-    
-    
-    
-    '''domain_samples_dir = os.path.join(args.out, 'domain_samples')
-    os.makedirs(domain_samples_dir, exist_ok=True)
-
-
-
-    labeled_dataset = get_dataset(dataset="camelyon17", download=False, root_dir='/midtier/cocolab/scratch/ofn9004/WILD',unlabeled=False)
-
-    val_data = labeled_dataset.get_subset(
-    "test",  # or "val" for OOD validation
-    transform=transforms.Compose(
-        [transforms.Resize((448, 448)), transforms.ToTensor()]
-    ))
-
-# Prepare data loaders
-    val_loader = get_train_loader("standard", val_data, batch_size=args.batch_size)  # Use get_eval_loader for validation
-    val_sample_batch = select_diverse_sample_batch(val_loader, args, samples_per_domain=10)
-        # Save domain samples visualization
-
-    save_domain_samples_visualization(*val_sample_batch, 10+1, domain_samples_dir)
-    
-    # Visualize reconstructions
-    visualize_reconstructions(10+1, val_sample_batch)'''
+    print("\n🎉 Training and analysis complete!")
+    print(f"📁 All results saved to: {args.out}")
+    print("=" * 50)
 
 
 
