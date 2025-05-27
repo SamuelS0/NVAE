@@ -14,6 +14,7 @@ import torch.optim as optim
 import os
 import numpy as np
 from scipy import stats
+import datetime
 
 """
     Training and evaluation of NVAE, DIVA, DANN, and IRM models
@@ -571,6 +572,106 @@ def analyze_domain_distribution(train_loader, test_loader, num_domains=6):
     
     return train_domain_counts, test_domain_counts
 
+def generate_param_based_dirname(args):
+    """
+    Generate a directory name based on key model parameters.
+    
+    Args:
+        args: Command line arguments
+        
+    Returns:
+        str: Directory name based on parameters
+    """
+    # Create a descriptive directory name based on key parameters
+    param_parts = [
+        f"alpha1-{args.alpha_1}",
+        f"alpha2-{args.alpha_2}",
+        f"zy{args.zy_dim}",
+        f"zx{args.zx_dim}",
+        f"zay{args.zay_dim}",
+        f"za{args.za_dim}",
+        f"b1-{args.beta_1}",
+        f"b2-{args.beta_2}",
+        f"b3-{args.beta_3}",
+        f"b4-{args.beta_4}",
+        f"ep{args.epochs}",
+        f"bs{args.batch_size}",
+        f"lr{args.learning_rate}"
+    ]
+    
+    # Join with underscores and limit length
+    param_dirname = "_".join(param_parts)
+    
+    # Add timestamp to ensure uniqueness if parameters are identical
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    param_dirname = f"{param_dirname}_{timestamp}"
+    
+    return param_dirname
+
+def save_model_args(args, output_dir):
+    """
+    Save model arguments to a text file in the output directory.
+    
+    Args:
+        args: Command line arguments
+        output_dir: Directory to save the arguments file
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Define model-related arguments to save
+    model_args = {
+        'Model Architecture Parameters': {
+            'zy_dim': args.zy_dim,
+            'zx_dim': args.zx_dim,
+            'zay_dim': args.zay_dim,
+            'za_dim': args.za_dim,
+        },
+        'Loss Weight Parameters': {
+            'beta_1': args.beta_1,
+            'beta_2': args.beta_2,
+            'beta_3': args.beta_3,
+            'beta_4': args.beta_4,
+            'alpha_1': args.alpha_1,
+            'alpha_2': args.alpha_2,
+        },
+        'Training Parameters': {
+            'epochs': args.epochs,
+            'batch_size': args.batch_size,
+            'learning_rate': args.learning_rate,
+        },
+        'Data Parameters': {
+            'intensity': args.intensity,
+            'intensity_decay': args.intensity_decay,
+        },
+        'Experiment Settings': {
+            'setting': args.setting,
+            'mode': args.mode,
+            'config': args.config,
+            'device': str(args.device),
+            'cuda': args.cuda,
+            'num_workers': args.num_workers,
+        }
+    }
+    
+    # Save to text file
+    args_file_path = os.path.join(output_dir, 'model_arguments.txt')
+    
+    with open(args_file_path, 'w') as f:
+        f.write("CRMNIST Evaluation - Model Arguments\n")
+        f.write("=" * 50 + "\n")
+        f.write(f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        for category, params in model_args.items():
+            f.write(f"{category}:\n")
+            f.write("-" * len(category) + "\n")
+            for param_name, param_value in params.items():
+                f.write(f"  {param_name}: {param_value}\n")
+            f.write("\n")
+    
+    print(f"Model arguments saved to: {args_file_path}")
+    return args_file_path
+
 def prep_domain_data(spec_data):
     # Prepare domain data
     domain_data = {int(key): value for key, value in spec_data['domain_data'].items()}
@@ -597,6 +698,19 @@ def run_experiment(args):
         raise FileNotFoundError(f"Config file not found: {args.config}")
     if not hasattr(args, 'out') or args.out is None:
         raise ValueError("Output directory must be specified")
+    
+    # Generate parameter-based subdirectory
+    param_dirname = generate_param_based_dirname(args)
+    param_output_dir = os.path.join(args.out, param_dirname)
+    
+    print(f"Parameter-based output directory: {param_output_dir}")
+    
+    # Save model arguments to text file in the parameter-specific directory
+    save_model_args(args, param_output_dir)
+    
+    # Update args.out to use the parameter-specific directory for all subsequent operations
+    original_out = args.out
+    args.out = param_output_dir
     
     mode = args.mode
     print(f"Running in {mode} mode")
@@ -850,6 +964,8 @@ if __name__ == "__main__":
     parser.add_argument('--beta_2', type=float, default=1.0)
     parser.add_argument('--beta_3', type=float, default=1.0)
     parser.add_argument('--beta_4', type=float, default=1.0)
+    parser.add_argument('--alpha_1', type=float, default=1.0, help='Weight for y (digit) classifier loss')
+    parser.add_argument('--alpha_2', type=float, default=2.0, help='Weight for a (domain) classifier loss')
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--setting', type=str, default='cross-domain', choices=['holdout', 'cross-domain'])

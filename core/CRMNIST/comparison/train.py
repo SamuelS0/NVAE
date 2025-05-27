@@ -26,6 +26,8 @@ def train_nvae(args, spec_data, train_loader, test_loader, models_dir):
                beta_2=args.beta_2,
                beta_3=args.beta_3,
                beta_4=args.beta_4,
+               alpha_1=args.alpha_1,
+               alpha_2=args.alpha_2,
                diva=False)
     
     # Move model to device
@@ -52,6 +54,8 @@ def train_nvae(args, spec_data, train_loader, test_loader, models_dir):
         'beta_2': args.beta_2,
         'beta_3': args.beta_3,
         'beta_4': args.beta_4,
+        'alpha_1': args.alpha_1,
+        'alpha_2': args.alpha_2,
         'diva': False
     }
     
@@ -77,6 +81,8 @@ def train_diva(args, spec_data, train_loader, test_loader, models_dir):
                beta_2=args.beta_2,
                beta_3=args.beta_3,
                beta_4=args.beta_4,
+               alpha_1=args.alpha_1,
+               alpha_2=args.alpha_2,
                diva=True)
     
     # Move model to device
@@ -103,6 +109,8 @@ def train_diva(args, spec_data, train_loader, test_loader, models_dir):
         'beta_2': args.beta_2,
         'beta_3': args.beta_3,
         'beta_4': args.beta_4,
+        'alpha_1': args.alpha_1,
+        'alpha_2': args.alpha_2,
         'diva': True
     }
     

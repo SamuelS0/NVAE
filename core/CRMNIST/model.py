@@ -68,9 +68,9 @@ class VAE(NModule):
         self.class_map = class_map
 
         if diva:
-            assert zay_dim % 3 == 0, "zay_dim must be divisible by 3"
+            
 
-            extra_dim = zay_dim // 3
+            extra_dim = max(zay_dim // 3, 1)
 
             self.zy_dim = zy_dim + extra_dim
             self.zx_dim = zx_dim + extra_dim
