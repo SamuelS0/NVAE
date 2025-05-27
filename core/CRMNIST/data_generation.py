@@ -5,7 +5,7 @@ import torch.utils.data as data_utils
 import random
 from torch.utils.data import Dataset, DataLoader, ConcatDataset, Subset
 from torchvision import datasets, transforms
-from torchvision.transforms import functional, ToTensor as F, ToTensor
+from torchvision.transforms import functional, ToTensor
 from PIL import Image
 import torch.nn.functional as F
 import core.CRMNIST.utils

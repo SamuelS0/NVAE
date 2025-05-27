@@ -62,7 +62,20 @@ class DANN(nn.Module):
         )
 
         self.domain_discriminator = DomainDiscriminator(self.z_dim, self.num_r_classes)
-        self.classifier = nn.Linear(self.z_dim, self.num_y_classes)
+        
+        # Changed: Classifier now matches VAE's qy architecture
+        self.classifier = nn.Sequential(
+            nn.Linear(self.z_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, self.num_y_classes),
+            nn.ReLU(),
+            nn.Linear(self.num_y_classes, self.num_y_classes)
+        )
+        
+        # Initialize classifier weights to match VAE's qy initialization
+        torch.nn.init.xavier_uniform_(self.classifier[0].weight)
+        with torch.no_grad():
+            self.classifier[0].bias.zero_()
 
     def forward(self, x, y, r):
         # Ensure input is float type
@@ -70,7 +83,10 @@ class DANN(nn.Module):
         features = self.feature_extractor(x)
         reversed_features = grad_reverse(features)
         domain_predictions = self.domain_discriminator(reversed_features, 1.0)
-        y_predictions = self.classifier(features)
+        
+        # Changed: Use the new multi-layer classifier
+        y_logits = self.classifier(features)
+        y_predictions = torch.softmax(y_logits, dim=1)
 
         return y_predictions, domain_predictions
     

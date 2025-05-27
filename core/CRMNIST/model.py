@@ -320,6 +320,8 @@ class VAE(NModule):
             max_samples: Maximum number of samples to use for visualization
         """
         self.eval()
+        
+        # Initialize lists to store latent vectors and labels
         zy_list, za_list, zay_list, zx_list = [], [], [], []
         y_list, c_list, r_list = [], [], []
         
@@ -331,11 +333,16 @@ class VAE(NModule):
         }
         
         # Target samples per category
-        target_samples = 200
+        target_samples = min(200, max_samples // 30)  # Ensure we don't exceed max_samples
+        total_collected = 0
         
-        # Collect data in batches
+        # Collect data in batches with memory management
         with torch.no_grad():
             for i, (x, y, c, r) in enumerate(dataloader):
+                # Early stopping if we've collected enough samples
+                if total_collected >= max_samples:
+                    break
+                    
                 x = x.to(device)
                 y = y.to(device)
                 c = c.to(device)
@@ -350,10 +357,13 @@ class VAE(NModule):
                     r = torch.argmax(r, dim=1)
                 
                 # Create mask for samples we want to keep
-                keep_mask = torch.ones(len(y), dtype=torch.bool, device=device)
+                keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
                 
                 # Check each sample
                 for j in range(len(y)):
+                    if total_collected >= max_samples:
+                        break
+                        
                     digit = y[j].item()
                     color = c[j].item()
                     rotation = r[j].item()
@@ -367,43 +377,48 @@ class VAE(NModule):
                         counts['digit'][digit] += 1
                         counts['rotation'][rotation] += 1
                         counts['color'][color] += 1
-                    else:
-                        keep_mask[j] = False
+                        total_collected += 1
                 
                 # Apply mask to get only samples we want to keep
-                x = x[keep_mask]
-                y = y[keep_mask]
-                c = c[keep_mask]
-                r = r[keep_mask]
+                if keep_mask.any():
+                    x_batch = x[keep_mask]
+                    y_batch = y[keep_mask]
+                    c_batch = c[keep_mask]
+                    r_batch = r[keep_mask]
+                    
+                    # Get latent representations for this batch
+                    z_loc, _ = self.qz(x_batch)
+                    zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
+                    zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
+                    if self.diva:
+                        zay = None
+                    else:
+                        zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
+                    za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
+                    
+                    # Move to CPU and store to save GPU memory
+                    zy_list.append(zy.cpu())
+                    za_list.append(za.cpu())
+                    if not self.diva:
+                        zay_list.append(zay.cpu())
+                    zx_list.append(zx.cpu())
+                    y_list.append(y_batch.cpu())
+                    c_list.append(c_batch.cpu())
+                    r_list.append(r_batch.cpu())
+                    
+                    # Clear GPU cache periodically
+                    if i % 10 == 0:
+                        torch.cuda.empty_cache() if torch.cuda.is_available() else None
                 
-                if len(x) == 0:  # Skip if no samples to keep
-                    continue
-                
-                # Get latent representations
-                z_loc, _ = self.qz(x)
-                zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
-                zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
-                if self.diva:
-                    zay = None
-                else:
-                    zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
-                za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
-                
-                # Store latent vectors and labels
-                zy_list.append(zy)
-                za_list.append(za)
-                if not self.diva:
-                    zay_list.append(zay)
-                zx_list.append(zx)
-                y_list.append(y)
-                c_list.append(c)
-                r_list.append(r)
-                
-                # Check if we have enough samples for all categories
-                if all(count >= target_samples for count in counts['digit'].values()) and \
-                   all(count >= target_samples for count in counts['rotation'].values()) and \
-                   all(count >= target_samples for count in counts['color'].values()):
+                # Memory management: limit the number of batches we process
+                if i > 100:  # Process at most 100 batches
                     break
+        
+        # Check if we collected any data
+        if not zy_list:
+            raise ValueError("No data was collected for visualization. Check your dataloader and sampling criteria.")
+        
+        print(f"\nCollected {total_collected} samples total")
         
         # Print sample counts
         print("\nNumber of samples per category:")
@@ -423,7 +438,7 @@ class VAE(NModule):
         print(f"\nTotal samples: {total_samples}")
         print(f"Average samples per category: {total_samples / (10 + 6 + 7):.1f}")
         
-        # Concatenate tensors on GPU
+        # Concatenate tensors on CPU to save memory
         zy = torch.cat(zy_list, dim=0)
         za = torch.cat(za_list, dim=0)
         if not self.diva:
@@ -432,8 +447,12 @@ class VAE(NModule):
         y_labels = torch.cat(y_list, dim=0)
         c_labels = torch.cat(c_list, dim=0)
         r_labels = torch.cat(r_list, dim=0)
-
         
+        # Clear the lists to free memory
+        del zy_list, za_list, zx_list, y_list, c_list, r_list
+        if not self.diva:
+            del zay_list
+
         # Convert one-hot encoded labels to single dimension
         if len(c_labels.shape) > 1:
             c_labels = torch.argmax(c_labels, dim=1)

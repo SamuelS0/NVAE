@@ -5,6 +5,8 @@ import os
 import torch
 from core.CRMNIST.comparison.dann import DANN
 from core.CRMNIST.comparison.dann_trainer import DANNTrainer
+from core.CRMNIST.comparison.irm import IRM
+import numpy as np
 
 """
     Train NVAE and comparison models
@@ -53,10 +55,11 @@ def train_nvae(args, spec_data, train_loader, test_loader, models_dir):
         'diva': False
     }
     
-    torch.save({
-        'params': model_params,
-        'state_dict': nvae.state_dict()
-    }, os.path.join(models_dir, "nvae_checkpoint.pt"))
+    if models_dir:
+        torch.save({
+            'params': model_params,
+            'state_dict': nvae.state_dict()
+        }, os.path.join(models_dir, "nvae_checkpoint.pt"))
 
     return nvae, training_metrics
 
@@ -103,10 +106,11 @@ def train_diva(args, spec_data, train_loader, test_loader, models_dir):
         'diva': True
     }
     
-    torch.save({
-        'params': model_params,
-        'state_dict': diva.state_dict()
-    }, os.path.join(models_dir, "diva_checkpoint.pt"))
+    if models_dir:
+        torch.save({
+            'params': model_params,
+            'state_dict': diva.state_dict()
+        }, os.path.join(models_dir, "diva_checkpoint.pt"))
 
     return diva, training_metrics
 
@@ -132,9 +136,100 @@ def train_dann(args, spec_data, train_loader, test_loader, models_dir):
         'z_dim': z_dim
     }
     
-    torch.save({
-        'params': model_params,
-        'state_dict': dann.state_dict()
-    }, os.path.join(models_dir, "dann_checkpoint.pt"))
+    if models_dir:
+        torch.save({
+            'params': model_params,
+            'state_dict': dann.state_dict()
+        }, os.path.join(models_dir, "dann_checkpoint.pt"))
 
     return dann, training_metrics
+
+def train_irm(args, spec_data, train_loader, test_loader, models_dir, seed=None):
+    """
+    Train IRM model
+    """
+    print("Training IRM...")
+    
+    # Set random seed if provided
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+    
+    # latent dimension is the sum of all split latent dimensions
+    z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
+    
+    irm = IRM(spec_data, z_dim, penalty_weight=1e4, penalty_anneal_iters=500)
+    irm = irm.to(args.device)
+    
+    optimizer = optim.Adam(irm.parameters(), lr=args.learning_rate)
+    
+    # Simple training loop for IRM
+    best_val_acc = 0.0
+    best_model_state = None
+    patience_counter = 0
+    patience = 5
+    
+    for epoch in range(args.epochs):
+        # Training
+        irm.train()
+        train_loss = 0
+        for x, y, c, r in train_loader:
+            x, y, r = x.to(args.device), y.to(args.device), r.to(args.device)
+            
+            optimizer.zero_grad()
+            irm_loss, class_loss, penalty = irm.loss_function(x, y, r)
+            irm_loss.backward()
+            optimizer.step()
+            train_loss += class_loss.item()
+        
+        # Validation
+        irm.eval()
+        val_correct = 0
+        val_total = 0
+        with torch.no_grad():
+            for x, y, c, r in test_loader:
+                x, y = x.to(args.device), y.to(args.device)
+                logits, _ = irm.forward(x)
+                predictions = torch.argmax(logits, dim=1)
+                val_correct += (predictions == y).sum().item()
+                val_total += y.size(0)
+        
+        val_acc = val_correct / val_total if val_total > 0 else 0.0
+        
+        # Early stopping
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_model_state = irm.state_dict().copy()
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                break
+    
+    # Load best model
+    if best_model_state is not None:
+        irm.load_state_dict(best_model_state)
+    
+    # Save model if models_dir is provided and not a seed run
+    if models_dir and seed is None:
+        model_params = {
+            'spec_data': spec_data,
+            'z_dim': z_dim,
+            'penalty_weight': 1e4,
+            'penalty_anneal_iters': 500
+        }
+        
+        torch.save({
+            'params': model_params,
+            'state_dict': irm.state_dict()
+        }, os.path.join(models_dir, "irm_checkpoint.pt"))
+    
+    training_metrics = {
+        'best_model_epoch': epoch + 1,
+        'best_validation_loss': 1.0 - best_val_acc,  # Convert accuracy to loss-like metric
+        'best_batch_metrics': {'y_accuracy': best_val_acc}
+    }
+    
+    return irm, training_metrics

@@ -2,25 +2,21 @@ from core.train import train
 from core.test import test_nvae, test_dann
 from core.CRMNIST.model import VAE
 from core.CRMNIST.comparison.dann import DANN
+from core.CRMNIST.comparison.irm import IRM
 import torch
 from core.CRMNIST.data_generation import generate_crmnist_dataset
-from core.CRMNIST.comparison.train import train_nvae, train_diva, train_dann
+from core.CRMNIST.comparison.train import train_nvae, train_diva, train_dann, train_irm
 import core.CRMNIST.utils
+import core.utils
 import json
 from torch.utils.data import DataLoader
 import torch.optim as optim
 import os
-
-"""TODO:
-    - divide dimensions evenly for zy, za, zx when removing zay, (also try splitting only among zy and za)
-    - test against domain adversarial network
-    - compute metrics for each model using each rotation as a test domain, get mean and std of metrics
-    - run each method with multiple random seeds, reporting mean ± standard-deviation.
-    - visualize latent space
-"""
+import numpy as np
+from scipy import stats
 
 """
-    Training and evaluation of NVAE and DIVA models
+    Training and evaluation of NVAE, DIVA, DANN, and IRM models
 
     To run the script, use the following command:
 
@@ -29,7 +25,81 @@ import os
 
 device = None 
 
-def evaluate_models(nvae, diva, dann, test_loader, test_domain=None, path=None):
+def test_irm(model, test_loader, device):
+    """
+    Test function for IRM model
+    
+    Args:
+        model: IRM model to test
+        test_loader: DataLoader for test data
+        device: Device to run inference on
+        
+    Returns:
+        tuple: (test_loss, metrics_dict)
+    """
+    if model is None:
+        raise ValueError("Model cannot be None")
+    if test_loader is None:
+        raise ValueError("Test loader cannot be None")
+        
+    model.eval()
+    test_loss = 0
+    correct = 0
+    total = 0
+    
+    with torch.no_grad():
+        for batch_idx, (x, y, c, r) in enumerate(test_loader):
+            try:
+                x, y, r = x.to(device), y.to(device), r.to(device)
+                
+                logits, _ = model.forward(x, y, r)
+                loss = torch.nn.functional.cross_entropy(logits, y)
+                
+                predictions = torch.argmax(logits, dim=1)
+                correct += (predictions == y).sum().item()
+                total += y.size(0)
+                test_loss += loss.item()
+                
+            except Exception as e:
+                print(f"Error processing batch {batch_idx}: {e}")
+                continue
+    
+    if len(test_loader) == 0:
+        print("Warning: Empty test loader")
+        return 0.0, {'y_accuracy': 0.0, 'classification_accuracy': 0.0}
+    
+    test_loss /= len(test_loader)
+    accuracy = correct / total if total > 0 else 0.0
+    
+    metrics = {
+        'y_accuracy': accuracy,
+        'classification_accuracy': accuracy  # For consistency with other models
+    }
+    
+    return test_loss, metrics
+
+def calculate_confidence_interval(accuracies, confidence=0.95):
+    """
+    Calculate confidence interval for a list of accuracies using t-distribution
+    """
+    n = len(accuracies)
+    if n == 0:
+        return 0.0, 0.0, 0.0, 0.0
+    
+    mean = np.mean(accuracies)
+    std = np.std(accuracies, ddof=1)  # Sample standard deviation
+    
+    # Calculate confidence interval using t-distribution
+    alpha = 1 - confidence
+    t_value = stats.t.ppf(1 - alpha/2, df=n-1)
+    margin_error = t_value * (std / np.sqrt(n))
+    
+    ci_lower = mean - margin_error
+    ci_upper = mean + margin_error
+    
+    return mean, std, ci_lower, ci_upper
+
+def evaluate_models_with_seeds(nvae, diva, dann, irm, test_loader, test_domain=None, path=None):
     """
     Evaluate models on the test set, optionally for a specific domain.
     
@@ -37,8 +107,9 @@ def evaluate_models(nvae, diva, dann, test_loader, test_domain=None, path=None):
         nvae: NVAE model
         diva: DIVA model
         dann: DANN model
+        irm: IRM model
         test_loader: DataLoader for test set
-        test_domain: Optional domain to evaluate on (0-4 for rotations)
+        test_domain: Optional domain to evaluate on (0-5 for rotations)
     """
     print("Evaluating models" + (f" on domain {test_domain}" if test_domain is not None else ""))
     
@@ -49,12 +120,9 @@ def evaluate_models(nvae, diva, dann, test_loader, test_domain=None, path=None):
         domain_test_loader = test_loader
     
     test_loss_nvae, test_metrics_nvae = test_nvae(nvae, domain_test_loader, device)
-    
-
-    test_loss_diva, test_metrics_diva = test_nvae(diva, domain_test_loader, device)
-    
+    test_loss_diva, test_metrics_diva = test_nvae(diva, domain_test_loader, device)  # DIVA uses same test function as NVAE (both are VAE architectures)
     test_loss_dann, test_metrics_dann = test_dann(dann, domain_test_loader, device)
-    
+    test_loss_irm, test_metrics_irm = test_irm(irm, domain_test_loader, device)
 
     print("--------------------------------")
     print(f"NVAE test results:")
@@ -70,11 +138,17 @@ def evaluate_models(nvae, diva, dann, test_loader, test_domain=None, path=None):
     print(f"DANN test results:")
     print(f"Test loss: {test_loss_dann}")
     print(f"Test metrics: {test_metrics_dann}")
+    
+    print("--------------------------------")
+    print(f"IRM test results:")
+    print(f"Test loss: {test_loss_irm}")
+    print(f"Test metrics: {test_metrics_irm}")
    
     return {
         'nvae': {'loss': test_loss_nvae, 'metrics': test_metrics_nvae},
         'diva': {'loss': test_loss_diva, 'metrics': test_metrics_diva},
-        'dann': {'loss': test_loss_dann, 'metrics': test_metrics_dann}
+        'dann': {'loss': test_loss_dann, 'metrics': test_metrics_dann},
+        'irm': {'loss': test_loss_irm, 'metrics': test_metrics_irm}
     }
 
 def filter_domain_loader(loader, domain, exclude=False):
@@ -83,17 +157,36 @@ def filter_domain_loader(loader, domain, exclude=False):
     
     Args:
         loader: Original DataLoader
-        domain: Domain to filter for (0-4 for rotations)
+        domain: Domain to filter for (0-5 for rotations)
         exclude: If True, exclude samples from the specified domain instead of including them
         
     Returns:
         Filtered DataLoader with only samples from the specified domain (or all except that domain)
+        
+    Raises:
+        ValueError: If no samples found for the specified domain or if domain is invalid
     """
+    if domain < 0:
+        raise ValueError(f"Domain must be non-negative, got {domain}")
+    
     domain_samples = []
+    total_samples = 0
+    
     for batch in loader:
         x, y, c, r = batch
+        total_samples += len(x)
+        
         # Get rotation domain for each sample
-        rotation_indices = torch.argmax(r, dim=1) if torch.max(r) > 0 else torch.zeros(len(r))
+        if len(r.shape) > 1:
+            rotation_indices = torch.argmax(r, dim=1)
+        else:
+            rotation_indices = r
+            
+        # Validate domain values
+        max_domain = torch.max(rotation_indices).item()
+        if domain > max_domain:
+            continue  # Skip this batch if domain is out of range
+            
         # Keep samples based on exclude flag
         mask = rotation_indices != domain if exclude else rotation_indices == domain
         if mask.any():
@@ -106,6 +199,9 @@ def filter_domain_loader(loader, domain, exclude=False):
         c_domain = torch.cat([s[2] for s in domain_samples])
         r_domain = torch.cat([s[3] for s in domain_samples])
         
+        print(f"Filtered {'excluding' if exclude else 'including'} domain {domain}: "
+              f"{len(x_domain)} samples out of {total_samples} total")
+        
         # Create a new dataset with only domain samples
         domain_dataset = torch.utils.data.TensorDataset(x_domain, y_domain, c_domain, r_domain)
         return torch.utils.data.DataLoader(
@@ -116,7 +212,9 @@ def filter_domain_loader(loader, domain, exclude=False):
             pin_memory=loader.pin_memory
         )
     else:
-        raise ValueError(f"No samples found for domain {domain}")
+        action = "excluding" if exclude else "including"
+        raise ValueError(f"No samples found when {action} domain {domain}. "
+                        f"Total samples processed: {total_samples}")
     
 def print_results(results, holdout=False):
     """
@@ -156,26 +254,30 @@ def print_results(results, holdout=False):
 
 
 
-def run_cross_domain_evaluation(args, nvae, diva, dann, test_loader, spec_data):
+def run_cross_domain_evaluation(args, nvae, diva, dann, irm, test_loader, spec_data):
     """
+    UNUSED FUNCTION - kept for potential future use.
+    
     Run evaluation across all domains and compute statistics.
     
     Args:
         args: Command line arguments
         nvae: NVAE model
         diva: DIVA model
+        dann: DANN model
+        irm: IRM model
         test_loader: DataLoader for test set
         
     Returns:
         Dictionary containing mean and std of metrics across domains
     """
     num_domains = spec_data['num_r_classes'] 
-    cross_domain_results = {'nvae': {}, 'diva': {}, 'dann': {}}
+    cross_domain_results = {'nvae': {}, 'diva': {}, 'dann': {}, 'irm': {}}
     
     # Evaluate on each domain
     for domain in range(num_domains):
         print(f"\nEvaluating on domain {domain} ({domain * 15}°)")
-        results = evaluate_models(nvae, diva, dann, test_loader, test_domain=domain, path=os.path.join(args.out, f'cross_domain_domain_{domain}'))
+        results = evaluate_models_with_seeds(nvae, diva, dann, irm, test_loader, test_domain=domain, path=os.path.join(args.out, f'cross_domain_domain_{domain}'))
         for model in cross_domain_results:
             cross_domain_results[model][domain] = {
                 'loss': results[model]['loss'],
@@ -184,77 +286,243 @@ def run_cross_domain_evaluation(args, nvae, diva, dann, test_loader, spec_data):
     
     return cross_domain_results
 
-
-
-def run_holdout_evaluation(args, train_loader, test_loader, class_map, spec_data):
+def run_holdout_evaluation_with_seeds(args, train_loader, test_loader, class_map, spec_data, num_seeds=10):
     """
-    Run evaluation where we hold out one domain at a time for testing.
+    Run evaluation where we hold out the final domain (domain 5, 75°) for testing.
+    Train each model 10 times with different seeds and compute confidence intervals.
     
     Args:
         args: Command line arguments
         train_loader: DataLoader for training set
         test_loader: DataLoader for test set
+        class_map: Class mapping
+        spec_data: Specification data
+        num_seeds: Number of different random seeds to use
         
     Returns:
-        Dictionary containing results for each holdout domain
+        Dictionary containing results with confidence intervals for the final holdout domain
     """
-    num_domains = 5  # 5 rotation domains
-    holdout_results = {'nvae': {}, 'diva': {}, 'dann': {}}
+    num_domains = spec_data['num_r_classes']  # Use the correct number from config (6 domains)
+    holdout_results = {'nvae': {}, 'diva': {}, 'dann': {}, 'irm': {}}
     
-    # For each domain, hold it out and train/test
-    for holdout_domain in range(num_domains):
-        print(f"\nHolding out domain {holdout_domain} ({holdout_domain * 15}°)")
-        
-        # Filter training data to exclude holdout domain
-        filtered_train_loader = filter_domain_loader(train_loader, holdout_domain, exclude=True)
-        
-        # Train models on filtered training data
-
-        holdout_test_loader = filter_domain_loader(test_loader, holdout_domain)
-
-        
-        nvae, training_results_nvae = train_nvae(args, spec_data,
-                                                filtered_train_loader, holdout_test_loader, args.out)
-        print(f"NVAE training results: \n"
-              f"Best model epoch: {training_results_nvae['best_model_epoch']}\n"
-              f"Best validation loss: {training_results_nvae['best_validation_loss']}\n"
-              f"Best batch metrics: {training_results_nvae['best_batch_metrics']}")  
-          
-        diva, training_results_diva = train_diva(args, spec_data, 
-                                               filtered_train_loader, holdout_test_loader, args.out)
-        print(f"DIVA training results: \n"
-              f"Best model epoch: {training_results_diva['best_model_epoch']}\n"
-              f"Best validation loss: {training_results_diva['best_validation_loss']}\n"
-              f"Best batch metrics: {training_results_diva['best_batch_metrics']}")
-        
-        dann, training_results_dann = train_dann(args, spec_data,
-                                               filtered_train_loader, holdout_test_loader, args.out)
-        print(f"DANN training results: \n"
-              f"Best model epoch: {training_results_dann['best_model_epoch']}\n"
-              f"Best validation loss: {training_results_dann['best_validation_loss']}\n"
-              f"Best batch metrics: {training_results_dann['best_batch_metrics']}")
-        
-
-        
-        results = evaluate_models(nvae, diva, dann, holdout_test_loader, path=os.path.join(args.out, f'holdout_domain_{holdout_domain}'))
-        
-        # Store results
-        for model in holdout_results:
-            holdout_results[model][holdout_domain] = {
-                'loss': results[model]['loss'],
-                'metrics': results[model]['metrics']
-            }
+    # Hold out only the final domain (domain 5, which is 75°)
+    holdout_domain = num_domains - 1  # Domain 5 (75°)
+    print(f"\nHolding out final domain {holdout_domain} ({holdout_domain * 15}°)")
     
+    # Filter training data to exclude holdout domain (train on domains 0-4)
+    filtered_train_loader = filter_domain_loader(train_loader, holdout_domain, exclude=True)
+    holdout_test_loader = filter_domain_loader(test_loader, holdout_domain)
+    
+    # Store accuracies for each model across seeds
+    model_accuracies = {'nvae': [], 'diva': [], 'dann': [], 'irm': []}
+    
+    # Train each model with different seeds (10 models per type = 40 total models)
+    for seed in range(num_seeds):
+        print(f"\n  Training with seed {seed+1}/{num_seeds}")
+        
+        # Set random seeds for reproducibility
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+        
+        # Train NVAE
+        nvae, _ = train_nvae(args, spec_data, filtered_train_loader, holdout_test_loader, None)
+        _, nvae_metrics = test_nvae(nvae, holdout_test_loader, args.device)
+        model_accuracies['nvae'].append(nvae_metrics.get('y_accuracy', 0.0))
+        del nvae  # Free memory
+        
+        # Train DIVA
+        diva, _ = train_diva(args, spec_data, filtered_train_loader, holdout_test_loader, None)
+        _, diva_metrics = test_nvae(diva, holdout_test_loader, args.device)  # DIVA uses same test function as NVAE
+        model_accuracies['diva'].append(diva_metrics.get('y_accuracy', 0.0))
+        del diva  # Free memory
+        
+        # Train DANN
+        dann, _ = train_dann(args, spec_data, filtered_train_loader, holdout_test_loader, None)
+        _, dann_metrics = test_dann(dann, holdout_test_loader, args.device)
+        model_accuracies['dann'].append(dann_metrics.get('y_accuracy', 0.0))
+        del dann  # Free memory
+        
+        # Train IRM
+        irm, _ = train_irm(args, spec_data, filtered_train_loader, holdout_test_loader, None, seed=seed)
+        _, irm_metrics = test_irm(irm, holdout_test_loader, args.device)
+        model_accuracies['irm'].append(irm_metrics.get('y_accuracy', 0.0))
+        del irm  # Free memory
+        
+        # Clear GPU cache if using CUDA
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    # Calculate confidence intervals for each model
+    for model in model_accuracies:
+        accuracies = model_accuracies[model]
+        mean, std, ci_lower, ci_upper = calculate_confidence_interval(accuracies)
+        
+        margin_error = (ci_upper - ci_lower) / 2
+        
+        holdout_results[model][holdout_domain] = {
+            'accuracies': accuracies,
+            'mean_accuracy': mean,
+            'std_accuracy': std,
+            'ci_lower': ci_lower,
+            'ci_upper': ci_upper,
+            'confidence_interval': f"{mean:.4f} ± {margin_error:.4f}",
+            'metrics': {'y_accuracy': mean}  # For compatibility
+        }
     
     return holdout_results
 
-def analyze_domain_distribution(train_loader, test_loader):
+def run_cross_domain_evaluation_with_seeds(args, train_loader, test_loader, spec_data, num_seeds=10):
+    """
+    Run cross-domain evaluation with multiple seeds and confidence intervals.
+    Train models once with multiple seeds, then test on each domain.
+    
+    Args:
+        args: Command line arguments
+        train_loader: DataLoader for training set
+        test_loader: DataLoader for test set
+        spec_data: Specification data
+        num_seeds: Number of different random seeds to use
+        
+    Returns:
+        Dictionary containing results with confidence intervals for each domain
+    """
+    num_domains = spec_data['num_r_classes']
+    cross_domain_results = {'nvae': {}, 'diva': {}, 'dann': {}, 'irm': {}}
+    
+    # Train models with different seeds
+    trained_models = {'nvae': [], 'diva': [], 'dann': [], 'irm': []}
+    
+    print("Training models with different seeds...")
+    for seed in range(num_seeds):
+        print(f"\nTraining with seed {seed+1}/{num_seeds}")
+        
+        # Set random seeds for reproducibility
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+        
+        # Train NVAE
+        nvae, _ = train_nvae(args, spec_data, train_loader, test_loader, None)
+        trained_models['nvae'].append(nvae)
+        
+        # Train DIVA
+        diva, _ = train_diva(args, spec_data, train_loader, test_loader, None)
+        trained_models['diva'].append(diva)
+        
+        # Train DANN
+        dann, _ = train_dann(args, spec_data, train_loader, test_loader, None)
+        trained_models['dann'].append(dann)
+        
+        # Train IRM
+        irm, _ = train_irm(args, spec_data, train_loader, test_loader, None, seed=seed)
+        trained_models['irm'].append(irm)
+        
+        # Clear GPU cache if using CUDA
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    # Evaluate on each domain
+    for domain in range(num_domains):
+        print(f"\nEvaluating on domain {domain} ({domain * 15}°)")
+        domain_test_loader = filter_domain_loader(test_loader, domain)
+        
+        # Store accuracies for each model across seeds
+        model_accuracies = {'nvae': [], 'diva': [], 'dann': [], 'irm': []}
+        
+        # Test each trained model on this domain
+        for seed in range(num_seeds):
+            # Test NVAE
+            _, nvae_metrics = test_nvae(trained_models['nvae'][seed], domain_test_loader, args.device)
+            model_accuracies['nvae'].append(nvae_metrics.get('y_accuracy', 0.0))
+            
+            # Test DIVA
+            _, diva_metrics = test_nvae(trained_models['diva'][seed], domain_test_loader, args.device)  # DIVA uses same test function as NVAE
+            model_accuracies['diva'].append(diva_metrics.get('y_accuracy', 0.0))
+            
+            # Test DANN
+            _, dann_metrics = test_dann(trained_models['dann'][seed], domain_test_loader, args.device)
+            model_accuracies['dann'].append(dann_metrics.get('y_accuracy', 0.0))
+            
+            # Test IRM
+            _, irm_metrics = test_irm(trained_models['irm'][seed], domain_test_loader, args.device)
+            model_accuracies['irm'].append(irm_metrics.get('y_accuracy', 0.0))
+        
+        # Calculate confidence intervals for each model
+        for model in model_accuracies:
+            accuracies = model_accuracies[model]
+            mean, std, ci_lower, ci_upper = calculate_confidence_interval(accuracies)
+            
+            margin_error = (ci_upper - ci_lower) / 2
+            
+            cross_domain_results[model][domain] = {
+                'accuracies': accuracies,
+                'mean_accuracy': mean,
+                'std_accuracy': std,
+                'ci_lower': ci_lower,
+                'ci_upper': ci_upper,
+                'confidence_interval': f"{mean:.4f} ± {margin_error:.4f}",
+                'metrics': {'y_accuracy': mean}  # For compatibility
+            }
+    
+    return cross_domain_results
+
+def print_results_with_ci(results, holdout=False):
+    """
+    Print results for each domain and model with confidence intervals
+
+    results is a dictionary with the following structure:
+    {
+        'model_name1': {
+            'domain_0': {
+                'mean_accuracy': 0.85,
+                'std_accuracy': 0.02,
+                'ci_lower': 0.83,
+                'ci_upper': 0.87,
+                'confidence_interval': '0.8500 ± 0.0123',
+                'accuracies': [0.84, 0.86, ...]
+            },
+            ...
+        },
+        ...
+    }
+
+    holdout: True if holdout results, False if cross-domain results
+    """
+
+    print(f"--------------------------------")
+    print(f"{'Holdout' if holdout else 'Cross-domain'} results with 95% Confidence Intervals:")
+
+    for model in results:
+        print(f"--------------------------------")
+        print(f"Domain results for {model.upper()}:")
+        for domain in results[model]:
+            result = results[model][domain]
+            print(f"\n{'Held out test' if holdout else 'Cross-domain test'} domain {domain} ({domain * 15}°):")
+            print(f"Mean Accuracy: {result['mean_accuracy']:.4f}")
+            print(f"Std Accuracy: {result['std_accuracy']:.4f}")
+            print(f"95% CI: [{result['ci_lower']:.4f}, {result['ci_upper']:.4f}]")
+            print(f"Confidence Interval: {result['confidence_interval']}")
+            print(f"Individual accuracies: {[f'{acc:.4f}' for acc in result['accuracies']]}")
+        print(f"--------------------------------")
+    print(f"--------------------------------")
+
+def analyze_domain_distribution(train_loader, test_loader, num_domains=6):
     """
     Analyze and print the distribution of images across domains in both training and test sets.
+    
+    Args:
+        train_loader: DataLoader for training set
+        test_loader: DataLoader for test set
+        num_domains: Number of domains (default 6 for CRMNIST rotations)
     """
-    # Initialize counters for each domain (0-5)
-    train_domain_counts = {i: 0 for i in range(6)}  # Changed from 5 to 6 domains
-    test_domain_counts = {i: 0 for i in range(6)}   # Changed from 5 to 6 domains
+    # Initialize counters for each domain
+    train_domain_counts = {i: 0 for i in range(num_domains)}
+    test_domain_counts = {i: 0 for i in range(num_domains)}
     
     print("\nAnalyzing domain distribution...")
     
@@ -268,7 +536,9 @@ def analyze_domain_distribution(train_loader, test_loader):
             domain_indices = r
             
         for domain_idx in domain_indices:
-            train_domain_counts[domain_idx.item()] += 1
+            domain_val = domain_idx.item()
+            if domain_val < num_domains:
+                train_domain_counts[domain_val] += 1
     
     # Count test set distribution
     print("\nCounting test set distribution...")
@@ -280,7 +550,9 @@ def analyze_domain_distribution(train_loader, test_loader):
             domain_indices = r
             
         for domain_idx in domain_indices:
-            test_domain_counts[domain_idx.item()] += 1
+            domain_val = domain_idx.item()
+            if domain_val < num_domains:
+                test_domain_counts[domain_val] += 1
     
     # Print results
     print("\nDomain Distribution:")
@@ -290,11 +562,11 @@ def analyze_domain_distribution(train_loader, test_loader):
     total_train = sum(train_domain_counts.values())
     total_test = sum(test_domain_counts.values())
     
-    for domain in range(6):  # Changed from 5 to 6 domains
+    for domain in range(num_domains):
         train_count = train_domain_counts[domain]
         test_count = test_domain_counts[domain]
-        train_percent = (train_count / total_train) * 100
-        test_percent = (test_count / total_test) * 100
+        train_percent = (train_count / total_train) * 100 if total_train > 0 else 0.0
+        test_percent = (test_count / total_test) * 100 if total_test > 0 else 0.0
         print(f"{domain:6d} | {train_count:13d} | {train_percent:9.2f}% | {test_count:10d} | {test_percent:6.2f}%")
     
     return train_domain_counts, test_domain_counts
@@ -315,14 +587,34 @@ def run_experiment(args):
     global device
     device = args.device
     print(f"Using device: {device}")
+    
+    # Validate arguments
+    if not hasattr(args, 'mode') or args.mode is None:
+        raise ValueError("Mode must be specified")
+    if not hasattr(args, 'setting') or args.setting is None:
+        raise ValueError("Setting must be specified")
+    if not hasattr(args, 'config') or not os.path.exists(args.config):
+        raise FileNotFoundError(f"Config file not found: {args.config}")
+    if not hasattr(args, 'out') or args.out is None:
+        raise ValueError("Output directory must be specified")
+    
     mode = args.mode
     print(f"Running in {mode} mode")
     setting = args.setting
     print(f"Running in {setting} setting")
     
     # Load configuration from JSON
-    with open(args.config, 'r') as file:
-        spec_data = json.load(file)
+    try:
+        with open(args.config, 'r') as file:
+            spec_data = json.load(file)
+    except Exception as e:
+        raise ValueError(f"Error loading config file {args.config}: {e}")
+    
+    # Validate spec_data
+    required_keys = ['num_r_classes', 'domain_data', 'class_map']
+    for key in required_keys:
+        if key not in spec_data:
+            raise ValueError(f"Missing required key '{key}' in config file")
     
     models_dir = os.path.join(args.out, 'comparison_models')
     os.makedirs(models_dir, exist_ok=True)
@@ -359,13 +651,16 @@ def run_experiment(args):
                             pin_memory=True)
     
     # Analyze domain distribution
-    train_domain_counts, test_domain_counts = analyze_domain_distribution(train_loader, test_loader)
+    train_domain_counts, test_domain_counts = analyze_domain_distribution(
+        train_loader, test_loader, spec_data['num_r_classes']
+    )
     
     if setting == 'cross-domain' and mode == 'train':
         
         nvae, training_results_nvae = train_nvae(args, spec_data, train_loader, test_loader, models_dir)
         diva, training_results_diva = train_diva(args, spec_data, train_loader, test_loader, models_dir)
         dann, training_results_dann = train_dann(args, spec_data, train_loader, test_loader, models_dir)
+        irm, training_results_irm = train_irm(args, spec_data, train_loader, test_loader, models_dir)
 
         print("--------------------------------")
         print("NVAE training results:")
@@ -382,14 +677,19 @@ def run_experiment(args):
         print(f"Best model epoch: {training_results_dann['best_model_epoch']}\nBest validation loss: {training_results_dann['best_validation_loss']}\nBest batch metrics: {training_results_dann['best_batch_metrics']}")
 
         print("--------------------------------")
+
+        print("IRM training results:")
+        print(f"Best model epoch: {training_results_irm['best_model_epoch']}\nBest validation loss: {training_results_irm['best_validation_loss']}\nBest batch metrics: {training_results_irm['best_batch_metrics']}")
+
+        print("--------------------------------")
         print("Finished training models")
 
         return
     
     if setting == 'holdout' and (mode == 'train' or mode == 'test'):
         # Run holdout evaluation
-        holdout_results = run_holdout_evaluation(args, train_loader, test_loader, class_map, spec_data)
-        print_results(holdout_results, holdout=True)
+        holdout_results = run_holdout_evaluation_with_seeds(args, train_loader, test_loader, class_map, spec_data)
+        print_results_with_ci(holdout_results, holdout=True)
 
         results_path = os.path.join(args.out, 'evaluation_results_holdout.json')
         with open(results_path, 'w') as f:
@@ -399,29 +699,58 @@ def run_experiment(args):
 
         return
     
-    # Load models
-    nvae_checkpoint = torch.load(os.path.join(models_dir, 'nvae_checkpoint.pt'), map_location=device)
-    diva_checkpoint = torch.load(os.path.join(models_dir, 'diva_checkpoint.pt'), map_location=device)
-    dann_checkpoint = torch.load(os.path.join(models_dir, 'dann_checkpoint.pt'), map_location=device)
+    # Load models with error handling
+    checkpoint_files = {
+        'nvae': os.path.join(models_dir, 'nvae_checkpoint.pt'),
+        'diva': os.path.join(models_dir, 'diva_checkpoint.pt'),
+        'dann': os.path.join(models_dir, 'dann_checkpoint.pt'),
+        'irm': os.path.join(models_dir, 'irm_checkpoint.pt')
+    }
+    
+    # Check if all checkpoint files exist
+    for model_name, checkpoint_path in checkpoint_files.items():
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}. Please train the {model_name.upper()} model first.")
+    
+    nvae_checkpoint = torch.load(checkpoint_files['nvae'], map_location=device)
+    diva_checkpoint = torch.load(checkpoint_files['diva'], map_location=device)
+    dann_checkpoint = torch.load(checkpoint_files['dann'], map_location=device)
+    irm_checkpoint = torch.load(checkpoint_files['irm'], map_location=device)
 
     # Create models with saved parameters
     nvae = VAE(**nvae_checkpoint['params']).to(device)
     diva = VAE(**diva_checkpoint['params']).to(device)
     dann = DANN(**dann_checkpoint['params']).to(device)
+    irm = IRM(**irm_checkpoint['params']).to(device)
 
     # Load state dictionaries
     nvae.load_state_dict(nvae_checkpoint['state_dict'])
     diva.load_state_dict(diva_checkpoint['state_dict'])
     dann.load_state_dict(dann_checkpoint['state_dict'])
+    irm.load_state_dict(irm_checkpoint['state_dict'])
 
     # Set models to eval mode
     nvae.eval()
     diva.eval()
     dann.eval()
+    irm.eval()
 
     if setting == 'cross-domain' and mode == 'test':
-        # Run cross-domain evaluation
-        cross_domain_results = run_cross_domain_evaluation(args, nvae, diva, dann, test_loader, spec_data)
+        # Run cross-domain evaluation using pre-loaded models
+        cross_domain_results = {'nvae': {}, 'diva': {}, 'dann': {}, 'irm': {}}
+        num_domains = spec_data['num_r_classes']
+        
+        # Evaluate on each domain
+        for domain in range(num_domains):
+            print(f"\nEvaluating on domain {domain} ({domain * 15}°)")
+            results = evaluate_models_with_seeds(nvae, diva, dann, irm, test_loader, test_domain=domain)
+            for model in cross_domain_results:
+                cross_domain_results[model][domain] = {
+                    'loss': results[model]['loss'],
+                    'metrics': results[model]['metrics']
+                }
+        
+        # Print results
         print_results(cross_domain_results, holdout=False)
 
         results_path = os.path.join(args.out, 'evaluation_results_cross_domain.json')
@@ -444,14 +773,68 @@ def run_experiment(args):
         # diva.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'diva_latent_correlations'))
 
         dann.visualize_latent_space(test_loader, device, os.path.join(args.out, 'dann_latent_space'))
+        
+        irm.visualize_latent_space(test_loader, device, os.path.join(args.out, 'irm_latent_space'))
 
         # visualize reconstruction
 
         # nvae.visualize_reconstruction(test_loader, device, os.path.join(args.out, 'nvae_reconstruction'))
         # diva.visualize_reconstruction(test_loader, device, os.path.join(args.out, 'diva_reconstruction'))
         # dann.visualize_reconstruction(test_loader, device, os.path.join(args.out, 'dann_reconstruction'))
-
+        # irm.visualize_reconstruction(test_loader, device, os.path.join(args.out, 'irm_reconstruction'))
     
+    if mode == 'confidence_interval' or mode == 'all':
+        print("\n" + "="*80)
+        print("RUNNING CONFIDENCE INTERVAL EVALUATION WITH 10 SEEDS")
+        print("="*80)
+        
+        if setting == 'holdout':
+            print("Running holdout evaluation with confidence intervals...")
+            holdout_results = run_holdout_evaluation_with_seeds(args, train_loader, test_loader, class_map, spec_data)
+            print_results_with_ci(holdout_results, holdout=True)
+            
+            # Save results
+            results_path = os.path.join(args.out, 'evaluation_results_holdout_ci.json')
+            # Convert numpy arrays to lists for JSON serialization
+            json_results = {}
+            for model in holdout_results:
+                json_results[model] = {}
+                for domain in holdout_results[model]:
+                    result = holdout_results[model][domain].copy()
+                    result['accuracies'] = [float(acc) for acc in result['accuracies']]
+                    result['mean_accuracy'] = float(result['mean_accuracy'])
+                    result['std_accuracy'] = float(result['std_accuracy'])
+                    result['ci_lower'] = float(result['ci_lower'])
+                    result['ci_upper'] = float(result['ci_upper'])
+                    json_results[model][domain] = result
+            
+            with open(results_path, 'w') as f:
+                json.dump(json_results, f, indent=2)
+            print(f"\nHoldout CI results saved to {results_path}")
+            
+        elif setting == 'cross-domain':
+            print("Running cross-domain evaluation with confidence intervals...")
+            cross_domain_results = run_cross_domain_evaluation_with_seeds(args, train_loader, test_loader, spec_data)
+            print_results_with_ci(cross_domain_results, holdout=False)
+            
+            # Save results
+            results_path = os.path.join(args.out, 'evaluation_results_cross_domain_ci.json')
+            # Convert numpy arrays to lists for JSON serialization
+            json_results = {}
+            for model in cross_domain_results:
+                json_results[model] = {}
+                for domain in cross_domain_results[model]:
+                    result = cross_domain_results[model][domain].copy()
+                    result['accuracies'] = [float(acc) for acc in result['accuracies']]
+                    result['mean_accuracy'] = float(result['mean_accuracy'])
+                    result['std_accuracy'] = float(result['std_accuracy'])
+                    result['ci_lower'] = float(result['ci_lower'])
+                    result['ci_upper'] = float(result['ci_upper'])
+                    json_results[model][domain] = result
+            
+            with open(results_path, 'w') as f:
+                json.dump(json_results, f, indent=2)
+            print(f"\nCross-domain CI results saved to {results_path}")
 
 if __name__ == "__main__":
     parser = core.utils.get_parser('CRMNIST')
@@ -470,7 +853,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--setting', type=str, default='cross-domain', choices=['holdout', 'cross-domain'])
-    parser.add_argument('--mode', type=str, default='train', choices=['train', 'test', 'visualize', 'all'])
+    parser.add_argument('--mode', type=str, default='train', choices=['train', 'test', 'visualize', 'confidence_interval', 'all'])
     
     args = parser.parse_args()
     

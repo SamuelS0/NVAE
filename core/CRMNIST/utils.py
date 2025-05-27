@@ -13,9 +13,18 @@ class FixedRotate:
     def __init__(self, angle):
         # Convert angle to float if it's a string
         if isinstance(angle, str):
+            try:
+                self.angle = float(angle)
+            except ValueError:
+                raise ValueError(f"Invalid angle value: {angle}. Must be a number.")
+        elif isinstance(angle, (int, float)):
             self.angle = float(angle)
         else:
-            self.angle = angle
+            raise TypeError(f"Angle must be a number or string, got {type(angle)}")
+        
+        # Validate angle range (optional: normalize to 0-360)
+        if not (-360 <= self.angle <= 360):
+            raise ValueError(f"Angle {self.angle} is outside reasonable range [-360, 360]")
     
     def __call__(self, img):
         """
@@ -26,12 +35,19 @@ class FixedRotate:
         Returns:
             img (PIL.Image.Image or torch.Tensor): rotated image in RGB format (3 channels)
         """
+        if img is None:
+            raise ValueError("Input image cannot be None")
+            
         # Handle tensor input by converting to PIL
         is_tensor = isinstance(img, torch.Tensor)
         if is_tensor:
             # Save original properties
             original_dtype = img.dtype
             original_device = img.device
+            
+            # Validate tensor
+            if img.numel() == 0:
+                raise ValueError("Input tensor is empty")
             
             # Special handling for different tensor formats
             if img.dim() == 3 and img.shape[0] == 3:
@@ -56,7 +72,10 @@ class FixedRotate:
         if hasattr(pil_img, 'mode') and pil_img.mode != 'RGB':
             pil_img = pil_img.convert('RGB')
         
-        rotated_img = F.rotate(pil_img, self.angle, fill=(0, 0, 0))
+        try:
+            rotated_img = F.rotate(pil_img, self.angle, fill=(0, 0, 0))
+        except Exception as e:
+            raise RuntimeError(f"Failed to rotate image: {e}")
         
         # Convert back to tensor if input was tensor
         if is_tensor:
@@ -79,8 +98,21 @@ class AddColor:
     """
 
     def __init__(self, color, intensity):
+        if not isinstance(color, str):
+            raise TypeError(f"Color must be a string, got {type(color)}")
+            
         self.color = color.lower()
-        self.intensity = intensity
+        
+        # Validate intensity
+        if not isinstance(intensity, (int, float)):
+            raise TypeError(f"Intensity must be a number, got {type(intensity)}")
+        if intensity < 0:
+            raise ValueError(f"Intensity must be non-negative, got {intensity}")
+        if intensity > 10:  # Reasonable upper bound
+            raise ValueError(f"Intensity {intensity} is too high (max 10)")
+            
+        self.intensity = float(intensity)
+        
         self.channel_map = {
             'red': [0],
             'green': [1],
@@ -92,7 +124,8 @@ class AddColor:
         }
 
         if self.color not in self.channel_map:
-            raise ValueError("invalid color")
+            valid_colors = list(self.channel_map.keys())
+            raise ValueError(f"Invalid color '{self.color}'. Valid colors are: {valid_colors}")
     
     def __call__(self, img):
         """
@@ -103,12 +136,19 @@ class AddColor:
         Returns: 
             img (PIL.Image.Image or torch.Tensor): colored image in RGB format (3 channels)
         """
+        if img is None:
+            raise ValueError("Input image cannot be None")
+            
         # Handle tensor input by converting to PIL
         is_tensor = isinstance(img, torch.Tensor)
         if is_tensor:
             # Save original properties
             original_dtype = img.dtype
             original_device = img.device
+            
+            # Validate tensor
+            if img.numel() == 0:
+                raise ValueError("Input tensor is empty")
             
             # Special handling for different tensor formats
             if img.dim() == 3 and img.shape[0] == 3:
@@ -133,7 +173,10 @@ class AddColor:
         if hasattr(pil_img, 'mode') and pil_img.mode != 'RGB':
             pil_img = pil_img.convert('RGB')
             
-        np_img = np.array(pil_img).astype(np.float32) / 255.0
+        try:
+            np_img = np.array(pil_img).astype(np.float32) / 255.0
+        except Exception as e:
+            raise RuntimeError(f"Failed to convert image to numpy array: {e}")
 
         for channel in range(3):
             if channel in self.channel_map[self.color]:
@@ -152,7 +195,11 @@ class AddColor:
 
                 
         np_img = np.clip(np_img, 0, 1)
-        colored_img = Image.fromarray((np_img * 255).astype(np.uint8))
+        
+        try:
+            colored_img = Image.fromarray((np_img * 255).astype(np.uint8))
+        except Exception as e:
+            raise RuntimeError(f"Failed to create colored image: {e}")
         
         # Convert back to tensor if input was tensor
         if is_tensor:

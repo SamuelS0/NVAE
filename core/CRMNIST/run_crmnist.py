@@ -67,8 +67,20 @@ def run_experiment(args):
     # Generate dataset
     train_dataset = generate_crmnist_dataset(spec_data, train=True)
     test_dataset = generate_crmnist_dataset(spec_data, train=False)
+    
+    # Create validation split from training data to avoid data leakage
+    train_size = len(train_dataset)
+    val_size = int(0.2 * train_size)  # Use 20% for validation
+    train_size = train_size - val_size
+    
+    train_subset, val_subset = torch.utils.data.random_split(
+        train_dataset, [train_size, val_size], 
+        generator=torch.Generator().manual_seed(42)  # For reproducibility
+    )
+    
     # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_subset, batch_size=args.batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
     
     # Get dataset dimensions
@@ -100,7 +112,7 @@ def run_experiment(args):
     patience = 5
 
     # Train the model
-    training_metrics = train(args, model, optimizer, train_loader, test_loader, args.device, patience)
+    training_metrics = train(args, model, optimizer, train_loader, val_loader, args.device, patience)
 
     # Load best model for final evaluation
     if training_metrics['best_model_state'] is not None:
