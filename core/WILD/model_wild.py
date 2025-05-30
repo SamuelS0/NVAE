@@ -55,23 +55,41 @@ class VAE(NModule):
             alpha_2=1, 
             recon_weight=1,
             device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-            resolution='high'  # Add resolution parameter
+            resolution='high',  # Add resolution parameter
+            model='vae',  # Add DIVA mode parameter
             ):
         
         super().__init__()
-
+        if model == 'vae':
+            self.diva = False
+        elif model == 'diva':
+            self.diva = True
+        print('data resolution', resolution)
+        print('diva', self.diva)
         self.class_map = class_map
         self.device = device
         self.y_dim = y_dim
         self.a_dim = a_dim
 
-        self.zx_dim = zx_dim
-        self.zy_dim = zy_dim
-        self.za_dim = za_dim
-        self.zay_dim = zay_dim
-        self.z_y_combined_dim = zy_dim + zay_dim
-        self.z_a_combined_dim = za_dim + zay_dim
-        self.z_total_dim = zx_dim + zy_dim + zay_dim + za_dim
+        if self.diva:
+            assert zay_dim % 3 == 0, "zay_dim must be divisible by 3"
+            extra_dim = zay_dim // 3
+            
+            self.zy_dim = zy_dim + extra_dim
+            self.zx_dim = zx_dim + extra_dim
+            self.za_dim = za_dim + extra_dim
+            self.zay_dim = 0
+            self.z_y_combined_dim = self.zy_dim
+            self.z_a_combined_dim = self.za_dim
+            self.z_total_dim = self.zx_dim + self.zy_dim + self.za_dim
+        else:
+            self.zy_dim = zy_dim
+            self.zx_dim = zx_dim
+            self.zay_dim = zay_dim
+            self.za_dim = za_dim
+            self.z_y_combined_dim = zy_dim + zay_dim
+            self.z_a_combined_dim = za_dim + zay_dim
+            self.z_total_dim = zx_dim + zy_dim + zay_dim + za_dim
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -83,28 +101,35 @@ class VAE(NModule):
         self.alpha_1, self.alpha_2 = alpha_1, alpha_2
         self.recon_weight = recon_weight
 
-        self.zy_index_range = [0, zy_dim]
-        self.zx_index_range = [zy_dim, zy_dim + zx_dim]
-        self.zay_index_range = [zy_dim + zx_dim, zy_dim + zx_dim + zay_dim]
-        self.za_index_range = [zy_dim + zx_dim + zay_dim, self.z_total_dim]
+        self.zy_index_range = [0, self.zy_dim]
+        self.zx_index_range = [self.zy_dim, self.zy_dim + self.zx_dim]
+        if self.diva:
+            self.zay_index_range = None
+            self.za_index_range = [self.zy_dim + self.zx_dim, self.z_total_dim]
+        else:
+            self.zay_index_range = [self.zy_dim + self.zx_dim, self.zy_dim + self.zx_dim + self.zay_dim]
+            self.za_index_range = [self.zy_dim + self.zx_dim + self.zay_dim, self.z_total_dim]
         
         if resolution == 'high':  # 448x448
-            self.qz = qz(zy_dim, zx_dim, zay_dim, za_dim, self.z_total_dim,
-                         in_channels, out_channels, kernel, stride, padding).to(self.device)
-            self.px = px(zy_dim, zx_dim, zay_dim, za_dim, self.z_total_dim,
-                         in_channels, out_channels, kernel).to(self.device)
+            self.qz = qz(self.zy_dim, self.zx_dim, self.zay_dim, self.za_dim, self.z_total_dim,
+                         in_channels, out_channels, kernel, stride, padding, self.diva).to(self.device)
+            self.px = px(self.zy_dim, self.zx_dim, self.zay_dim, self.za_dim, self.z_total_dim,
+                         in_channels, out_channels, kernel, stride, padding, self.diva).to(self.device)
         else:  # 96x96
-            self.qz = qz_new(zy_dim, zx_dim, zay_dim, za_dim, self.z_total_dim,
-                             in_channels, out_channels, kernel, stride, padding).to(self.device)
-            self.px = px_new(zy_dim, zx_dim, zay_dim, za_dim, self.z_total_dim,
-                             in_channels, out_channels, kernel).to(self.device)
+            self.qz = qz_new(self.zy_dim, self.zx_dim, self.zay_dim, self.za_dim, self.z_total_dim,
+                             in_channels, out_channels, kernel, stride, padding, self.diva).to(self.device)
+            self.px = px_new(self.zy_dim, self.zx_dim, self.zay_dim, self.za_dim, self.z_total_dim,
+                             in_channels, out_channels, kernel, stride, padding, self.diva).to(self.device)
 
-        self.qy = qy(y_dim, zy_dim, zay_dim).to(self.device)
-        self.qa = qa(a_dim, za_dim, zay_dim).to(self.device)
+        self.qy = qy(self.y_dim, self.zy_dim, self.zay_dim, self.diva).to(self.device)
+        self.qa = qa(self.a_dim, self.za_dim, self.zay_dim, self.diva).to(self.device)
 
-        self.pzy = pzy(y_dim, zy_dim).to(self.device)
-        self.pzay = pzay(y_dim, a_dim, zay_dim).to(self.device)
-        self.pza = pza(a_dim, za_dim).to(self.device)
+        self.pzy = pzy(self.y_dim, self.zy_dim).to(self.device)
+        if self.diva:
+            self.pzay = None
+        else:
+            self.pzay = pzay(self.y_dim, self.a_dim, self.zay_dim).to(self.device)
+        self.pza = pza(self.a_dim, self.za_dim).to(self.device)
 
     def forward(self, a, x, y):
         # Encode
@@ -122,12 +147,21 @@ class VAE(NModule):
 
         zy = z[:, self.zy_index_range[0]:self.zy_index_range[1]]
         zx = z[:, self.zx_index_range[0]:self.zx_index_range[1]]
-        zay = z[:, self.zay_index_range[0]:self.zay_index_range[1]]
+        if self.diva:
+            zay = None
+        else:
+            zay = z[:, self.zay_index_range[0]:self.zay_index_range[1]]
         za = z[:, self.za_index_range[0]:self.za_index_range[1]]
         
         if not hasattr(self, '_shape_checked'):
-            print(f"Split latent vectors - zy: {zy.shape}, zx: {zx.shape}, zay: {zay.shape}, za: {za.shape}")
+            zay_shape = "None" if zay is None else zay.shape
+            print(f"Split latent vectors - zy: {zy.shape}, zx: {zx.shape}, zay: {zay_shape}, za: {za.shape}")
             self._shape_checked = True
+
+        if self.diva:
+            assert z.shape[1] == self.zy_dim + self.zx_dim + self.za_dim
+        else:
+            assert z.shape[1] == self.zy_dim + self.zx_dim + self.zay_dim + self.za_dim
 
         # Decoder Reconstruction
         x_recon = self.px(zy, zx, zay, za)
@@ -138,16 +172,20 @@ class VAE(NModule):
         pzx_loc = torch.zeros_like(zx).to(self.device)  # Use zeros_like to match zx tensor
         pzx_scale = torch.ones_like(zx).to(self.device) # Use ones_like to match zx tensor
         pza_loc, pza_scale = self.pza(a)
-        pzay_loc, pzay_scale = self.pzay(y, a)
+        
+        if self.diva:
+            pzay_loc, pzay_scale = None, None
+        else:
+            pzay_loc, pzay_scale = self.pzay(y, a)
 
         # Priors Reparameterization
-
         pzy = dist.Normal(pzy_loc, pzy_scale)
         pzx = dist.Normal(pzx_loc, pzx_scale)
         pza = dist.Normal(pza_loc, pza_scale)
-        pzay = dist.Normal(pzay_loc, pzay_scale)
-
-        
+        if self.diva:
+            pzay = None
+        else:
+            pzay = dist.Normal(pzay_loc, pzay_scale)
 
         # Auxiliary
         y_hat = self.qy(zy, zay)
@@ -156,18 +194,29 @@ class VAE(NModule):
         return x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za #zs were sampled from q
 
 
-
-    def loss_function(self, a, x, y):
+    def loss_function(self, a, x, y, current_beta):
         x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = self.forward(y, x, a)
         log_prob_z = qz.log_prob(z)
         log_prob_zy = log_prob_z[:, self.zy_index_range[0]:self.zy_index_range[1]]
         log_prob_zx = log_prob_z[:, self.zx_index_range[0]:self.zx_index_range[1]]
-        log_prob_zay = log_prob_z[:, self.zay_index_range[0]:self.zay_index_range[1]]
+        if self.diva:
+            log_prob_zay = torch.zeros_like(log_prob_zy)  # Create zero tensor for DIVA mode
+        else:
+            log_prob_zay = log_prob_z[:, self.zay_index_range[0]:self.zay_index_range[1]]
         log_prob_za = log_prob_z[:, self.za_index_range[0]:self.za_index_range[1]]
+
         x_recon_loss = F.mse_loss(x_recon, x, reduction='sum')
+        
+        # Get current beta value for annealing
+        #print('current_beta: ', current_beta)
+        #current_beta = 2
+        
         kl_zy = torch.sum(log_prob_zy - pzy.log_prob(zy))
         kl_zx = torch.sum(log_prob_zx - pzx.log_prob(zx))
-        kl_zay = torch.sum(log_prob_zay - pzay.log_prob(zay))
+        if self.diva:
+            kl_zay = torch.zeros_like(kl_zy)
+        else:
+            kl_zay = torch.sum(log_prob_zay - pzay.log_prob(zay))
         kl_za = torch.sum(log_prob_za - pza.log_prob(za))
 
         # Handle y label - could be index or one-hot
@@ -191,9 +240,11 @@ class VAE(NModule):
 
         # Calculate positive loss (removing negative sign)
         # In VAEs, we want to minimize the reconstruction loss + KL divergence
-        total_loss = self.recon_weight * x_recon_loss + self.beta_1 * kl_zy + self.beta_2 * kl_zx \
-                    + self.beta_3 * kl_zay + self.beta_4 * kl_za \
-                    + self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy
+        # Apply current_beta to all KL terms
+        total_loss = self.recon_weight * x_recon_loss + \
+                    current_beta * (self.beta_1 * kl_zy + self.beta_2 * kl_zx + \
+                    self.beta_3 * kl_zay + self.beta_4 * kl_za) + \
+                    self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy
 
         return total_loss, y_cross_entropy
     
@@ -202,7 +253,10 @@ class VAE(NModule):
             z_loc, z_scale = self.qz(x)
             zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
             zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
-            zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
+            if self.diva:
+                zay = torch.zeros_like(zy)
+            else:
+                zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
             za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
             y_hat = self.qy(zy, zay)
             return y_hat
@@ -260,10 +314,13 @@ class VAE(NModule):
             pza = dist.Normal(pza_loc, pza_scale)
             za = pza.sample()
             
-            # Class-hospital interaction latent variable
-            pzay_loc, pzay_scale = self.pzay(y, a)
-            pzay = dist.Normal(pzay_loc, pzay_scale)
-            zay = pzay.sample()
+            if self.diva:
+                zay = None
+            else:
+                # Class-hospital interaction latent variable
+                pzay_loc, pzay_scale = self.pzay(y, a)
+                pzay = dist.Normal(pzay_loc, pzay_scale)
+                zay = pzay.sample()
             
             generated_images_full = self.px(zy, zx, zay, za)
         
@@ -283,15 +340,10 @@ class qz(NModule):
                  out_channels=64,
                  kernel=3,
                  stride=1,
-                 padding=1
-                 ):
+                 padding=1,
+                 diva=False):
         super().__init__()
-
-        self.zy_dim = zy_dim
-        self.zx_dim = zx_dim
-        self.zay_dim = zay_dim
-        self.za_dim = za_dim
-        self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
+        self.diva = diva
         
         # Modified encoder for 448x448x3 input
         self.encoder = nn.Sequential(
@@ -336,7 +388,7 @@ class qz(NModule):
         h = self.encoder(x)
         h = F.relu(h)
         z_loc = self.loc(h)
-        z_scale = F.softplus(self.scale(h)) + 1e-7
+        z_scale = F.softplus(self.scale(h)) + 1e-6
         
         # h = self.encoder(x)
         # z_loc = self.loc(h)
@@ -356,61 +408,62 @@ class qz_new(NModule):
                  out_channels=64,
                  kernel=3,
                  stride=1,
-                 padding=1
-                 ):
+                 padding=1,
+                 diva=False):
         super().__init__()
-
-        self.zy_dim = zy_dim
-        self.zx_dim = zx_dim
-        self.zay_dim = zay_dim
-        self.za_dim = za_dim
-        self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
         
-        # Modified encoder for 96x96x3 input
+
+        # Enhanced encoder architecture with proper downsampling
         self.encoder = nn.Sequential(
             # 96x96x3 -> 48x48x64
-            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+            nn.Conv2d(in_channels, out_channels, kernel, stride, padding),
+            nn.BatchNorm2d(out_channels),
+            nn.LeakyReLU(0.2),
             nn.MaxPool2d(2),
             
             # 48x48x64 -> 24x24x128
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+            nn.Conv2d(out_channels, out_channels*2, kernel, stride, padding),
+            nn.BatchNorm2d(out_channels*2),
+            nn.LeakyReLU(0.2),
             nn.MaxPool2d(2),
             
             # 24x24x128 -> 12x12x256
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+            nn.Conv2d(out_channels*2, out_channels*4, kernel, stride, padding),
+            nn.BatchNorm2d(out_channels*4),
+            nn.LeakyReLU(0.2),
             nn.MaxPool2d(2),
             
             # 12x12x256 -> 6x6x512
-            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
+            nn.Conv2d(out_channels*4, out_channels*8, kernel, stride, padding),
+            nn.BatchNorm2d(out_channels*8),
+            nn.LeakyReLU(0.2),
             nn.MaxPool2d(2),
-            
-            # 6x6x512 -> 3x3x512
-            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            
-            nn.Flatten()
         )
         
-        # Adjust linear layer dimensions: 3x3x512 = 4608
-        self.loc = nn.Linear(4608, z_total_dim)
-        self.scale = nn.Linear(4608, z_total_dim)
-
-    def forward(self, x):
-        h = self.encoder(x)
-        h = F.relu(h)
-        z_loc = self.loc(h)
-        z_scale = F.softplus(self.scale(h)) + 1e-7
-        return z_loc, z_scale
+        # Calculate the size of flattened features: 6x6x512 = 18432
+        self.flat_features = out_channels*8 * 6 * 6
         
+        # Latent space projections
+        self.fc_mu = nn.Linear(self.flat_features, z_total_dim)
+        self.fc_var = nn.Linear(self.flat_features, z_total_dim)
+        
+    def forward(self, x):
+        # Encode
+        x = self.encoder(x)
+        x = x.view(x.size(0), -1)  # Flatten
+        
+        # Get mean and variance
+        mu = self.fc_mu(x)
+        log_var = self.fc_var(x)
+        std = torch.exp(0.5 * log_var)
+        
+        return mu, std
+
 #Auxiliarry classifiers
 class qy(NModule):
-    def __init__(self, y_dim, zy_dim, zay_dim):
+    def __init__(self, y_dim, zy_dim, zay_dim, diva=False):
         super().__init__()
+        self.diva = diva
 
         self.fc1 = nn.Linear(zy_dim + zay_dim, 64)
         self.fc2 = nn.Linear(64, y_dim)
@@ -421,7 +474,11 @@ class qy(NModule):
             self.fc1.bias.zero_()
 
     def forward(self, zy, zay):
-        z_combined = torch.cat((zy, zay), -1)
+        if self.diva:
+            z_combined = zy
+        else:
+            z_combined = torch.cat((zy, zay), -1)
+        
         h = self.fc1(z_combined)
         h = F.relu(h)
         h = self.fc2(h)
@@ -432,8 +489,9 @@ class qy(NModule):
 
 
 class qa(NModule):
-    def __init__(self, a_dim, za_dim, zay_dim):
+    def __init__(self, a_dim, za_dim, zay_dim, diva=False):
         super().__init__()
+        self.diva = diva
 
         self.z_combined_dim = za_dim + zay_dim
 
@@ -446,7 +504,14 @@ class qa(NModule):
             self.fc1.bias.zero_()
 
     def forward(self, za, zay):
-        z_combined = torch.cat((za, zay), -1)
+        if self.diva:
+            # When diva=True, we only use za
+            z_combined = za
+        else:
+            # When diva=False, concatenate za and zay
+            z_combined = torch.cat((za, zay), -1)
+
+    
         h = self.fc1(z_combined)
         h = F.relu(h)
         h = self.fc2(h)
@@ -529,8 +594,10 @@ class px(NModule):
             out_channels,
             kernel,
             stride=1,
-            padding=1):
+            padding=1,
+            diva=False):
         super().__init__()
+        self.diva = diva
         
         # Store parameters
         self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
@@ -562,7 +629,11 @@ class px(NModule):
         
     def forward(self, zy, zx, zay, za):
         # Combine latent variables
-        z_combined = torch.cat((zy, zx, zay, za), -1)
+        if self.diva:
+            assert zay is None, "zay should be None in DIVA mode"
+            z_combined = torch.cat((zy, zx, za), -1)
+        else:
+            z_combined = torch.cat((zy, zx, zay, za), -1)
         
         combined_features = z_combined
         
@@ -585,39 +656,56 @@ class px_new(NModule):
             out_channels,
             kernel,
             stride=1,
-            padding=1):
+            padding=1,
+            diva=False):
         super().__init__()
+        self.diva = diva
+        # Calculate initial size for decoder
+        self.initial_size = 6  # Starting from 6x6
+        self.initial_channels = out_channels*8  # 512 channels
         
-        self.z_total_dim = zy_dim + zx_dim + zay_dim + za_dim
+        # Project latent space to initial feature map
+        self.fc = nn.Linear(z_total_dim, self.initial_channels * self.initial_size * self.initial_size)
         
-        # Initial projection to match encoder's final dimensions
-        self.fc1 = nn.Linear(z_total_dim, 512 * 3 * 3)
-        
-        # Decoder for 96x96 output
+        # Enhanced decoder architecture with proper upsampling
         self.decoder = nn.Sequential(
-            # 3x3 -> 6x6
-            nn.ConvTranspose2d(512, 512, 4, 2, 1),
-            nn.ReLU(),
-            # 6x6 -> 12x12
-            nn.ConvTranspose2d(512, 256, 4, 2, 1),
-            nn.ReLU(),
-            # 12x12 -> 24x24
-            nn.ConvTranspose2d(256, 128, 4, 2, 1),
-            nn.ReLU(),
-            # 24x24 -> 48x48
-            nn.ConvTranspose2d(128, 64, 4, 2, 1),
-            nn.ReLU(),
-            # 48x48 -> 96x96
-            nn.ConvTranspose2d(64, 3, 4, 2, 1),
-            nn.Sigmoid()
+            # 6x6x512 -> 12x12x256
+            nn.ConvTranspose2d(self.initial_channels, out_channels*4, 4, 2, 1),
+            nn.BatchNorm2d(out_channels*4),
+            nn.LeakyReLU(0.2),
+            
+            # 12x12x256 -> 24x24x128
+            nn.ConvTranspose2d(out_channels*4, out_channels*2, 4, 2, 1),
+            nn.BatchNorm2d(out_channels*2),
+            nn.LeakyReLU(0.2),
+            
+            # 24x24x128 -> 48x48x64
+            nn.ConvTranspose2d(out_channels*2, out_channels, 4, 2, 1),
+            nn.BatchNorm2d(out_channels),
+            nn.LeakyReLU(0.2),
+            
+            # 48x48x64 -> 96x96x3
+            nn.ConvTranspose2d(out_channels, in_channels, 4, 2, 1),
+            nn.Sigmoid()  # Ensure output is in [0,1] range
         )
         
     def forward(self, zy, zx, zay, za):
-        z_combined = torch.cat((zy, zx, zay, za), -1)
-        h = self.fc1(z_combined)
-        h = h.view(-1, 512, 3, 3)
-        h = self.decoder(h)
-        return h
+        # Combine latent variables
+        if self.diva:
+            # When diva=True, we only use za
+            z_combined = torch.cat([zy, zx, za], dim=1)
+        else:
+            # When diva=False, concatenate za and zay
+            z_combined = torch.cat([zy, zx, zay, za], dim=1)
+        combined_features = z_combined
+        # Project to initial feature map
+        x = self.fc(z_combined)
+        x = x.view(-1, self.initial_channels, self.initial_size, self.initial_size)
+        
+        # Decode
+        x = self.decoder(x)
+        
+        return x
 
 # y is input, y is one hot encoded as vector of dimension y_dim.
 class pzy(NModule):
@@ -905,7 +993,7 @@ class VAE_LowRes(NModule):
         kl_zx = torch.sum(log_prob_zx - pzx.log_prob(zx))
         kl_zay = torch.sum(log_prob_zay - pzay.log_prob(zay))
         kl_za = torch.sum(log_prob_za - pza.log_prob(za))
-
+        
         # Handle y label - could be index or one-hot
         if len(y.shape) > 1 and y.shape[1] > 1:
             # One-hot encoded
@@ -921,7 +1009,7 @@ class VAE_LowRes(NModule):
         else:
             # Index tensor
             a_target = a.long()
-            
+
         y_cross_entropy = F.cross_entropy(y_hat, y_target, reduction='sum')
         a_cross_entropy = F.cross_entropy(a_hat, a_target, reduction='sum')
 
@@ -938,7 +1026,10 @@ class VAE_LowRes(NModule):
             z_loc, z_scale = self.qz(x)
             zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
             zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
-            zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
+            if self.diva:
+                zay = torch.zeros_like(zy)
+            else:
+                zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
             za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
             y_hat = self.qy(zy, zay)
             return y_hat
@@ -996,10 +1087,13 @@ class VAE_LowRes(NModule):
             pza = dist.Normal(pza_loc, pza_scale)
             za = pza.sample()
             
-            # Class-hospital interaction latent variable
-            pzay_loc, pzay_scale = self.pzay(y, a)
-            pzay = dist.Normal(pzay_loc, pzay_scale)
-            zay = pzay.sample()
+            if self.diva:
+                zay = None
+            else:
+                # Class-hospital interaction latent variable
+                pzay_loc, pzay_scale = self.pzay(y, a)
+                pzay = dist.Normal(pzay_loc, pzay_scale)
+                zay = pzay.sample()
             
             generated_images_full = self.px(zy, zx, zay, za)
         

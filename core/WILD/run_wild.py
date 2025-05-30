@@ -188,14 +188,14 @@ def get_args():
     # Model-specific arguments
     parser.add_argument('--zy_dim', type=int, default=128, help='Latent dimension for zy (VAE only)')
     parser.add_argument('--zx_dim', type=int, default=128, help='Latent dimension for zx (VAE only)')
-    parser.add_argument('--zay_dim', type=int, default=64, help='Latent dimension for zay (VAE only)')
-    parser.add_argument('--za_dim', type=int, default=64, help='Latent dimension for za (VAE only)')
+    parser.add_argument('--zay_dim', type=int, default=129, help='Latent dimension for zay (VAE only)')
+    parser.add_argument('--za_dim', type=int, default=128, help='Latent dimension for za (VAE only)')
     parser.add_argument('--beta_1', type=float, default=1.0, help='Beta 1 for VAE loss')
     parser.add_argument('--beta_2', type=float, default=1.0, help='Beta 2 for VAE loss')
     parser.add_argument('--beta_3', type=float, default=1.0, help='Beta 3 for VAE loss')
     parser.add_argument('--beta_4', type=float, default=1.0, help='Beta 4 for VAE loss')
-    parser.add_argument('--alpha_1', type=float, default=1.0, help='Alpha 1 for VAE loss')
-    parser.add_argument('--alpha_2', type=float, default=1.0, help='Alpha 2 for VAE loss')
+    parser.add_argument('--alpha_1', type=float, default=1.0, help='y label loss multiplier')
+    parser.add_argument('--alpha_2', type=float, default=1.0, help='domain label loss multiplier')
     parser.add_argument('--recon_weight', type=float, default=1.0, help='Weight for reconstruction loss (VAE only)')
     parser.add_argument('--d_dim', type=int, default=5, help='Domain dimension for DIVA_VAE')
     parser.add_argument('--y_dim', type=int, default=2, help='Class dimension for DIVA_VAE')
@@ -207,46 +207,34 @@ def get_args():
                         help='Multiplier for auxiliary loss on y (DIVA_VAE only)')
     parser.add_argument('--aux_loss_multiplier_d', type=float, default=100000,
                         help='Multiplier for auxiliary loss on d (DIVA_VAE only)')
-    parser.add_argument('--beta', type=float, default=1.0, help='Beta for KL divergence in DIVA_VAE')
+    parser.add_argument('--beta_scale', type=float, default=1.0, help='Beta for KL divergence')
+    #beta annealingstore true, when --beta_annealing it is true
+    parser.add_argument('--beta_annealing', action='store_true', help='Beta annealing')
 
     return parser.parse_args()
 
 def initialize_model(args, num_classes, num_domains):
-    if args.model == 'vae':
-        if args.resolution == 'high':
-            model = VAE(class_map=None,
-                        zy_dim=args.zy_dim,
-                        zx_dim=args.zx_dim,
-                        zay_dim=args.zay_dim,
-                        za_dim=args.za_dim,
-                        y_dim=num_classes,
-                        a_dim=num_domains,
-                        beta_1=args.beta_1,
-                        beta_2=args.beta_2,
-                        beta_3=args.beta_3,
-                        beta_4=args.beta_4,
-                        alpha_1=args.alpha_1,
-                        alpha_2=args.alpha_2,
-                        device=args.device)
-        else:
-            # Use low-resolution model
-            model = VAE_LowRes(class_map=None,
-                        zy_dim=args.zy_dim,
-                        zx_dim=args.zx_dim,
-                        zay_dim=args.zay_dim,
-                        za_dim=args.za_dim,
-                        y_dim=num_classes,
-                        a_dim=num_domains,
-                        beta_1=args.beta_1,
-                        beta_2=args.beta_2,
-                        beta_3=args.beta_3,
-                        beta_4=args.beta_4,
-                        alpha_1=args.alpha_1,
-                        alpha_2=args.alpha_2,
-                        device=args.device)
-    elif args.model == 'diva':
-        model = DIVA_VAE(args)
+    
+    model = VAE(class_map=None,
+                zy_dim=args.zy_dim,
+                zx_dim=args.zx_dim,
+                zay_dim=args.zay_dim,
+                za_dim=args.za_dim,
+                y_dim=num_classes,
+                a_dim=num_domains,
+                beta_1=args.beta_1,
+                beta_2=args.beta_2,
+                beta_3=args.beta_3,
+                beta_4=args.beta_4,
+                alpha_1=args.alpha_1,
+                alpha_2=args.alpha_2,
+                recon_weight=args.recon_weight,
+                device=args.device, 
+                resolution=args.resolution, 
+                model=args.model)
+    
     return model
+
 
 
 
