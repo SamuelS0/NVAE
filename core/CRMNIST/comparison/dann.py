@@ -67,9 +67,9 @@ class DANN(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(self.z_dim, 64),
             nn.ReLU(),
-            nn.Linear(64, self.num_y_classes),
+            nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(self.num_y_classes, self.num_y_classes)
+            nn.Linear(64, self.num_y_classes)
         )
         
         # Initialize classifier weights to match VAE's qy initialization
@@ -77,42 +77,42 @@ class DANN(nn.Module):
         with torch.no_grad():
             self.classifier[0].bias.zero_()
 
-    def forward(self, x, y, r):
+    def forward(self, x, y, r, λ=1.0):
         # Ensure input is float type
         x = x.float()
         features = self.feature_extractor(x)
-        reversed_features = grad_reverse(features)
-        domain_predictions = self.domain_discriminator(reversed_features, 1.0)
         
-        # Changed: Use the new multi-layer classifier
+        # Apply gradient reversal with adaptive λ in domain discriminator
+        domain_predictions = self.domain_discriminator(features, λ)
+        
+        # Get raw logits for classification
         y_logits = self.classifier(features)
-        y_predictions = torch.softmax(y_logits, dim=1)
 
-        return y_predictions, domain_predictions
+        return y_logits, domain_predictions
     
-    def loss_function(self, y_predictions, domain_predictions, y, r):
+    def loss_function(self, y_predictions, domain_predictions, y, r, λ=1.0):
         """
         Compute the DANN loss as a weighted sum of classification and domain losses.
         Args:
-            y_predictions: Predictions for digit classification
+            y_predictions: Raw logits for digit classification
             domain_predictions: Predictions for domain classification
             y: True digit labels
             r: True domain labels
+            λ: Weight for domain loss (should be scheduled during training)
         Returns:
             total_loss: Weighted sum of classification and domain losses
             y_loss: Classification loss
             domain_loss: Domain classification loss
         """
-        # Classification loss (digit prediction)
+        # Classification loss (digit prediction) - use raw logits
         y_loss = F.cross_entropy(y_predictions, y)
         
         # Domain loss (rotation prediction)
         domain_loss = F.cross_entropy(domain_predictions, r)
         
-        # Total loss is the sum of both losses
-        # We want to minimize classification error while maximizing domain confusion
-        λ = 1.0  # Weight for domain loss
-        total_loss = y_loss - λ * domain_loss
+        # Total loss: minimize classification error + domain adversarial loss
+        # The gradient reversal in domain discriminator handles the adversarial aspect
+        total_loss = y_loss + λ * domain_loss
         
         return total_loss, y_loss, domain_loss
 
@@ -194,3 +194,12 @@ class DANN(nn.Module):
             plt.savefig(save_path)
             print(f"Latent space visualization saved to {save_path}")
         plt.close()
+
+    @staticmethod
+    def get_lambda(epoch, max_epochs):
+        """
+        Adaptive lambda scheduling as described in DANN paper.
+        Lambda starts at 0 and gradually increases to 1.
+        """
+        p = epoch / max_epochs
+        return 2. / (1. + np.exp(-10 * p)) - 1

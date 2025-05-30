@@ -235,11 +235,12 @@ class VAE(NModule):
             zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
             zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
             if self.diva:
-                zay = torch.zeros_like(zy)
+                zay = None  # More efficient than creating zero tensors
             else:
                 zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
             za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
-            y_hat = self.qy(zy, zay)
+            # Use get_probabilities for inference (returns softmax probabilities)
+            y_hat = self.qy.get_probabilities(zy, zay)
             return y_hat
 
     def generate(self, y, a=None, num_samples=10, device=None):
@@ -857,19 +858,26 @@ class qy(NModule):
             self.z_combined_dim = zy_dim + zay_dim
 
         self.fc1 = nn.Linear(self.z_combined_dim, 64)
-        self.fc2 = nn.Linear(64, y_dim)
-        self.fc3 = nn.Linear(y_dim, y_dim)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, y_dim)
 
         torch.nn.init.xavier_uniform_(self.fc1.weight)
+        torch.nn.init.xavier_uniform_(self.fc2.weight)
+        torch.nn.init.xavier_uniform_(self.fc3.weight)
         with torch.no_grad():
             self.fc1.bias.zero_()
+            self.fc2.bias.zero_()
+            self.fc3.bias.zero_()
 
     def forward(self, zy, zay):
         if self.diva:
-            # When diva=True, we only use zy
+            # When diva=True, we only use zy (zay should be None)
+            if zay is not None:
+                assert torch.all(zay == 0), "zay should be None or all zeros in DIVA mode"
             z_combined = zy
         else:
             # When diva=False, concatenate zy and zay
+            assert zay is not None, "zay cannot be None in non-DIVA mode"
             z_combined = torch.cat((zy, zay), -1)
 
         h = self.fc1(z_combined)
@@ -877,8 +885,13 @@ class qy(NModule):
         h = self.fc2(h)
         h = F.relu(h)
         logits = self.fc3(h)
-        y_hat = torch.softmax(logits, dim=1)
-        return y_hat
+        # Return raw logits for numerical stability with cross_entropy loss
+        return logits
+    
+    def get_probabilities(self, zy, zay):
+        """Get probability distributions (for interpretation/inference)"""
+        logits = self.forward(zy, zay)
+        return torch.softmax(logits, dim=1)
 
 
 class qa(NModule):
@@ -893,19 +906,26 @@ class qa(NModule):
             self.z_combined_dim = za_dim + zay_dim
 
         self.fc1 = nn.Linear(self.z_combined_dim, 64)
-        self.fc2 = nn.Linear(64, a_dim)
-        self.fc3 = nn.Linear(a_dim, a_dim)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, a_dim)
 
         torch.nn.init.xavier_uniform_(self.fc1.weight)
+        torch.nn.init.xavier_uniform_(self.fc2.weight)
+        torch.nn.init.xavier_uniform_(self.fc3.weight)
         with torch.no_grad():
             self.fc1.bias.zero_()
+            self.fc2.bias.zero_()
+            self.fc3.bias.zero_()
 
     def forward(self, za, zay):
         if self.diva:
-            # When diva=True, we only use za
+            # When diva=True, we only use za (zay should be None)
+            if zay is not None:
+                assert torch.all(zay == 0), "zay should be None or all zeros in DIVA mode"
             z_combined = za
         else:
             # When diva=False, concatenate za and zay
+            assert zay is not None, "zay cannot be None in non-DIVA mode"
             z_combined = torch.cat((za, zay), -1)
 
         h = self.fc1(z_combined)
@@ -913,8 +933,13 @@ class qa(NModule):
         h = self.fc2(h)
         h = F.relu(h)
         logits = self.fc3(h)
-        a_hat = torch.softmax(logits, dim=1)
-        return a_hat
+        # Return raw logits for numerical stability with cross_entropy loss
+        return logits
+    
+    def get_probabilities(self, za, zay):
+        """Get probability distributions (for interpretation/inference)"""
+        logits = self.forward(za, zay)
+        return torch.softmax(logits, dim=1)
 
 
 

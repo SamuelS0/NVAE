@@ -813,7 +813,63 @@ def run_experiment(args):
 
         return
     
-    # Load models with error handling
+    # Handle confidence interval mode (trains models from scratch)
+    if mode == 'confidence_interval' or mode == 'all':
+        print("\n" + "="*80)
+        print("RUNNING CONFIDENCE INTERVAL EVALUATION WITH 10 SEEDS")
+        print("="*80)
+        
+        if setting == 'holdout':
+            print("Running holdout evaluation with confidence intervals...")
+            holdout_results = run_holdout_evaluation_with_seeds(args, train_loader, test_loader, class_map, spec_data)
+            print_results_with_ci(holdout_results, holdout=True)
+            
+            # Save results
+            results_path = os.path.join(args.out, 'evaluation_results_holdout_ci.json')
+            # Convert numpy arrays to lists for JSON serialization
+            json_results = {}
+            for model in holdout_results:
+                json_results[model] = {}
+                for domain in holdout_results[model]:
+                    result = holdout_results[model][domain].copy()
+                    result['accuracies'] = [float(acc) for acc in result['accuracies']]
+                    result['mean_accuracy'] = float(result['mean_accuracy'])
+                    result['std_accuracy'] = float(result['std_accuracy'])
+                    result['ci_lower'] = float(result['ci_lower'])
+                    result['ci_upper'] = float(result['ci_upper'])
+                    json_results[model][domain] = result
+            
+            with open(results_path, 'w') as f:
+                json.dump(json_results, f, indent=2)
+            print(f"\nHoldout CI results saved to {results_path}")
+            return
+            
+        elif setting == 'cross-domain':
+            print("Running cross-domain evaluation with confidence intervals...")
+            cross_domain_results = run_cross_domain_evaluation_with_seeds(args, train_loader, test_loader, spec_data)
+            print_results_with_ci(cross_domain_results, holdout=False)
+            
+            # Save results
+            results_path = os.path.join(args.out, 'evaluation_results_cross_domain_ci.json')
+            # Convert numpy arrays to lists for JSON serialization
+            json_results = {}
+            for model in cross_domain_results:
+                json_results[model] = {}
+                for domain in cross_domain_results[model]:
+                    result = cross_domain_results[model][domain].copy()
+                    result['accuracies'] = [float(acc) for acc in result['accuracies']]
+                    result['mean_accuracy'] = float(result['mean_accuracy'])
+                    result['std_accuracy'] = float(result['std_accuracy'])
+                    result['ci_lower'] = float(result['ci_lower'])
+                    result['ci_upper'] = float(result['ci_upper'])
+                    json_results[model][domain] = result
+            
+            with open(results_path, 'w') as f:
+                json.dump(json_results, f, indent=2)
+            print(f"\nCross-domain CI results saved to {results_path}")
+            return
+    
+    # Load models with error handling (only for modes that need pre-trained models)
     checkpoint_files = {
         'nvae': os.path.join(models_dir, 'nvae_checkpoint.pt'),
         'diva': os.path.join(models_dir, 'diva_checkpoint.pt'),
@@ -896,59 +952,6 @@ def run_experiment(args):
         # diva.visualize_reconstruction(test_loader, device, os.path.join(args.out, 'diva_reconstruction'))
         # dann.visualize_reconstruction(test_loader, device, os.path.join(args.out, 'dann_reconstruction'))
         # irm.visualize_reconstruction(test_loader, device, os.path.join(args.out, 'irm_reconstruction'))
-    
-    if mode == 'confidence_interval' or mode == 'all':
-        print("\n" + "="*80)
-        print("RUNNING CONFIDENCE INTERVAL EVALUATION WITH 10 SEEDS")
-        print("="*80)
-        
-        if setting == 'holdout':
-            print("Running holdout evaluation with confidence intervals...")
-            holdout_results = run_holdout_evaluation_with_seeds(args, train_loader, test_loader, class_map, spec_data)
-            print_results_with_ci(holdout_results, holdout=True)
-            
-            # Save results
-            results_path = os.path.join(args.out, 'evaluation_results_holdout_ci.json')
-            # Convert numpy arrays to lists for JSON serialization
-            json_results = {}
-            for model in holdout_results:
-                json_results[model] = {}
-                for domain in holdout_results[model]:
-                    result = holdout_results[model][domain].copy()
-                    result['accuracies'] = [float(acc) for acc in result['accuracies']]
-                    result['mean_accuracy'] = float(result['mean_accuracy'])
-                    result['std_accuracy'] = float(result['std_accuracy'])
-                    result['ci_lower'] = float(result['ci_lower'])
-                    result['ci_upper'] = float(result['ci_upper'])
-                    json_results[model][domain] = result
-            
-            with open(results_path, 'w') as f:
-                json.dump(json_results, f, indent=2)
-            print(f"\nHoldout CI results saved to {results_path}")
-            
-        elif setting == 'cross-domain':
-            print("Running cross-domain evaluation with confidence intervals...")
-            cross_domain_results = run_cross_domain_evaluation_with_seeds(args, train_loader, test_loader, spec_data)
-            print_results_with_ci(cross_domain_results, holdout=False)
-            
-            # Save results
-            results_path = os.path.join(args.out, 'evaluation_results_cross_domain_ci.json')
-            # Convert numpy arrays to lists for JSON serialization
-            json_results = {}
-            for model in cross_domain_results:
-                json_results[model] = {}
-                for domain in cross_domain_results[model]:
-                    result = cross_domain_results[model][domain].copy()
-                    result['accuracies'] = [float(acc) for acc in result['accuracies']]
-                    result['mean_accuracy'] = float(result['mean_accuracy'])
-                    result['std_accuracy'] = float(result['std_accuracy'])
-                    result['ci_lower'] = float(result['ci_lower'])
-                    result['ci_upper'] = float(result['ci_upper'])
-                    json_results[model][domain] = result
-            
-            with open(results_path, 'w') as f:
-                json.dump(json_results, f, indent=2)
-            print(f"\nCross-domain CI results saved to {results_path}")
 
 if __name__ == "__main__":
     parser = core.utils.get_parser('CRMNIST')
