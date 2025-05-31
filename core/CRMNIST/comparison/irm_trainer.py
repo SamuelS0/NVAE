@@ -5,6 +5,10 @@ import numpy as np
 from tqdm import tqdm
 import os
 import matplotlib.pyplot as plt
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+from core.utils import process_batch
+
 
 class IRMTrainer:
     def __init__(self, model, train_loader, val_loader, test_loader, device, 
@@ -36,13 +40,13 @@ class IRMTrainer:
         total_samples = 0
         
         pbar = tqdm(self.train_loader, desc="Training")
-        for batch_idx, (x, y, c, r) in enumerate(pbar):
-            x, y, r = x.to(self.device), y.to(self.device), r.to(self.device)
+        for batch_idx, batch in enumerate(pbar):
+            x, y, d = process_batch(batch, self.device, dataset_type=self.dataset)
             
             self.optimizer.zero_grad()
             
             # Forward pass and loss computation
-            irm_loss, class_loss, penalty = self.model.loss_function(x, y, r)
+            irm_loss, class_loss, penalty = self.model.loss_function(x, y, d)
             
             # Backward pass
             irm_loss.backward()
@@ -74,10 +78,10 @@ class IRMTrainer:
         total_loss = 0.0
         
         with torch.no_grad():
-            for x, y, c, r in dataloader:
-                x, y, r = x.to(self.device), y.to(self.device), r.to(self.device)
+            for batch in dataloader:
+                x, y, d = process_batch(batch, self.device, dataset_type=self.dataset)
                 
-                logits, _ = self.model.forward(x, y, r)
+                logits, _ = self.model.forward(x, y, d)
                 loss = torch.nn.functional.cross_entropy(logits, y)
                 
                 predictions = torch.argmax(logits, dim=1)

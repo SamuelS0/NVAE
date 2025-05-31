@@ -104,3 +104,47 @@ def calculate_metrics(model, y, x, r):
             'a_accuracy': a_accuracy
         }
     
+def process_batch(batch, device, dataset_type='crmnist'):
+    """
+    Process a batch of data for different dataset types.
+    
+    Args:
+        batch: Tuple of (x, y, c, d) where:
+            x: input images
+            y: labels (could be one-hot encoded)
+            c: color labels (could be one-hot encoded)
+            d: domain labels (could be one-hot encoded)
+        device: torch device to move tensors to
+        dataset_type: Type of dataset ('crmnist', 'irm', 'dann', etc.)
+        
+    Returns:
+        Tuple of (x, y, d) where:
+            x: processed input images
+            y: processed labels (converted to indices if one-hot)
+            d: processed domain labels (converted to indices if one-hot)
+    """
+
+    
+    
+    
+    
+    # Dataset-specific processing
+    if dataset_type == 'crmnist':
+        # IRM specific processing if needed
+        x, y, c, d = batch
+        x = x.to(device)
+        y = y.to(device)
+        d = d.to(device)
+    elif dataset_type == 'wild':
+        x, y, metadata = batch
+        x = x.to(device)
+        y = y.to(device)
+        #metadata = metadata.to(device)
+        d = metadata[:, 0]
+    
+    # Convert one-hot encoded labels to indices if needed
+    if len(y.shape) > 1 and y.shape[1] > 1:
+        y = torch.argmax(y, dim=1)
+    if len(d.shape) > 1 and d.shape[1] > 1:
+        d = torch.argmax(d, dim=1)
+    return x, y, d 

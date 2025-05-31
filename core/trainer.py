@@ -5,6 +5,7 @@ import numpy as np
 from typing import Dict, Tuple, Optional
 from tqdm import tqdm
 from core.CRMNIST.utils import select_diverse_sample_batch, visualize_reconstructions
+from core.utils import process_batch
 
 class Trainer:
     def __init__(
@@ -81,12 +82,12 @@ class Trainer:
         train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), 
                          desc=f"Training")
         
-        for batch_idx, (x, y, c, r) in train_pbar:
+        for batch_idx, batch in train_pbar:
             self.optimizer.zero_grad()
             
             # Move data to device
-            x, y, c, r = x.to(self.device), y.to(self.device), c.to(self.device), r.to(self.device)
-            
+            #x, y, c, r = x.to(self.device), y.to(self.device), c.to(self.device), r.to(self.device)
+            x, y, r = process_batch(batch, self.device, dataset_type=self.dataset)
             # Forward pass and loss calculation
             loss = self.model.loss_function(y, x, r)
             

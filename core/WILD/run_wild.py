@@ -101,6 +101,27 @@ def run_experiment(dataset, args):
         optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
         pbar.update(1)
     
+    #Save model parameters
+    model_params = {
+        'recon_weight': args.recon_weight,
+        'zy_dim': args.zy_dim,
+        'zx_dim': args.zx_dim,
+        'zay_dim': args.zay_dim,
+        'za_dim': args.za_dim,
+        'y_dim': num_classes,
+        'a_dim': num_domains,
+        'beta_1': args.beta_1,
+        'beta_2': args.beta_2,
+        'beta_3': args.beta_3,
+        'beta_4': args.beta_4,
+        'alpha_1': args.alpha_1,
+        'alpha_2': args.alpha_2,
+        'beta_scale': args.beta_scale,
+        'diva': args.model
+        }
+    with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
+        json.dump(model_params, f)
+    
     # Early stopping setup
     patience = 10  # Number of epochs to wait for improvement
     
@@ -175,7 +196,7 @@ def get_args():
     parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate')
     parser.add_argument('--cuda', action='store_true', default=True, help='Enable CUDA training')
     parser.add_argument('--out', type=str, default='results', help='Output directory')
-    parser.add_argument('--resolution', type=str, default='high', choices=['high', 'low'],
+    parser.add_argument('--resolution', type=str, default='low', choices=['high', 'low'],
                         help='Image resolution: high or low')
     parser.add_argument('--val_type', type=str, default='id_val', help='Validation type: id_val or val')
     
@@ -203,10 +224,6 @@ def get_args():
                     help='size of latent space 1')
     parser.add_argument('--x_dim', type=int, default=96 * 96 * 3,
                     help='input size after flattening')
-    parser.add_argument('--aux_loss_multiplier_y', type=float, default=75000.0,
-                        help='Multiplier for auxiliary loss on y (DIVA_VAE only)')
-    parser.add_argument('--aux_loss_multiplier_d', type=float, default=100000,
-                        help='Multiplier for auxiliary loss on d (DIVA_VAE only)')
     parser.add_argument('--beta_scale', type=float, default=1.0, help='Beta for KL divergence')
     #beta annealingstore true, when --beta_annealing it is true
     parser.add_argument('--beta_annealing', action='store_true', help='Beta annealing')
@@ -251,7 +268,8 @@ if __name__ == "__main__":
     # Setup data directory
     if args.data_dir is None:
         # Use default data directory in user's home folder
-        args.data_dir = os.path.expanduser("~/data/wilds")
+        #args.data_dir = os.path.expanduser("~/data/wilds")
+        args.data_dir = '/midtier/cocolab/scratch/ofn9004/WILD'
     
     # Create data directory if it doesn't exist
     print(f"📁 Data directory: {args.data_dir}")

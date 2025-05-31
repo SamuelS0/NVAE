@@ -1,8 +1,12 @@
 import torch
 from tqdm import tqdm
 import os
+import sys
+# Add project root to Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from typing import Dict, Tuple
-from utils_wild import (
+from core.utils import process_batch
+from core.WILD.utils_wild import (
     visualize_reconstructions,
     select_diverse_sample_batch,
     calculate_metrics
@@ -72,8 +76,8 @@ class WILDTrainer:
         train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), 
                          desc=f"Epoch {epoch+1} [Train]")
         
-        for batch_idx, (x, y, metadata) in train_pbar:
-            hospital_id = metadata[:, 0]
+        for batch_idx, batch in train_pbar:
+            x, y, hospital_id = process_batch(batch, self.device, dataset_type='wild')
             self.optimizer.zero_grad()
             
             if self.args.cuda:
@@ -115,8 +119,8 @@ class WILDTrainer:
                        desc=f"Epoch {epoch+1} [Val]")
         current_beta = self.get_current_beta(epoch)
         with torch.no_grad():
-            for batch_idx, (x, y, metadata) in val_pbar:
-                hospital_id = metadata[:, 0]
+            for batch_idx, batch in val_pbar:
+                x, y, hospital_id = process_batch(batch, self.device, dataset_type='wild')
                 
                 if self.args.cuda:
                     x = x.to(self.device)
@@ -172,6 +176,7 @@ class WILDTrainer:
     
     def save_final_model(self, epoch: int):
         """Save the final model state."""
+        
         final_model_path = os.path.join(self.models_dir, f'model_checkpoint_epoch_{epoch+1}.pt')
         torch.save(self.model.state_dict(), final_model_path)
         print(f"Final model saved to {final_model_path}")
