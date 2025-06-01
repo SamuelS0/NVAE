@@ -8,7 +8,7 @@ from torchvision import datasets, transforms
 from torchvision.transforms import functional, ToTensor
 from PIL import Image
 import torch.nn.functional as F
-import core.CRMNIST.utils
+import core.CRMNIST.utils_crmnist
 
 data_path = os.path.join('.','data')
 crmnist_path = os.path.join(data_path,'crmnist')
@@ -144,9 +144,9 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
 
     # transform data for each domain
     for i in range(num_domains):
-        r_transform = core.CRMNIST.utils.make_transform(domain_data, i, 'rotate_only', transform_intensity, transform_decay)
-        c_transform = core.CRMNIST.utils.make_transform(domain_data, i, 'domain_color', transform_intensity, transform_decay)
-        red_transform = core.CRMNIST.utils.make_transform(domain_data, i, 'unique_color', transform_intensity, transform_decay)
+        r_transform = core.CRMNIST.utils_crmnist.make_transform(domain_data, i, 'rotate_only', transform_intensity, transform_decay)
+        c_transform = core.CRMNIST.utils_crmnist.make_transform(domain_data, i, 'domain_color', transform_intensity, transform_decay)
+        red_transform = core.CRMNIST.utils_crmnist.make_transform(domain_data, i, 'unique_color', transform_intensity, transform_decay)
 
         labels_subset = torch.tensor(domain_data[i]['subset'])
 

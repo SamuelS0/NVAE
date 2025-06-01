@@ -12,13 +12,14 @@ from core.utils import process_batch
 
 class IRMTrainer:
     def __init__(self, model, train_loader, val_loader, test_loader, device, 
-                 lr=1e-3, weight_decay=1e-4, save_dir='./checkpoints'):
+                 lr=1e-3, weight_decay=1e-4, save_dir='./checkpoints', model_params=None):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.test_loader = test_loader
         self.device = device
         self.save_dir = save_dir
+        self.model_params = model_params
         
         # Create save directory
         os.makedirs(save_dir, exist_ok=True)

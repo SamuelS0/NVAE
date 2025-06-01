@@ -14,6 +14,7 @@ class IRM(nn.Module):
         self.penalty_weight = penalty_weight
         self.penalty_anneal_iters = penalty_anneal_iters
         self.step_count = 0
+        self.name = 'irm'
 
         # Feature extractor - EXACT same architecture as the VAE encoder (qz)
         # This matches the encoder in VAE model.py lines 796-820

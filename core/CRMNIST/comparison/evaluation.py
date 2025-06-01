@@ -6,8 +6,9 @@ from core.CRMNIST.comparison.irm import IRM
 import torch
 from core.CRMNIST.data_generation import generate_crmnist_dataset
 from core.CRMNIST.comparison.train import train_nvae, train_diva, train_dann, train_irm
-import core.CRMNIST.utils
+import core.CRMNIST.utils_crmnist as utils_crmnist
 import core.utils
+from core.utils import visualize_latent_spaces
 import json
 from torch.utils.data import DataLoader
 import torch.optim as optim
@@ -572,41 +573,41 @@ def analyze_domain_distribution(train_loader, test_loader, num_domains=6):
     
     return train_domain_counts, test_domain_counts
 
-def generate_param_based_dirname(args):
-    """
-    Generate a directory name based on key model parameters.
+# def generate_param_based_dirname(args):
+#     """
+#     Generate a directory name based on key model parameters.
     
-    Args:
-        args: Command line arguments
+#     Args:
+#         args: Command line arguments
         
-    Returns:
-        str: Directory name based on parameters
-    """
-    # Create a descriptive directory name based on key parameters
-    param_parts = [
-        f"alpha1-{args.alpha_1}",
-        f"alpha2-{args.alpha_2}",
-        f"zy{args.zy_dim}",
-        f"zx{args.zx_dim}",
-        f"zay{args.zay_dim}",
-        f"za{args.za_dim}",
-        f"b1-{args.beta_1}",
-        f"b2-{args.beta_2}",
-        f"b3-{args.beta_3}",
-        f"b4-{args.beta_4}",
-        f"ep{args.epochs}",
-        f"bs{args.batch_size}",
-        f"lr{args.learning_rate}"
-    ]
+#     Returns:
+#         str: Directory name based on parameters
+#     """
+#     # Create a descriptive directory name based on key parameters
+#     param_parts = [
+#         f"alpha1-{args.alpha_1}",
+#         f"alpha2-{args.alpha_2}",
+#         f"zy{args.zy_dim}",
+#         f"zx{args.zx_dim}",
+#         f"zay{args.zay_dim}",
+#         f"za{args.za_dim}",
+#         f"b1-{args.beta_1}",
+#         f"b2-{args.beta_2}",
+#         f"b3-{args.beta_3}",
+#         f"b4-{args.beta_4}",
+#         f"ep{args.epochs}",
+#         f"bs{args.batch_size}",
+#         f"lr{args.learning_rate}"
+#     ]
     
-    # Join with underscores and limit length
-    param_dirname = "_".join(param_parts)
+#     # Join with underscores and limit length
+#     param_dirname = "_".join(param_parts)
     
-    # Add timestamp to ensure uniqueness if parameters are identical
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    param_dirname = f"{param_dirname}_{timestamp}"
+#     # Add timestamp to ensure uniqueness if parameters are identical
+#     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+#     param_dirname = f"{param_dirname}_{timestamp}"
     
-    return param_dirname
+#     return param_dirname
 
 def save_model_args(args, output_dir):
     """
@@ -684,10 +685,97 @@ def prep_domain_data(spec_data):
 
     return spec_data, class_map
 
+def find_latest_model_checkpoint(models_dir, model_type):
+    """
+    Find the latest model checkpoint for a given model type.
+    
+    Args:
+        models_dir: Directory containing model checkpoints
+        model_type: Type of model ('nvae', 'diva', 'dann', or 'irm')
+        
+    Returns:
+        str: Path to the latest model checkpoint
+    """
+    # Get all model files of the specified type
+    model_files = [f for f in os.listdir(models_dir) if f.startswith(f"{model_type}_") and f.endswith(".pt")]
+    
+    if not model_files:
+        raise FileNotFoundError(f"No {model_type.upper()} model checkpoints found in {models_dir}")
+    
+    # Sort by timestamp (which is at the end of the filename)
+    model_files.sort(key=lambda x: x.split("_")[-1].split(".")[0], reverse=True)
+    
+    return os.path.join(models_dir, model_files[0])
+
+def load_model_checkpoint(model_type, models_dir, device):
+    """
+    Load a model checkpoint.
+    
+    Args:
+        model_type: Type of model ('nvae', 'diva', 'dann', or 'irm')
+        models_dir: Directory containing model checkpoints
+        device: Device to load the model on
+        
+    Returns:
+        tuple: (model, training_metrics)
+    """
+    # Find the latest checkpoint
+    checkpoint_path = find_latest_model_checkpoint(models_dir, model_type)
+    print(f"Loading {model_type.upper()} model from {checkpoint_path}")
+    
+    # Load checkpoint with weights_only=False to handle all saved objects
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    
+    # Verify model type matches
+    saved_model_type = checkpoint.get('model_type', model_type)
+    if saved_model_type != model_type:
+        print(f"Warning: Saved model type ({saved_model_type}) doesn't match requested type ({model_type})")
+    
+    # Create model with saved parameters
+    if model_type in ['nvae', 'diva']:
+        model = VAE(**checkpoint['params']).to(device)
+    elif model_type == 'dann':
+        model = DANN(**checkpoint['params']).to(device)
+    elif model_type == 'irm':
+        model = IRM(**checkpoint['params']).to(device)
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    
+    # Load state dict
+    model.load_state_dict(checkpoint['state_dict'])
+    
+    return model, checkpoint.get('training_metrics', {})
+
 def run_experiment(args):
     global device
-    device = args.device
-    print(f"Using device: {device}")
+    
+    # Create output directories
+    os.makedirs(args.out, exist_ok=True)
+    models_dir = os.path.join(args.out, 'comparison_models', args.setting)
+    os.makedirs(models_dir, exist_ok=True)
+    
+    # Create reconstructions directory
+    reconstructions_dir = os.path.join(args.out, 'reconstructions')
+    os.makedirs(reconstructions_dir, exist_ok=True)
+    
+    # Create domain samples directory
+    domain_samples_dir = os.path.join(args.out, 'domain_samples')
+    os.makedirs(domain_samples_dir, exist_ok=True)
+    
+    # Create latent space visualization directory
+    latent_space_dir = os.path.join(args.out, 'latent_space')
+    os.makedirs(latent_space_dir, exist_ok=True)
+    
+    # Create confidence interval directory
+    confidence_dir = os.path.join(args.out, 'confidence_intervals')
+    os.makedirs(confidence_dir, exist_ok=True)
+    
+    # Create results directory
+    results_dir = os.path.join(args.out, 'results')
+    os.makedirs(results_dir, exist_ok=True)
+    
+    # Print output directory
+    print(f"Output directory: {args.out}")
     
     # Validate arguments
     if not hasattr(args, 'mode') or args.mode is None:
@@ -700,17 +788,13 @@ def run_experiment(args):
         raise ValueError("Output directory must be specified")
     
     # Generate parameter-based subdirectory
-    param_dirname = generate_param_based_dirname(args)
-    param_output_dir = os.path.join(args.out, param_dirname)
+    param_output_dir = args.out
     
     print(f"Parameter-based output directory: {param_output_dir}")
     
     # Save model arguments to text file in the parameter-specific directory
     save_model_args(args, param_output_dir)
     
-    # Update args.out to use the parameter-specific directory for all subsequent operations
-    original_out = args.out
-    args.out = param_output_dir
     
     mode = args.mode
     print(f"Running in {mode} mode")
@@ -813,138 +897,39 @@ def run_experiment(args):
 
         return
     
-    # Handle confidence interval mode (trains models from scratch)
-    if mode == 'confidence_interval' or mode == 'all':
-        print("\n" + "="*80)
-        print("RUNNING CONFIDENCE INTERVAL EVALUATION WITH 10 SEEDS")
-        print("="*80)
+    # Load models with error handling
+    try:
+        nvae, nvae_metrics = load_model_checkpoint('nvae', models_dir, device)
+        diva, diva_metrics = load_model_checkpoint('diva', models_dir, device)
+        dann, dann_metrics = load_model_checkpoint('dann', models_dir, device)
+        # irm, irm_metrics = load_model_checkpoint('irm', models_dir, device)
         
-        if setting == 'holdout':
-            print("Running holdout evaluation with confidence intervals...")
-            holdout_results = run_holdout_evaluation_with_seeds(args, train_loader, test_loader, class_map, spec_data)
-            print_results_with_ci(holdout_results, holdout=True)
-            
-            # Save results
-            results_path = os.path.join(args.out, 'evaluation_results_holdout_ci.json')
-            # Convert numpy arrays to lists for JSON serialization
-            json_results = {}
-            for model in holdout_results:
-                json_results[model] = {}
-                for domain in holdout_results[model]:
-                    result = holdout_results[model][domain].copy()
-                    result['accuracies'] = [float(acc) for acc in result['accuracies']]
-                    result['mean_accuracy'] = float(result['mean_accuracy'])
-                    result['std_accuracy'] = float(result['std_accuracy'])
-                    result['ci_lower'] = float(result['ci_lower'])
-                    result['ci_upper'] = float(result['ci_upper'])
-                    json_results[model][domain] = result
-            
-            with open(results_path, 'w') as f:
-                json.dump(json_results, f, indent=2)
-            print(f"\nHoldout CI results saved to {results_path}")
-            return
-            
-        elif setting == 'cross-domain':
-            print("Running cross-domain evaluation with confidence intervals...")
-            cross_domain_results = run_cross_domain_evaluation_with_seeds(args, train_loader, test_loader, spec_data)
-            print_results_with_ci(cross_domain_results, holdout=False)
-            
-            # Save results
-            results_path = os.path.join(args.out, 'evaluation_results_cross_domain_ci.json')
-            # Convert numpy arrays to lists for JSON serialization
-            json_results = {}
-            for model in cross_domain_results:
-                json_results[model] = {}
-                for domain in cross_domain_results[model]:
-                    result = cross_domain_results[model][domain].copy()
-                    result['accuracies'] = [float(acc) for acc in result['accuracies']]
-                    result['mean_accuracy'] = float(result['mean_accuracy'])
-                    result['std_accuracy'] = float(result['std_accuracy'])
-                    result['ci_lower'] = float(result['ci_lower'])
-                    result['ci_upper'] = float(result['ci_upper'])
-                    json_results[model][domain] = result
-            
-            with open(results_path, 'w') as f:
-                json.dump(json_results, f, indent=2)
-            print(f"\nCross-domain CI results saved to {results_path}")
-            return
-    
-    # Load models with error handling (only for modes that need pre-trained models)
-    checkpoint_files = {
-        'nvae': os.path.join(models_dir, 'nvae_checkpoint.pt'),
-        'diva': os.path.join(models_dir, 'diva_checkpoint.pt'),
-        'dann': os.path.join(models_dir, 'dann_checkpoint.pt'),
-        'irm': os.path.join(models_dir, 'irm_checkpoint.pt')
-    }
-    
-    # Check if all checkpoint files exist
-    for model_name, checkpoint_path in checkpoint_files.items():
-        if not os.path.exists(checkpoint_path):
-            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}. Please train the {model_name.upper()} model first.")
-    
-    nvae_checkpoint = torch.load(checkpoint_files['nvae'], map_location=device)
-    diva_checkpoint = torch.load(checkpoint_files['diva'], map_location=device)
-    dann_checkpoint = torch.load(checkpoint_files['dann'], map_location=device)
-    irm_checkpoint = torch.load(checkpoint_files['irm'], map_location=device)
-
-    # Create models with saved parameters
-    nvae = VAE(**nvae_checkpoint['params']).to(device)
-    diva = VAE(**diva_checkpoint['params']).to(device)
-    dann = DANN(**dann_checkpoint['params']).to(device)
-    irm = IRM(**irm_checkpoint['params']).to(device)
-
-    # Load state dictionaries
-    nvae.load_state_dict(nvae_checkpoint['state_dict'])
-    diva.load_state_dict(diva_checkpoint['state_dict'])
-    dann.load_state_dict(dann_checkpoint['state_dict'])
-    irm.load_state_dict(irm_checkpoint['state_dict'])
-
-    # Set models to eval mode
-    nvae.eval()
-    diva.eval()
-    dann.eval()
-    irm.eval()
-
-    if setting == 'cross-domain' and mode == 'test':
-        # Run cross-domain evaluation using pre-loaded models
-        cross_domain_results = {'nvae': {}, 'diva': {}, 'dann': {}, 'irm': {}}
-        num_domains = spec_data['num_r_classes']
+        print("\nLoaded model metrics:")
+        print(f"NVAE: {nvae_metrics}")
+        print(f"DIVA: {diva_metrics}")
+        print(f"DANN: {dann_metrics}")
+        # print(f"IRM: {irm_metrics}")
         
-        # Evaluate on each domain
-        for domain in range(num_domains):
-            print(f"\nEvaluating on domain {domain} ({domain * 15}°)")
-            results = evaluate_models_with_seeds(nvae, diva, dann, irm, test_loader, test_domain=domain)
-            for model in cross_domain_results:
-                cross_domain_results[model][domain] = {
-                    'loss': results[model]['loss'],
-                    'metrics': results[model]['metrics']
-                }
-        
-        # Print results
-        print_results(cross_domain_results, holdout=False)
-
-        results_path = os.path.join(args.out, 'evaluation_results_cross_domain.json')
-        with open(results_path, 'w') as f:
-            json.dump(cross_domain_results, f, indent=2)
-        
-        print(f"\nResults saved to {results_path}")
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print("Please train the models first using --mode train")
         return
-    
+
     if mode == 'visualize':
 
         # visualize latent spaces
 
-        nvae.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'nvae_latent_space'))
+        visualize_latent_spaces(nvae, test_loader, device, type="nvae", save_path=os.path.join(args.out, 'latent_space', 'nvae_latent_space'))
         # nvae.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'nvae_disentanglement'))
         # nvae.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'nvae_latent_correlations'))
 
-        diva.visualize_latent_spaces(test_loader, device, os.path.join(args.out, 'diva_latent_space'))
+        visualize_latent_spaces(diva, test_loader, device, type= "diva", save_path=os.path.join(args.out, 'latent_space', 'diva_latent_space'))
         # diva.visualize_disentanglement(test_loader, device, os.path.join(args.out, 'diva_disentanglement'))
         # diva.visualize_latent_correlations(test_loader, device, os.path.join(args.out, 'diva_latent_correlations'))
 
-        dann.visualize_latent_space(test_loader, device, os.path.join(args.out, 'dann_latent_space'))
+        visualize_latent_spaces(dann, test_loader, device, type="dann", save_path=os.path.join(args.out, 'latent_space', 'dann_latent_space'))
         
-        irm.visualize_latent_space(test_loader, device, os.path.join(args.out, 'irm_latent_space'))
+        # irm.visualize_latent_space(test_loader, device, os.path.join(args.out, 'latent_space', 'irm_latent_space'))
 
         # visualize reconstruction
 

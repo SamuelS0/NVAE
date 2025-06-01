@@ -368,7 +368,7 @@ class qz(NModule):
             nn.MaxPool2d(2),
             
             # 28x28x512 -> 14x14x512
-            nn.Conv2d(512, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(512,512, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(2),
             

@@ -12,11 +12,11 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import os
 import random
-import core.CRMNIST.utils
+import core.CRMNIST.utils_crmnist
 from core.CRMNIST.data_generation import generate_crmnist_dataset
 from core.CRMNIST.model import VAE
 from core.train import train
-from core.CRMNIST.utils import select_diverse_sample_batch, visualize_reconstructions, visualize_conditional_generation
+from core.CRMNIST.utils_crmnist import select_diverse_sample_batch, visualize_reconstructions, visualize_conditional_generation
 from core.test import test
 
 """
@@ -58,7 +58,7 @@ def run_experiment(args):
     class_map = spec_data['class_map']
     
     # Choose labels subset if not already chosen
-    spec_data['y_c'], subsets = core.CRMNIST.utils.choose_label_subset(spec_data)
+    spec_data['y_c'], subsets = core.CRMNIST.utils_crmnist.choose_label_subset(spec_data)
     # Update domain_data with subsets
     for i, subset in subsets.items():
         if i in domain_data:

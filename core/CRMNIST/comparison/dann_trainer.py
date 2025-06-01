@@ -1,4 +1,4 @@
-from core.trainer import Trainer
+from core.CRMNIST.trainer import CRMNISTTrainer
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -7,9 +7,9 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 from core.utils import process_batch
 
-class DANNTrainer(Trainer):
-    def __init__(self, model, optimizer, device, args, patience=5):
-        super().__init__(model, optimizer, device, args, patience)
+class DANNTrainer(CRMNISTTrainer):
+    def __init__(self, model, optimizer, device, args, patience=5, model_params=None):
+        super().__init__(model, optimizer, device, args, patience, model_params)
 
     
     def _train_epoch(self, train_loader):
@@ -145,12 +145,3 @@ class DANNTrainer(Trainer):
 
         return avg_val_loss, avg_val_metrics
                 
-                
-
-                
-    
-            
-        
-        
-        
-        

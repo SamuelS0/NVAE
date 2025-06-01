@@ -42,6 +42,7 @@ class DANN(nn.Module):
         self.num_y_classes = spec_data['num_y_classes']
         self.num_r_classes = spec_data['num_r_classes'] 
         self.z_dim = z_dim
+        self.name = 'dann'
 
         # Feature extractor matching our VAE encoder architecture
         self.feature_extractor = nn.Sequential(

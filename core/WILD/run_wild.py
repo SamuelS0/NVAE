@@ -31,6 +31,7 @@ from utils_wild import (
 from trainer import WILDTrainer
 from train import train
 from test import test
+from core.utils import visualize_latent_spaces
 """
 WILD VAE training script.
 
@@ -254,8 +255,6 @@ def initialize_model(args, num_classes, num_domains):
 
 
 
-
-
 if __name__ == "__main__":
     print("🔬 WILD VAE Training Pipeline")
     print("=" * 50)
@@ -268,8 +267,7 @@ if __name__ == "__main__":
     # Setup data directory
     if args.data_dir is None:
         # Use default data directory in user's home folder
-        #args.data_dir = os.path.expanduser("~/data/wilds")
-        args.data_dir = '/midtier/cocolab/scratch/ofn9004/WILD'
+        args.data_dir = os.path.expanduser("~/data/wilds")
     
     # Create data directory if it doesn't exist
     print(f"📁 Data directory: {args.data_dir}")
@@ -335,8 +333,13 @@ if __name__ == "__main__":
     val_x, val_y, val_metadata = next(iter(val_loader))
     
     # Generate latent space analysis with progress
-    latent_recon_dir = os.path.join(args.out, 'latent_recon')
+    latent_recon_dir = os.path.join(args.out, 'latent_visualization')
     os.makedirs(latent_recon_dir, exist_ok=True)
+
+    latent_space_dir = os.path.join(args.out, 'latent_space')
+    os.makedirs(latent_space_dir, exist_ok=True)
+
+    visualize_latent_spaces(model, args.device, latent_space_dir, val_loader)
     
     latent_analysis_tasks = [
         ("Latent analysis (without components)", lambda: generate_images_latent(

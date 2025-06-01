@@ -2,12 +2,14 @@ import torch
 import os
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Any
 from tqdm import tqdm
-from core.CRMNIST.utils import select_diverse_sample_batch, visualize_reconstructions
+import core.CRMNIST.utils_crmnist as utils_crmnist
+from core.CRMNIST.utils_crmnist import get_model_name
 from core.utils import process_batch
 
-class Trainer:
+
+class CRMNISTTrainer:
     def __init__(
         self,
         model: torch.nn.Module,
@@ -15,13 +17,14 @@ class Trainer:
         device: torch.device,
         args,
         patience: int = 5,
+        model_params: Dict[str, Any] = None
     ):
         self.model = model.to(device)  # Move model to device immediately
         self.optimizer = optimizer
         self.device = device
         self.args = args
         self.patience = patience
-        
+        self.model_params = model_params
         # Early stopping setup
         self.best_val_loss = float('inf')
         self.best_val_accuracy = 0.0  # Track best accuracy for early stopping
@@ -31,8 +34,8 @@ class Trainer:
         self.best_epoch = 0
         self.best_batch_metrics = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
         
-        # Create output directories
-        self.models_dir = os.path.join(args.out, 'models')
+        # Create output directories with simpler structure
+        self.models_dir = os.path.join(args.out, 'comparison_models', args.setting)
         os.makedirs(self.models_dir, exist_ok=True)
         
         # Create reconstructions directory
@@ -42,7 +45,7 @@ class Trainer:
     def train(self, train_loader, val_loader, num_epochs: int) -> torch.nn.Module:
         """Train the model with early stopping and model checkpointing."""
         # Select a diverse sample batch for reconstruction visualization
-        # sample_batch = select_diverse_sample_batch(val_loader, self.args)
+        # sample_batch = utils_crmnist.select_diverse_sample_batch(val_loader, self.args)
         
         for epoch in range(num_epochs):
             # Training phase
@@ -63,7 +66,7 @@ class Trainer:
             # Generate and visualize reconstructions after each epoch
             # Skip for DANN models which don't do reconstructions
             # if not isinstance(self.model, DANN):
-            #     visualize_reconstructions(self.model, epoch+1, sample_batch, self.args, self.reconstructions_dir)
+            #     utils_crmnist.visualize_reconstructions(self.model, epoch+1, sample_batch, self.args, self.reconstructions_dir)
             
             # Early stopping check
             if self._check_early_stopping(val_loss, epoch, num_epochs, val_metrics):
@@ -185,9 +188,22 @@ class Trainer:
             self.best_epoch = epoch
             self.patience_counter = 0
             self.best_batch_metrics = batch_metrics
-            # Save best model immediately when new best is found
-            best_model_path = os.path.join(self.models_dir, 'model_best.pt')
-            torch.save(self.best_model_state, best_model_path)
+            
+            # Save best model with consistent naming
+            model_type = getattr(self.model, 'name', self.model.__class__.__name__.lower())
+            model_name = get_model_name(self.args, model_type)
+            best_model_path = os.path.join(self.models_dir, f'{model_name}.pt')
+            
+            # Get model parameters from training metrics
+            model_params = self.args.model_params if hasattr(self.args, 'model_params') else None
+            
+            torch.save({
+                'params': model_params,
+                'state_dict': self.best_model_state,
+                'training_metrics': self.best_batch_metrics,
+                'epoch': self.best_epoch,
+                'model_type': model_type
+            }, best_model_path)
             print(f"  New best model saved! (Validation Accuracy: {self.best_val_accuracy:.4f}, Loss: {val_loss:.4f})")
             print(f"  Best model batch metrics: {self.best_batch_metrics}")
             return False
@@ -203,6 +219,19 @@ class Trainer:
     
     def save_final_model(self, epoch: int):
         """Save the final model state."""
-        final_model_path = os.path.join(self.models_dir, f'model_checkpoint_epoch_{epoch+1}.pt')
-        torch.save(self.model.state_dict(), final_model_path)
+        # Get model type from model name or class name
+        model_type = getattr(self.model, 'name', self.model.__class__.__name__.lower())
+        model_name = get_model_name(self.args, model_type)
+        final_model_path = os.path.join(self.models_dir, f'{model_name}_final.pt')
+        
+        # Get model parameters from training metrics
+        model_params = self.args.model_params if hasattr(self.args, 'model_params') else None
+        
+        torch.save({
+            'params': self.model_params,
+            'state_dict': self.model.state_dict(),
+            'training_metrics': self.best_batch_metrics,
+            'epoch': epoch,
+            'model_type': model_type
+        }, final_model_path)
         print(f"Final model saved to {final_model_path}") 

@@ -5,6 +5,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+from sklearn.manifold import TSNE
+from tqdm import tqdm
 
 
 def get_parser(description):
@@ -103,7 +106,682 @@ def calculate_metrics(model, y, x, r):
             'y_accuracy': y_accuracy,
             'a_accuracy': a_accuracy
         }
+
+def sample_nvae(model, dataloader, num_samples, device):
+    """
+    Sample data from NVAE model and collect domain information.
     
+    Args:
+        model: NVAE model
+        dataloader: DataLoader containing (x, y, c, r) tuples
+        num_samples: Maximum number of samples to collect
+        device: torch device
+    
+    Returns:
+        zy_list, za_list, zay_list, zx_list: Lists of latent vectors
+        y_list: List of digit labels
+        domain_dict: Dictionary of domain labels
+        labels_dict: Dictionary of domain label names
+    """
+    model.eval()
+    zy_list, za_list, zay_list, zx_list = [], [], [], []
+    y_list = []
+    domain_dict = {"color": [], 'rotation': []}
+    labels_dict = {
+        "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
+        'rotation': ['0°', '15°', '30°', '45°', '60°', '75°']
+    }
+    
+    # Initialize counters for each combination
+    counts = {}
+    for digit in range(10):
+        for color in range(7):
+            for rotation in range(6):
+                counts[(digit, color, rotation)] = 0
+    
+    # Target samples per combination - ensure we get enough for visualization
+    target_samples = 50  # Minimum samples per combination for good visualization
+    total_collected = 0
+    all_combinations_satisfied = False
+    
+    with torch.no_grad():
+        pbar = tqdm(dataloader, desc="Sampling NVAE data")
+        for x, y, c, r in pbar:
+            # Only check max_samples after we have enough samples for each combination
+            if all_combinations_satisfied and total_collected >= num_samples:
+                break
+                
+            x = x.to(device)
+            y = y.to(device)
+            c = c.to(device)
+            r = r.to(device)
+            
+            # Convert to indices if one-hot encoded
+            if len(y.shape) > 1:
+                y = torch.argmax(y, dim=1)
+            if len(c.shape) > 1:
+                c = torch.argmax(c, dim=1)
+            if len(r.shape) > 1:
+                r = torch.argmax(r, dim=1)
+            
+            # Create mask for samples we want to keep
+            keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
+            
+            # Check each sample
+            for j in range(len(y)):
+                digit = y[j].item()
+                color = c[j].item()
+                rotation = r[j].item()
+                
+                # Check if we need more samples for this specific combination
+                combination = (digit, color, rotation)
+                should_keep = counts[combination] < target_samples
+                
+                if should_keep:
+                    keep_mask[j] = True
+                    counts[combination] += 1
+                    total_collected += 1
+            
+            # Apply mask to get only samples we want to keep
+            if keep_mask.any():
+                x_batch = x[keep_mask]
+                y_batch = y[keep_mask]
+                c_batch = c[keep_mask]
+                r_batch = r[keep_mask]
+                
+                # Get latent representations
+                z_loc, _ = model.qz(x_batch)
+                zy = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
+                zx = z_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
+                zay = z_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
+                za = z_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+                
+                # Store latent vectors and labels
+                zy_list.append(zy.cpu())
+                za_list.append(za.cpu())
+                zay_list.append(zay.cpu())
+                zx_list.append(zx.cpu())
+                y_list.append(y_batch.cpu())
+                domain_dict["color"].append(c_batch.cpu())
+                domain_dict["rotation"].append(r_batch.cpu())
+            
+            # Check if we have enough samples for all combinations
+            all_combinations_satisfied = all(count >= target_samples for count in counts.values())
+            
+            # Update progress bar with more detailed information
+            min_count = min(counts.values())
+            max_count = max(counts.values())
+            pbar.set_postfix({
+                'total': total_collected,
+                'min_count': min_count,
+                'max_count': max_count,
+                'target': target_samples,
+                'satisfied': all_combinations_satisfied
+            })
+    
+    # Print detailed statistics about the sampling
+    print("\nSampling Statistics:")
+    print(f"Total samples collected: {total_collected}")
+    print(f"Target samples per combination: {target_samples}")
+    print(f"Minimum samples per combination: {min(counts.values())}")
+    print(f"Maximum samples per combination: {max(counts.values())}")
+    
+    # Print distribution of samples across digits
+    digit_counts = {i: 0 for i in range(10)}
+    for (digit, _, _), count in counts.items():
+        digit_counts[digit] += count
+    print("\nSamples per digit:")
+    for digit, count in digit_counts.items():
+        print(f"Digit {digit}: {count} samples")
+    
+    # Print distribution of samples across colors
+    color_counts = {i: 0 for i in range(7)}
+    for (_, color, _), count in counts.items():
+        color_counts[color] += count
+    print("\nSamples per color:")
+    for color, count in color_counts.items():
+        print(f"{labels_dict['color'][color]}: {count} samples")
+    
+    # Print distribution of samples across rotations
+    rotation_counts = {i: 0 for i in range(6)}
+    for (_, _, rotation), count in counts.items():
+        rotation_counts[rotation] += count
+    print("\nSamples per rotation:")
+    for rotation, count in rotation_counts.items():
+        print(f"{labels_dict['rotation'][rotation]}: {count} samples")
+    
+    return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
+
+def sample_diva(model, dataloader, num_samples, device):
+    """
+    Sample data from DIVA model and collect domain information.
+    DIVA is similar to NVAE but doesn't have a zay latent space.
+    
+    Args:
+        model: DIVA model
+        dataloader: DataLoader containing (x, y, c, r) tuples
+        num_samples: Maximum number of samples to collect
+        device: torch device
+    
+    Returns:
+        zy_list, za_list, zay_list, zx_list: Lists of latent vectors
+        y_list: List of digit labels
+        domain_dict: Dictionary of domain labels
+        labels_dict: Dictionary of domain label names
+    """
+    model.eval()
+    zy_list, za_list, zx_list = [], [], []
+    y_list = []
+    domain_dict = {"color": [], 'rotation': []}
+    labels_dict = {
+        "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
+        'rotation': ['0°', '15°', '30°', '45°', '60°', '75°']
+    }
+    
+    # Initialize counters for each combination
+    counts = {}
+    for digit in range(10):
+        for color in range(7):
+            for rotation in range(6):
+                counts[(digit, color, rotation)] = 0
+    
+    # Target samples per combination - ensure we get enough for visualization
+    target_samples = 50  # Minimum samples per combination for good visualization
+    total_collected = 0
+    all_combinations_satisfied = False
+    
+    with torch.no_grad():
+        pbar = tqdm(dataloader, desc="Sampling DIVA data")
+        for x, y, c, r in pbar:
+            # Only check max_samples after we have enough samples for each combination
+            if all_combinations_satisfied and total_collected >= num_samples:
+                break
+                
+            x = x.to(device)
+            y = y.to(device)
+            c = c.to(device)
+            r = r.to(device)
+            
+            # Convert to indices if one-hot encoded
+            if len(y.shape) > 1:
+                y = torch.argmax(y, dim=1)
+            if len(c.shape) > 1:
+                c = torch.argmax(c, dim=1)
+            if len(r.shape) > 1:
+                r = torch.argmax(r, dim=1)
+            
+            # Create mask for samples we want to keep
+            keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
+            
+            # Check each sample
+            for j in range(len(y)):
+                digit = y[j].item()
+                color = c[j].item()
+                rotation = r[j].item()
+                
+                # Check if we need more samples for this specific combination
+                combination = (digit, color, rotation)
+                should_keep = counts[combination] < target_samples
+                
+                if should_keep:
+                    keep_mask[j] = True
+                    counts[combination] += 1
+                    total_collected += 1
+            
+            # Apply mask to get only samples we want to keep
+            if keep_mask.any():
+                x_batch = x[keep_mask]
+                y_batch = y[keep_mask]
+                c_batch = c[keep_mask]
+                r_batch = r[keep_mask]
+                
+                # Get latent representations
+                z_loc, _ = model.qz(x_batch)
+                zy = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
+                zx = z_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
+                za = z_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+                
+                # Store latent vectors and labels
+                zy_list.append(zy.cpu())
+                za_list.append(za.cpu())
+                zx_list.append(zx.cpu())
+                y_list.append(y_batch.cpu())
+                domain_dict["color"].append(c_batch.cpu())
+                domain_dict["rotation"].append(r_batch.cpu())
+            
+            # Check if we have enough samples for all combinations
+            all_combinations_satisfied = all(count >= target_samples for count in counts.values())
+            
+            # Update progress bar with more detailed information
+            min_count = min(counts.values())
+            max_count = max(counts.values())
+            pbar.set_postfix({
+                'total': total_collected,
+                'min_count': min_count,
+                'max_count': max_count,
+                'target': target_samples,
+                'satisfied': all_combinations_satisfied
+            })
+    
+    # Print detailed statistics about the sampling
+    print("\nSampling Statistics:")
+    print(f"Total samples collected: {total_collected}")
+    print(f"Target samples per combination: {target_samples}")
+    print(f"Minimum samples per combination: {min(counts.values())}")
+    print(f"Maximum samples per combination: {max(counts.values())}")
+    
+    # Print distribution of samples across digits
+    digit_counts = {i: 0 for i in range(10)}
+    for (digit, _, _), count in counts.items():
+        digit_counts[digit] += count
+    print("\nSamples per digit:")
+    for digit, count in digit_counts.items():
+        print(f"Digit {digit}: {count} samples")
+    
+    # Print distribution of samples across colors
+    color_counts = {i: 0 for i in range(7)}
+    for (_, color, _), count in counts.items():
+        color_counts[color] += count
+    print("\nSamples per color:")
+    for color, count in color_counts.items():
+        print(f"{labels_dict['color'][color]}: {count} samples")
+    
+    # Print distribution of samples across rotations
+    rotation_counts = {i: 0 for i in range(6)}
+    for (_, _, rotation), count in counts.items():
+        rotation_counts[rotation] += count
+    print("\nSamples per rotation:")
+    for rotation, count in rotation_counts.items():
+        print(f"{labels_dict['rotation'][rotation]}: {count} samples")
+    
+    # Return None for zay_list since DIVA doesn't have it
+    return zy_list, za_list, None, zx_list, y_list, domain_dict, labels_dict
+
+def sample_dann(model, dataloader, num_samples, device):
+    """
+    Sample data from DANN model and collect domain information.
+    
+    Args:
+        model: DANN model
+        dataloader: DataLoader containing (x, y, c, r) tuples
+        num_samples: Maximum number of samples to collect
+        device: torch device
+    
+    Returns:
+        zy_list, za_list, zay_list, zx_list: Lists of latent vectors
+        y_list: List of digit labels
+        domain_dict: Dictionary of domain labels
+        labels_dict: Dictionary of domain label names
+    """
+    model.eval()
+    zy_list, za_list, zay_list, zx_list = [], [], [], []
+    y_list = []
+    domain_dict = {"rotation": []}  # DANN only uses rotation as domain
+    labels_dict = {
+        "rotation": ['0°', '15°', '30°', '45°', '60°', '75°']
+    }
+    
+    # Initialize counters for each combination
+    counts = {}
+    for digit in range(10):
+        for rotation in range(6):
+            counts[(digit, rotation)] = 0
+    
+    # Target samples per combination - ensure we get enough for visualization
+    target_samples = 50  # Minimum samples per combination for good visualization
+    total_collected = 0
+    all_combinations_satisfied = False
+    
+    with torch.no_grad():
+        pbar = tqdm(dataloader, desc="Sampling DANN data")
+        for x, y, c, r in pbar:
+            # Only check max_samples after we have enough samples for each combination
+            if all_combinations_satisfied and total_collected >= num_samples:
+                break
+                
+            x = x.to(device)
+            y = y.to(device)
+            c = c.to(device)
+            r = r.to(device)
+            
+            # Convert to indices if one-hot encoded
+            if len(y.shape) > 1:
+                y = torch.argmax(y, dim=1)
+            if len(c.shape) > 1:
+                c = torch.argmax(c, dim=1)
+            if len(r.shape) > 1:
+                r = torch.argmax(r, dim=1)
+            
+            # Create mask for samples we want to keep
+            keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
+            
+            # Check each sample
+            for j in range(len(y)):
+                digit = y[j].item()
+                rotation = r[j].item()
+                
+                # Check if we need more samples for this specific combination
+                combination = (digit, rotation)
+                should_keep = counts[combination] < target_samples
+                
+                if should_keep:
+                    keep_mask[j] = True
+                    counts[combination] += 1
+                    total_collected += 1
+            
+            # Apply mask to get only samples we want to keep
+            if keep_mask.any():
+                x_batch = x[keep_mask]
+                y_batch = y[keep_mask]
+                c_batch = c[keep_mask]
+                r_batch = r[keep_mask]
+                
+                # Get latent representations
+                features = model.get_features(x_batch)
+                
+                # For DANN, we only have one latent space (features)
+                # We'll use it for all latent spaces in visualization
+                zy_list.append(features.cpu())
+                za_list.append(features.cpu())
+                zay_list.append(features.cpu())
+                zx_list.append(features.cpu())
+                y_list.append(y_batch.cpu())
+                domain_dict["rotation"].append(r_batch.cpu())
+            
+            # Check if we have enough samples for all combinations
+            all_combinations_satisfied = all(count >= target_samples for count in counts.values())
+            
+            # Update progress bar with more detailed information
+            min_count = min(counts.values())
+            max_count = max(counts.values())
+            pbar.set_postfix({
+                'total': total_collected,
+                'min_count': min_count,
+                'max_count': max_count,
+                'target': target_samples,
+                'satisfied': all_combinations_satisfied
+            })
+    
+    # Print detailed statistics about the sampling
+    print("\nSampling Statistics:")
+    print(f"Total samples collected: {total_collected}")
+    print(f"Target samples per combination: {target_samples}")
+    print(f"Minimum samples per combination: {min(counts.values())}")
+    print(f"Maximum samples per combination: {max(counts.values())}")
+    
+    # Print distribution of samples across digits
+    digit_counts = {i: 0 for i in range(10)}
+    for (digit, _), count in counts.items():
+        digit_counts[digit] += count
+    print("\nSamples per digit:")
+    for digit, count in digit_counts.items():
+        print(f"Digit {digit}: {count} samples")
+    
+    # Print distribution of samples across rotations
+    rotation_counts = {i: 0 for i in range(6)}
+    for (_, rotation), count in counts.items():
+        rotation_counts[rotation] += count
+    print("\nSamples per rotation:")
+    for rotation, count in rotation_counts.items():
+        print(f"{labels_dict['rotation'][rotation]}: {count} samples")
+    
+    return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
+
+def sample_wild(model, dataloader, num_samples, device):
+    """
+    Sample data from WILD model and collect domain information.
+    
+    Args:
+        model: WILD model
+        dataloader: DataLoader containing (x, y, c, r) tuples
+        num_samples: Maximum number of samples to collect
+        device: torch device
+    
+    Returns:
+        zy_list, za_list, zay_list, zx_list: Lists of latent vectors
+        y_list: List of digit labels
+        domain_dict: Dictionary of domain labels
+        labels_dict: Dictionary of domain label names
+    """
+    model.eval()
+    zy_list, za_list, zay_list, zx_list = [], [], [], []
+    y_list = []
+    domain_dict = {"color": [], "rotation": []}
+    labels_dict = {
+        "color": ['black', 'blue', 'green', 'red', 'white', 'yellow', 'gray'],
+        "rotation": ['0°', '15°', '30°', '45°', '60°', '75°']
+    }
+    
+    # Initialize counters for each combination
+    counts = {}
+    for digit in range(10):
+        for color in range(7):
+            for rotation in range(6):
+                counts[(digit, color, rotation)] = 0
+    
+    # Target samples per combination - ensure we get enough for visualization
+    target_samples = 50  # Minimum samples per combination for good visualization
+    total_collected = 0
+    all_combinations_satisfied = False
+    
+    with torch.no_grad():
+        pbar = tqdm(dataloader, desc="Sampling WILD data")
+        for x, y, c, r in pbar:
+            # Only check max_samples after we have enough samples for each combination
+            if all_combinations_satisfied and total_collected >= num_samples:
+                break
+                
+            x = x.to(device)
+            y = y.to(device)
+            c = c.to(device)
+            r = r.to(device)
+            
+            # Convert to indices if one-hot encoded
+            if len(y.shape) > 1:
+                y = torch.argmax(y, dim=1)
+            if len(c.shape) > 1:
+                c = torch.argmax(c, dim=1)
+            if len(r.shape) > 1:
+                r = torch.argmax(r, dim=1)
+            
+            # Create mask for samples we want to keep
+            keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
+            
+            # Check each sample
+            for j in range(len(y)):
+                digit = y[j].item()
+                color = c[j].item()
+                rotation = r[j].item()
+                
+                # Check if we need more samples for this specific combination
+                combination = (digit, color, rotation)
+                should_keep = counts[combination] < target_samples
+                
+                if should_keep:
+                    keep_mask[j] = True
+                    counts[combination] += 1
+                    total_collected += 1
+            
+            # Apply mask to get only samples we want to keep
+            if keep_mask.any():
+                x_batch = x[keep_mask]
+                y_batch = y[keep_mask]
+                c_batch = c[keep_mask]
+                r_batch = r[keep_mask]
+                
+                # Get latent representations
+                features = model.get_features(x_batch)
+                
+                # For WILD, we only have one latent space (features)
+                # We'll use it for all latent spaces in visualization
+                zy_list.append(features.cpu())
+                za_list.append(features.cpu())
+                zay_list.append(features.cpu())
+                zx_list.append(features.cpu())
+                y_list.append(y_batch.cpu())
+                domain_dict["color"].append(c_batch.cpu())
+                domain_dict["rotation"].append(r_batch.cpu())
+            
+            # Check if we have enough samples for all combinations
+            all_combinations_satisfied = all(count >= target_samples for count in counts.values())
+            
+            # Update progress bar with more detailed information
+            min_count = min(counts.values())
+            max_count = max(counts.values())
+            pbar.set_postfix({
+                'total': total_collected,
+                'min_count': min_count,
+                'max_count': max_count,
+                'target': target_samples,
+                'satisfied': all_combinations_satisfied
+            })
+    
+    # Print detailed statistics about the sampling
+    print("\nSampling Statistics:")
+    print(f"Total samples collected: {total_collected}")
+    print(f"Target samples per combination: {target_samples}")
+    print(f"Minimum samples per combination: {min(counts.values())}")
+    print(f"Maximum samples per combination: {max(counts.values())}")
+    
+    # Print distribution of samples across digits
+    digit_counts = {i: 0 for i in range(10)}
+    for (digit, _, _), count in counts.items():
+        digit_counts[digit] += count
+    print("\nSamples per digit:")
+    for digit, count in digit_counts.items():
+        print(f"Digit {digit}: {count} samples")
+    
+    # Print distribution of samples across colors
+    color_counts = {i: 0 for i in range(7)}
+    for (_, color, _), count in counts.items():
+        color_counts[color] += count
+    print("\nSamples per color:")
+    for color, count in color_counts.items():
+        print(f"{labels_dict['color'][color]}: {count} samples")
+    
+    # Print distribution of samples across rotations
+    rotation_counts = {i: 0 for i in range(6)}
+    for (_, _, rotation), count in counts.items():
+        rotation_counts[rotation] += count
+    print("\nSamples per rotation:")
+    for rotation, count in rotation_counts.items():
+        print(f"{labels_dict['rotation'][rotation]}: {count} samples")
+    
+    return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
+
+def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=None, max_samples=5000):
+    """
+    Visualize latent spaces using t-SNE for any model with latent spaces.
+    
+    Args:
+        model: Model with latent spaces (zy, zx, zay, za)
+        dataloader: DataLoader containing (x, y, *domains) tuples
+        device: torch device
+        save_path: Optional path to save the visualization
+        max_samples: Maximum number of samples to use for visualization
+    """
+    model.eval()
+    
+    # Get data and domain information from helper functions
+    if type == "nvae":
+        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_nvae(model, dataloader, max_samples, device)
+    elif type == "diva":
+        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_diva(model, dataloader, max_samples, device)
+    elif type == "dann":
+        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_dann(model, dataloader, max_samples, device)
+    elif type == "wild":
+        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_wild(model, dataloader, max_samples, device)
+    else:  # Default to NVAE
+        raise ValueError(f"Invalid model type: {type}")
+    
+    # Concatenate tensors
+    zy = torch.cat(zy_list, dim=0)
+    za = torch.cat(za_list, dim=0)
+    zx = torch.cat(zx_list, dim=0)
+    y_labels = torch.cat(y_list, dim=0)
+    for domain_name in domain_dict:
+        domain_dict[domain_name] = torch.cat(domain_dict[domain_name], dim=0)
+    
+    # Print sample counts for all collected samples
+    print("\nNumber of samples per category:")
+    print("\nDigits:")
+    digit_counts = torch.bincount(y_labels)
+    for digit, count in enumerate(digit_counts):
+        print(f"Digit {digit}: {count} samples")
+    
+    for domain_name in domain_dict.keys():
+        print(f"\n{domain_name.capitalize()}:")
+        domain_counts = torch.bincount(domain_dict[domain_name])
+        for value, count in enumerate(domain_counts):
+            print(f"{labels_dict[domain_name][value]}: {count} samples")
+    
+    # Convert to numpy
+    zy = zy.numpy()
+    za = za.numpy()
+    zx = zx.numpy()
+    y_labels = y_labels.numpy()
+    for domain_name in domain_dict:
+        domain_dict[domain_name] = domain_dict[domain_name].numpy()
+    
+    # Run t-SNE
+    print("\nRunning t-SNE (this may take a few minutes)...")
+    tsne = TSNE(n_components=2, random_state=42, n_jobs=-1)
+    
+    # Apply t-SNE to each latent space
+    latent_spaces = [(zy, 'Label-specific (zy)')]
+    if not (hasattr(model, 'diva') and model.diva):
+        zay = torch.cat(zay_list, dim=0).numpy()
+        latent_spaces.append((zay, 'Domain-Label (zay)'))
+    latent_spaces.extend([
+        (za, 'Domain-specific (za)'),
+        (zx, 'Residual (zx)')
+    ])
+    
+    tsne_results = []
+    for space, title in tqdm(latent_spaces, desc="Computing t-SNE", unit="space"):
+        space_2d = tsne.fit_transform(space)
+        tsne_results.append((space_2d, title))
+    
+    # Create figure
+    n_cols = len(latent_spaces)
+    n_rows = 1 + len(domain_dict)  # One row for digits, one for each domain
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 5*n_rows))
+    
+    # Plot each latent space
+    for col_idx, (space_2d, title) in enumerate(tsne_results):
+        # First row: color by digit
+        scatter = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1], 
+                                         c=y_labels, cmap='tab10', alpha=0.7)
+        axes[0, col_idx].set_title(f'{title}\nColored by Digit')
+        axes[0, col_idx].legend(*scatter.legend_elements(), title="Digits")
+        
+        # Additional rows: color by each domain
+        for row_idx, (domain_name, domain_values) in enumerate(domain_dict.items(), 1):
+            scatter = axes[row_idx, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
+                                                   c=domain_values, cmap='tab10',
+                                                   vmin=0, vmax=len(labels_dict[domain_name])-1,
+                                                   alpha=0.7)
+            axes[row_idx, col_idx].set_title(f'{title}\nColored by {domain_name.capitalize()}')
+            
+            # Create custom legend for domain values
+            legend_elements = [
+                plt.Line2D([0], [0], marker='o', color='w',
+                          markerfacecolor=plt.cm.tab10(i/len(labels_dict[domain_name])),
+                          label=labels_dict[domain_name][i], markersize=10)
+                for i in range(len(labels_dict[domain_name]))
+            ]
+            axes[row_idx, col_idx].legend(handles=legend_elements, title=domain_name.capitalize())
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight', dpi=100)
+        print(f"Latent space visualization saved to {save_path}")
+    plt.close()
+
+
+
+
+
 def process_batch(batch, device, dataset_type='crmnist'):
     """
     Process a batch of data for different dataset types.

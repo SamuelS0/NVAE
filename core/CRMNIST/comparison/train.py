@@ -35,13 +35,8 @@ def train_nvae(args, spec_data, train_loader, test_loader, models_dir):
     
     optimizer = optim.Adam(nvae.parameters(), lr=args.learning_rate)
     patience = 5
-    training_metrics = train(args, nvae, optimizer, train_loader, test_loader, args.device, patience)
-
-    if training_metrics['best_model_state'] is not None:
-        nvae.load_state_dict(training_metrics['best_model_state'])
-        print("Loaded best model for final evaluation")
     
-    # Save both model parameters and state dict
+    # Define model parameters for saving
     model_params = {
         'class_map': spec_data['class_map'],
         'zy_dim': args.zy_dim,
@@ -59,17 +54,16 @@ def train_nvae(args, spec_data, train_loader, test_loader, models_dir):
         'diva': False
     }
     
-    if models_dir:
-        torch.save({
-            'params': model_params,
-            'state_dict': nvae.state_dict()
-        }, os.path.join(models_dir, "nvae_checkpoint.pt"))
+    training_metrics = train(args, nvae, optimizer, train_loader, test_loader, args.device, patience, model_params=model_params)
+
+    if training_metrics['best_model_state'] is not None:
+        nvae.load_state_dict(training_metrics['best_model_state'])
+        print("Loaded best model for final evaluation")
 
     return nvae, training_metrics
 
 def train_diva(args, spec_data, train_loader, test_loader, models_dir):
     print("Training DIVA...")
-    print(f"args zy_dim: {args.zy_dim}")
     diva = VAE(class_map=spec_data['class_map'],
                zy_dim=args.zy_dim,
                zx_dim=args.zx_dim,
@@ -90,13 +84,8 @@ def train_diva(args, spec_data, train_loader, test_loader, models_dir):
     
     optimizer = optim.Adam(diva.parameters(), lr=args.learning_rate)
     patience = 5
-    training_metrics = train(args, diva, optimizer, train_loader, test_loader, args.device, patience)
-
-    if training_metrics['best_model_state'] is not None:
-        diva.load_state_dict(training_metrics['best_model_state'])
-        print("Loaded best model for final evaluation")
     
-    # Save both model parameters and state dict
+    # Define model parameters for saving
     model_params = {
         'class_map': spec_data['class_map'],
         'zy_dim': args.zy_dim,
@@ -114,11 +103,11 @@ def train_diva(args, spec_data, train_loader, test_loader, models_dir):
         'diva': True
     }
     
-    if models_dir:
-        torch.save({
-            'params': model_params,
-            'state_dict': diva.state_dict()
-        }, os.path.join(models_dir, "diva_checkpoint.pt"))
+    training_metrics = train(args, diva, optimizer, train_loader, test_loader, args.device, patience, model_params=model_params)
+
+    if training_metrics['best_model_state'] is not None:
+        diva.load_state_dict(training_metrics['best_model_state'])
+        print("Loaded best model for final evaluation")
 
     return diva, training_metrics
 
@@ -132,23 +121,18 @@ def train_dann(args, spec_data, train_loader, test_loader, models_dir):
     dann = dann.to(args.device)
     optimizer = optim.Adam(dann.parameters(), lr=args.learning_rate)
     patience = 5
-    training_metrics = train(args, dann, optimizer, train_loader, test_loader, args.device, patience, DANNTrainer)
-
-    if training_metrics['best_model_state'] is not None:
-        dann.load_state_dict(training_metrics['best_model_state'])
-        print("Loaded best model for final evaluation")
     
-    # Save both model parameters and state dict
+    # Define model parameters for saving
     model_params = {
         'spec_data': spec_data,
         'z_dim': z_dim
     }
     
-    if models_dir:
-        torch.save({
-            'params': model_params,
-            'state_dict': dann.state_dict()
-        }, os.path.join(models_dir, "dann_checkpoint.pt"))
+    training_metrics = train(args, dann, optimizer, train_loader, test_loader, args.device, patience, DANNTrainer, model_params=model_params)
+
+    if training_metrics['best_model_state'] is not None:
+        dann.load_state_dict(training_metrics['best_model_state'])
+        print("Loaded best model for final evaluation")
 
     return dann, training_metrics
 
@@ -172,12 +156,20 @@ def train_irm(args, spec_data, train_loader, test_loader, models_dir, seed=None)
     irm = irm.to(args.device)
     
     optimizer = optim.Adam(irm.parameters(), lr=args.learning_rate)
+    patience = 5
+    
+    # Define model parameters for saving
+    model_params = {
+        'spec_data': spec_data,
+        'z_dim': z_dim,
+        'penalty_weight': 1e4,
+        'penalty_anneal_iters': 500
+    }
     
     # Simple training loop for IRM
     best_val_acc = 0.0
     best_model_state = None
     patience_counter = 0
-    patience = 5
     
     for epoch in range(args.epochs):
         # Training
@@ -220,24 +212,11 @@ def train_irm(args, spec_data, train_loader, test_loader, models_dir, seed=None)
     if best_model_state is not None:
         irm.load_state_dict(best_model_state)
     
-    # Save model if models_dir is provided and not a seed run
-    if models_dir and seed is None:
-        model_params = {
-            'spec_data': spec_data,
-            'z_dim': z_dim,
-            'penalty_weight': 1e4,
-            'penalty_anneal_iters': 500
-        }
-        
-        torch.save({
-            'params': model_params,
-            'state_dict': irm.state_dict()
-        }, os.path.join(models_dir, "irm_checkpoint.pt"))
-    
     training_metrics = {
         'best_model_epoch': epoch + 1,
         'best_validation_loss': 1.0 - best_val_acc,  # Convert accuracy to loss-like metric
-        'best_batch_metrics': {'y_accuracy': best_val_acc}
+        'best_batch_metrics': {'y_accuracy': best_val_acc},
+        'model_params': model_params
     }
     
     return irm, training_metrics

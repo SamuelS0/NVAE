@@ -65,6 +65,8 @@ class VAE(NModule):
         
         super().__init__()
 
+        self.name = 'nvae' if not diva else 'diva'
+
         self.class_map = class_map
 
         if diva:
@@ -126,6 +128,7 @@ class VAE(NModule):
 
         self.pza = pza(self.a_dim, self.za_dim)
         self.px = px(self.zy_dim, self.zx_dim, self.zay_dim, self.za_dim, self.z_total_dim, in_channels, out_channels, kernel, diva=diva)
+
 
     def forward(self, y, x, a):
         # Encode
