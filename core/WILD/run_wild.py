@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import os
 import random
 from argparse import ArgumentParser
-from model_wild import VAE, VAE_LowRes
+from core.WILD.model_wild import VAE
 from tqdm import tqdm
 from wilds import get_dataset
 from wilds.common.data_loaders import get_train_loader, get_eval_loader
@@ -22,15 +22,14 @@ import matplotlib.gridspec as gridspec
 import sys
 import time
 #from model_diva import DIVA_VAE
-from utils_wild import (
+from core.WILD.utils_wild import (
     prepare_data, 
     visualize_reconstructions,
     select_diverse_sample_batch,
     generate_images_latent
 )
-from trainer import WILDTrainer
-from train import train
-from test import test
+from core.train import train
+from core.test import test
 from core.utils import visualize_latent_spaces
 """
 WILD VAE training script.
@@ -47,6 +46,7 @@ test hospital IDs: [2]
 
 
 command: python -B WILD/run_wild.py --out results_low_res_vae/ --batch_size 128 --model vae --resolution low --epochs 50
+# '/midtier/cocolab/scratch/ofn9004/WILD'
 """
 
 def run_experiment(dataset, args):
@@ -146,7 +146,7 @@ def run_experiment(dataset, args):
     test_sample_batch = select_diverse_sample_batch(test_loader, data_type='test', samples_per_domain=10)
     
     print("  🔍 Running test evaluation...")
-    test_loss, metrics_avg = test(model, args.device, test_loader, args)
+    test_loss, metrics_avg = test(model, test_loader, dataset_type='wild', device=args.device)
     
     print(f'\n📈 Final Test Results:')
     print(f'  Test Loss: {test_loss:.4f}')
@@ -168,7 +168,7 @@ def run_experiment(dataset, args):
         results = {
             'final_test_loss': final_test_loss,
             'final_metrics': final_metrics,
-            'best_validation_loss': training_metrics['best_validation_loss'],
+            'best_val_accuracy': training_metrics['best_val_accuracy'],
             'total_epochs_trained': training_metrics['total_epochs_trained']
         }
         
@@ -202,7 +202,7 @@ def get_args():
     parser.add_argument('--val_type', type=str, default='id_val', help='Validation type: id_val or val')
     
     # Data arguments
-    parser.add_argument('--data_dir', type=str, default=None, 
+    parser.add_argument('--data_dir', type=str, default='None', 
                         help='Directory to store/load dataset (default: ~/data/wilds)')
     parser.add_argument('--download', action='store_true', default=True,
                         help='Download dataset if not found locally')
@@ -228,7 +228,7 @@ def get_args():
     parser.add_argument('--beta_scale', type=float, default=1.0, help='Beta for KL divergence')
     #beta annealingstore true, when --beta_annealing it is true
     parser.add_argument('--beta_annealing', action='store_true', help='Beta annealing')
-
+    parser.add_argument('--dataset', type=str, default='wild')
     return parser.parse_args()
 
 def initialize_model(args, num_classes, num_domains):
@@ -339,7 +339,7 @@ if __name__ == "__main__":
     latent_space_dir = os.path.join(args.out, 'latent_space')
     os.makedirs(latent_space_dir, exist_ok=True)
 
-    visualize_latent_spaces(model, args.device, latent_space_dir, val_loader)
+    visualize_latent_spaces(model=model, dataloader=val_loader, device=args.device, type='wild', save_path=latent_space_dir)
     
     latent_analysis_tasks = [
         ("Latent analysis (without components)", lambda: generate_images_latent(

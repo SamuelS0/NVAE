@@ -3,14 +3,12 @@ from tqdm import tqdm
 import os
 import sys
 # Add project root to Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from typing import Dict, Tuple
-from core.utils import process_batch
 from core.WILD.utils_wild import (
     visualize_reconstructions,
-    select_diverse_sample_batch,
-    calculate_metrics
+    select_diverse_sample_batch
 )
+from core.utils import process_batch, get_model_name, _calculate_metrics
 
 class WILDTrainer:
     def __init__(self, model, optimizer, device, args, patience=5):
@@ -21,7 +19,7 @@ class WILDTrainer:
         self.patience = patience
         
         # Early stopping setup
-        self.best_val_acc = 0.0
+        self.best_val_accuracy = 0.0
         self.best_model_state = None
         self.patience_counter = 0
         self.epochs_trained = 0
@@ -62,7 +60,7 @@ class WILDTrainer:
             for k, v in val_metrics.items():
                 print(f'  Val {k}: {v:.4f}')
             # Early stopping check
-            if self._check_early_stopping(val_metrics, epoch, num_epochs):
+            if self._check_early_stopping(val_loss, epoch, num_epochs, val_metrics):
                 break
             self.save_final_model(epoch)    
         self.epochs_trained = epoch + 1
@@ -76,6 +74,7 @@ class WILDTrainer:
         train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), 
                          desc=f"Epoch {epoch+1} [Train]")
         
+       
         for batch_idx, batch in train_pbar:
             x, y, hospital_id = process_batch(batch, self.device, dataset_type='wild')
             self.optimizer.zero_grad()
@@ -85,14 +84,13 @@ class WILDTrainer:
                 y = y.to(self.device)
                 hospital_id = hospital_id.to(self.device)
             
-            loss, class_y_loss = self.model.loss_function(hospital_id, x, y, current_beta)
+            loss = self.model.loss_function(y, x, hospital_id, current_beta)
             loss.backward()
             self.optimizer.step()
-            
             train_loss += loss.item()
             
             if batch_idx % 10 == 0:
-                batch_metrics = calculate_metrics(self.model, y, x, hospital_id, args=self.args)
+                batch_metrics = _calculate_metrics(self.model, y, x, hospital_id)
                 for k, v in batch_metrics.items():
                     train_metrics_sum[k] += v
                 num_batches += 1
@@ -127,10 +125,10 @@ class WILDTrainer:
                     y = y.to(self.device)
                     hospital_id = hospital_id.to(self.device)
                 
-                loss, _ = self.model.loss_function(hospital_id, x, y, current_beta)
+                loss = self.model.loss_function(y, x, hospital_id, current_beta)
                 val_loss += loss.item()
                 
-                batch_metrics = calculate_metrics(self.model, y, x, hospital_id, args=self.args)
+                batch_metrics = _calculate_metrics(self.model, y, x, hospital_id)
                 for k, v in batch_metrics.items():
                     val_metrics_sum[k] += v
                 
@@ -139,30 +137,45 @@ class WILDTrainer:
         val_loss /= len(val_loader)
         val_metrics = {k: v / len(val_loader) for k, v in val_metrics_sum.items()}
 
-        val_sample_batch = select_diverse_sample_batch(val_loader, data_type = self.args.val_type, samples_per_domain=10)
+        #val_sample_batch = select_diverse_sample_batch(val_loader, data_type = self.args.val_type, samples_per_domain=10)
         #save_domain_samples_visualization(*val_sample_batch, epoch+1, domain_samples_dir)
-        image_dir = os.path.join(self.reconstructions_dir, f'val_epoch_{epoch}.png')
-        visualize_reconstructions(self.model, epoch+1, val_sample_batch, image_dir, args=self.args)
+        #image_dir = os.path.join(self.reconstructions_dir, f'val_epoch_{epoch}.png')
+        #visualize_reconstructions(self.model, epoch+1, val_sample_batch, image_dir, args=self.args)
         
         return val_loss, val_metrics
 
     
-    
 
-    def _check_early_stopping(self, val_metrics: Dict[str, float], epoch: int, num_epochs: int) -> bool:
-        """Check if early stopping criteria are met based on classification accuracy."""
-        val_acc = val_metrics['y_accuracy']
+    def _check_early_stopping(self, val_loss: float, epoch: int, num_epochs: int, batch_metrics: Dict[str, float]) -> bool:
+        """Check if early stopping criteria are met based on validation accuracy."""
+        current_val_accuracy = batch_metrics['y_accuracy']
         
-        if val_acc > self.best_val_acc:
-            self.best_val_acc = val_acc
+        # Early stopping based on validation accuracy
+        if current_val_accuracy > self.best_val_accuracy:
+            self.best_val_accuracy = current_val_accuracy
+            self.best_val_loss = val_loss
             self.best_model_state = self.model.state_dict().copy()
             self.best_epoch = epoch
             self.patience_counter = 0
+            self.best_batch_metrics = batch_metrics
             
-            # Save best model immediately when new best is found
-            best_model_path = os.path.join(self.models_dir, 'model_best.pt')
-            torch.save(self.best_model_state, best_model_path)
-            print(f"  New best model saved! (Validation Accuracy: {self.best_val_acc:.4f})")
+            # Save best model with consistent naming
+            model_type = getattr(self.model, 'name', self.model.__class__.__name__.lower())
+            model_name = get_model_name(self.args, model_type)
+            best_model_path = os.path.join(self.models_dir, f'{model_name}.pt')
+            
+            # Get model parameters from training metrics
+            model_params = self.args.model_params if hasattr(self.args, 'model_params') else None
+            
+            torch.save({
+                #'params': model_params,
+                'state_dict': self.best_model_state,
+                'training_metrics': self.best_batch_metrics,
+                'epoch': self.best_epoch,
+                'model_type': model_type
+            }, best_model_path)
+            print(f"  New best model saved! (Validation Accuracy: {self.best_val_accuracy:.4f}, Loss: {val_loss:.4f})")
+            print(f"  Best model batch metrics: {self.best_batch_metrics}")
             return False
         else:
             self.patience_counter += 1
@@ -173,14 +186,28 @@ class WILDTrainer:
             if self.patience_counter >= self.patience and epoch >= min_required_epochs:
                 return True
             return False
-    
+
     def save_final_model(self, epoch: int):
         """Save the final model state."""
+        # Get model type from model name or class name
+        model_type = getattr(self.model, 'name', self.model.__class__.__name__.lower())
+        #model_name = get_model_name(self.args, model_type)
+        model_name = f'epoch_{epoch}'
+        final_model_path = os.path.join(self.models_dir, f'{model_name}_final.pt')
         
-        final_model_path = os.path.join(self.models_dir, f'model_checkpoint_epoch_{epoch+1}.pt')
-        torch.save(self.model.state_dict(), final_model_path)
-        print(f"Final model saved to {final_model_path}")
+        # Get model parameters from training metrics
+        #model_params = self.args.model_params if hasattr(self.args, 'model_params') else None
+        
+        torch.save({
+            #'params': self.model_params,
+            'state_dict': self.model.state_dict(),
+            'training_metrics': self.best_batch_metrics,
+            'epoch': epoch,
+            'model_type': model_type
+        }, final_model_path)
+        print(f"Final model saved to {final_model_path}") 
 
+    
     def get_current_beta(self, epoch):
         """Calculate the current beta value based on the epoch number.
         Beta increases linearly from 0 to 2 over max_epochs."""

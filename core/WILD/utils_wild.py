@@ -7,7 +7,6 @@ import matplotlib.gridspec as gridspec
 import torchvision.transforms as transforms
 from wilds import get_dataset
 from wilds.common.data_loaders import get_train_loader, get_eval_loader
-from model_wild import VAE
 #from model_diva import DIVA_VAE
 
 def select_diverse_sample_batch(loader, data_type = 'id_val', samples_per_domain=10):
@@ -441,31 +440,3 @@ def prepare_data(dataset, args):
     elif args.model == 'diva':
         return DIVA_VAE(args)'''
 
-def calculate_metrics(model, y, x, hospital_id, args):
-    """Calculate additional metrics beyond just loss"""
-    with torch.no_grad():
-        '''if args.model == 'vae':
-            x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(hospital_id, x, y)
-            _, a_pred = a_hat.max(1)
-            a_accuracy = (a_pred == hospital_id).float().mean().item()
-            recon_mse = torch.nn.functional.mse_loss(x_recon, x).item()
-        elif args.model == 'diva':
-            x_recon, d_hat, y_hat, qz, pz, z_q = model.forward(hospital_id, x, y)
-            _, a_pred = d_hat.max(1)
-            a_accuracy = (a_pred == hospital_id).float().mean().item()
-        
-            recon_mse = -log_mix_dep_Logistic_256(x, x_recon, average=False, n_comps=10)'''
-        x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(hospital_id, x, y)
-        _, a_pred = a_hat.max(1)
-        a_accuracy = (a_pred == hospital_id).float().mean().item()
-        recon_mse = torch.nn.functional.mse_loss(x_recon, x).item()
-        _, y_pred = y_hat.max(1)
-        y_true = y.long() if len(y.shape) == 1 or y.shape[1] == 1 else y.max(1)[1]
-        y_accuracy = (y_pred == y_true).float().mean().item()
-        
-        return {
-            'recon_mse': recon_mse,
-            'y_accuracy': y_accuracy,
-            'a_accuracy': a_accuracy
-        }
-    

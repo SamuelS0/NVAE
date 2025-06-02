@@ -16,9 +16,8 @@ import core.CRMNIST.utils_crmnist
 from core.CRMNIST.data_generation import generate_crmnist_dataset
 from core.CRMNIST.model import VAE
 from core.train import train
-from core.CRMNIST.utils_crmnist import select_diverse_sample_batch, visualize_reconstructions, visualize_conditional_generation
 from core.test import test
-
+from core.CRMNIST.utils_crmnist import select_diverse_sample_batch, visualize_reconstructions, visualize_conditional_generation
 """
 CRMNIST VAE training script.
 
@@ -108,7 +107,22 @@ def run_experiment(args):
     
     # Setup optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
-
+    model_params = {
+        'zy_dim': args.zy_dim,
+        'zx_dim': args.zx_dim,
+        'zay_dim': args.zay_dim,
+        'za_dim': args.za_dim,
+        'beta_1': args.beta_1,
+        'beta_2': args.beta_2,
+        'beta_3': args.beta_3,
+        'beta_4': args.beta_4,
+        #'alpha_1': args.alpha_1,
+        #'alpha_2': args.alpha_2,
+        'diva': False
+        }
+    with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
+        json.dump(model_params, f)
+    
     patience = 5
 
     # Train the model
@@ -180,6 +194,7 @@ if __name__ == "__main__":
     parser.add_argument('--beta_3', type=float, default=1.0)
     parser.add_argument('--beta_4', type=float, default=1.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
+    parser.add_argument('--dataset', type=str, default='crmnist')
     
     args = parser.parse_args()
     

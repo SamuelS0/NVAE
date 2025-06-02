@@ -131,7 +131,7 @@ class VAE(NModule):
             self.pzay = pzay(self.y_dim, self.a_dim, self.zay_dim).to(self.device)
         self.pza = pza(self.a_dim, self.za_dim).to(self.device)
 
-    def forward(self, a, x, y):
+    def forward(self, y, x, a):
         # Encode
         qz_loc, qz_scale = self.qz(x)
 
@@ -194,7 +194,8 @@ class VAE(NModule):
         return x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za #zs were sampled from q
 
 
-    def loss_function(self, a, x, y, current_beta):
+    def loss_function(self, y, x, a, current_beta = 1):
+
         x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = self.forward(y, x, a)
         log_prob_z = qz.log_prob(z)
         log_prob_zy = log_prob_z[:, self.zy_index_range[0]:self.zy_index_range[1]]
@@ -246,7 +247,7 @@ class VAE(NModule):
                     self.beta_3 * kl_zay + self.beta_4 * kl_za) + \
                     self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy
 
-        return total_loss, y_cross_entropy
+        return total_loss
     
     def classifier(self, x):
         with torch.no_grad():
@@ -855,7 +856,7 @@ class pza(NModule):
         
         return za_loc, za_scale
 
-class VAE_LowRes(NModule):
+'''class VAE_LowRes(NModule):
     def __init__(
             self,
             class_map,
@@ -930,7 +931,7 @@ class VAE_LowRes(NModule):
 
     # Forward, loss_function, classifier, and generate methods remain the same
     # as they operate on the latent space which is unchanged
-    def forward(self, a, x, y):
+    def forward(self, y, x, a):
         # Encode
         qz_loc, qz_scale = self.qz(x)
 
@@ -979,21 +980,32 @@ class VAE_LowRes(NModule):
 
         return x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za #zs were sampled from q
 
+    def loss_function(self, y, x, a, current_beta = 1):
 
-
-    def loss_function(self, a, x, y):
         x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = self.forward(y, x, a)
         log_prob_z = qz.log_prob(z)
         log_prob_zy = log_prob_z[:, self.zy_index_range[0]:self.zy_index_range[1]]
         log_prob_zx = log_prob_z[:, self.zx_index_range[0]:self.zx_index_range[1]]
-        log_prob_zay = log_prob_z[:, self.zay_index_range[0]:self.zay_index_range[1]]
+        if self.diva:
+            log_prob_zay = torch.zeros_like(log_prob_zy)  # Create zero tensor for DIVA mode
+        else:
+            log_prob_zay = log_prob_z[:, self.zay_index_range[0]:self.zay_index_range[1]]
         log_prob_za = log_prob_z[:, self.za_index_range[0]:self.za_index_range[1]]
+
         x_recon_loss = F.mse_loss(x_recon, x, reduction='sum')
+        
+        # Get current beta value for annealing
+        #print('current_beta: ', current_beta)
+        #current_beta = 2
+        
         kl_zy = torch.sum(log_prob_zy - pzy.log_prob(zy))
         kl_zx = torch.sum(log_prob_zx - pzx.log_prob(zx))
-        kl_zay = torch.sum(log_prob_zay - pzay.log_prob(zay))
+        if self.diva:
+            kl_zay = torch.zeros_like(kl_zy)
+        else:
+            kl_zay = torch.sum(log_prob_zay - pzay.log_prob(zay))
         kl_za = torch.sum(log_prob_za - pza.log_prob(za))
-        
+
         # Handle y label - could be index or one-hot
         if len(y.shape) > 1 and y.shape[1] > 1:
             # One-hot encoded
@@ -1009,17 +1021,19 @@ class VAE_LowRes(NModule):
         else:
             # Index tensor
             a_target = a.long()
-
+            
         y_cross_entropy = F.cross_entropy(y_hat, y_target, reduction='sum')
         a_cross_entropy = F.cross_entropy(a_hat, a_target, reduction='sum')
 
         # Calculate positive loss (removing negative sign)
         # In VAEs, we want to minimize the reconstruction loss + KL divergence
-        total_loss = self.recon_weight * x_recon_loss + self.beta_1 * kl_zy + self.beta_2 * kl_zx \
-                    + self.beta_3 * kl_zay + self.beta_4 * kl_za \
-                    + self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy
+        # Apply current_beta to all KL terms
+        total_loss = self.recon_weight * x_recon_loss + \
+                    current_beta * (self.beta_1 * kl_zy + self.beta_2 * kl_zx + \
+                    self.beta_3 * kl_zay + self.beta_4 * kl_za) + \
+                    self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy
 
-        return total_loss, y_cross_entropy
+        return total_loss
     
     def classifier(self, x):
         with torch.no_grad():
@@ -1097,4 +1111,4 @@ class VAE_LowRes(NModule):
             
             generated_images_full = self.px(zy, zx, zay, za)
         
-        return generated_images_full, y
+        return generated_images_full, y'''

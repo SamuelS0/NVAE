@@ -4,13 +4,12 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 from core.utils import process_batch
 
 class DANNTrainer(CRMNISTTrainer):
     def __init__(self, model, optimizer, device, args, patience=5, model_params=None):
         super().__init__(model, optimizer, device, args, patience, model_params)
-
+        self.dataset = args.dataset
     
     def _train_epoch(self, train_loader):
         self.model.train()

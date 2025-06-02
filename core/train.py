@@ -2,8 +2,11 @@ import torch
 import os
 from typing import Dict, Tuple
 from tqdm import tqdm
+from core.CRMNIST.trainer import CRMNISTTrainer
+from core.WILD.trainer import WILDTrainer
 
-def train(args, model, optimizer, train_loader, val_loader, device, patience, trainer_class, model_params=None):
+
+def train(args, model, optimizer, train_loader, val_loader, device, patience):
     """
     Train a model with early stopping.
     
@@ -21,14 +24,18 @@ def train(args, model, optimizer, train_loader, val_loader, device, patience, tr
     # Create output directories
     os.makedirs(args.out, exist_ok=True)
     
+    if args.dataset == 'crmnist':
+        trainer_class = CRMNISTTrainer
+    elif args.dataset == 'wild':
+        trainer_class = WILDTrainer
     # Initialize trainer
+    
     trainer = trainer_class(
         model=model,
         optimizer=optimizer,
         device=device,
         args=args,
-        patience=patience,
-        model_params=model_params
+        patience=patience
     )
     
     # Train model (updates model state in-place with best parameters)
@@ -39,12 +46,12 @@ def train(args, model, optimizer, train_loader, val_loader, device, patience, tr
 
     # Return training statistics
     return {
-        'best_validation_acc': trainer.best_val_acc,
+        'best_val_accuracy': trainer.best_val_accuracy,
         'total_epochs_trained': trainer.epochs_trained,
         'best_model_epoch': trainer.best_epoch + 1,  
         'best_model_state': trainer.best_model_state,
         'best_batch_metrics': trainer.best_batch_metrics,
-        'model_params': model_params  # Pass model params back to training function
+        #'model_params': model_params  # Pass model params back to training function
     }
 
     

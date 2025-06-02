@@ -6,12 +6,11 @@ from tqdm import tqdm
 import os
 import matplotlib.pyplot as plt
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 from core.utils import process_batch
 
 
 class IRMTrainer:
-    def __init__(self, model, train_loader, val_loader, test_loader, device, 
+    def __init__(self, model, train_loader, val_loader, test_loader, device, args,
                  lr=1e-3, weight_decay=1e-4, save_dir='./checkpoints', model_params=None):
         self.model = model
         self.train_loader = train_loader
@@ -20,7 +19,7 @@ class IRMTrainer:
         self.device = device
         self.save_dir = save_dir
         self.model_params = model_params
-        
+        self.dataset = args.dataset
         # Create save directory
         os.makedirs(save_dir, exist_ok=True)
         

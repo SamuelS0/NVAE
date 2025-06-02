@@ -2,12 +2,10 @@ import torch
 import os
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import Dict, Tuple, Optional, Any
+from typing import Dict, Tuple, Any
 from tqdm import tqdm
 import core.CRMNIST.utils_crmnist as utils_crmnist
-from core.CRMNIST.utils_crmnist import get_model_name
-from core.utils import process_batch
-
+from core.utils import process_batch, get_model_name, _calculate_metrics
 
 class CRMNISTTrainer:
     def __init__(
@@ -16,15 +14,14 @@ class CRMNISTTrainer:
         optimizer: torch.optim.Optimizer,
         device: torch.device,
         args,
-        patience: int = 5,
-        model_params: Dict[str, Any] = None
+        patience: int = 5
     ):
         self.model = model.to(device)  # Move model to device immediately
         self.optimizer = optimizer
         self.device = device
         self.args = args
         self.patience = patience
-        self.model_params = model_params
+        self.dataset = args.dataset
         # Early stopping setup
         self.best_val_loss = float('inf')
         self.best_val_accuracy = 0.0  # Track best accuracy for early stopping
@@ -102,7 +99,7 @@ class CRMNISTTrainer:
             
             # Calculate metrics
             if batch_idx % 10 == 0:  # Calculate every 10 batches to save computation
-                batch_metrics = self._calculate_metrics(y, x, r)
+                batch_metrics = _calculate_metrics(self.model, y, x, r)
                 for k, v in batch_metrics.items():
                     train_metrics_sum[k] += v
                 num_batches += 1
@@ -126,14 +123,14 @@ class CRMNISTTrainer:
                        desc=f"Validating")
         
         with torch.no_grad():
-            for batch_idx, (x, y, c, r) in val_pbar:
-                x, y, c, r = x.to(self.device), y.to(self.device), c.to(self.device), r.to(self.device)
+            for batch_idx, batch in val_pbar:
+                x, y, r = process_batch(batch, self.device, dataset_type=self.dataset)
                 
                 loss = self.model.loss_function(y, x, r)
                 val_loss += loss.item()
                 
                 # Calculate metrics
-                batch_metrics = self._calculate_metrics(y, x, r)
+                batch_metrics = _calculate_metrics(self.model, y, x, r)
                 for k, v in batch_metrics.items():
                     val_metrics_sum[k] += v
                 
@@ -146,35 +143,8 @@ class CRMNISTTrainer:
         
         return val_loss, val_metrics
     
-    def _calculate_metrics(self, y, x, r) -> Dict[str, float]:
-        """Calculate metrics for a batch."""
-        with torch.no_grad():
-            x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = self.model.forward(y, x, r)
-            
-            # Reconstruction MSE
-            recon_mse = torch.nn.functional.mse_loss(x_recon, x).item()
-            
-            # Classification accuracy
-            _, y_pred = y_hat.max(1)
-            if len(y.shape) > 1 and y.shape[1] > 1:
-                _, y_true = y.max(1)
-            else:
-                y_true = y.long()
-            y_accuracy = (y_pred == y_true).float().mean().item()
-            
-            # Attribute accuracy
-            _, a_pred = a_hat.max(1)
-            if len(r.shape) > 1 and r.shape[1] > 1:
-                _, a_true = r.max(1)
-            else:
-                a_true = r.long()
-            a_accuracy = (a_pred == a_true).float().mean().item()
-            
-            return {
-                'recon_mse': recon_mse,
-                'y_accuracy': y_accuracy,
-                'a_accuracy': a_accuracy
-            }
+    
+    
     
     def _check_early_stopping(self, val_loss: float, epoch: int, num_epochs: int, batch_metrics: Dict[str, float]) -> bool:
         """Check if early stopping criteria are met based on validation accuracy."""
@@ -194,11 +164,8 @@ class CRMNISTTrainer:
             model_name = get_model_name(self.args, model_type)
             best_model_path = os.path.join(self.models_dir, f'{model_name}.pt')
             
-            # Get model parameters from training metrics
-            model_params = self.args.model_params if hasattr(self.args, 'model_params') else None
             
             torch.save({
-                'params': model_params,
                 'state_dict': self.best_model_state,
                 'training_metrics': self.best_batch_metrics,
                 'epoch': self.best_epoch,
@@ -216,7 +183,7 @@ class CRMNISTTrainer:
             if self.patience_counter >= self.patience and epoch >= min_required_epochs:
                 return True
             return False
-    
+
     def save_final_model(self, epoch: int):
         """Save the final model state."""
         # Get model type from model name or class name
@@ -225,10 +192,10 @@ class CRMNISTTrainer:
         final_model_path = os.path.join(self.models_dir, f'{model_name}_final.pt')
         
         # Get model parameters from training metrics
-        model_params = self.args.model_params if hasattr(self.args, 'model_params') else None
+        #model_params = self.args.model_params if hasattr(self.args, 'model_params') else None
         
         torch.save({
-            'params': self.model_params,
+            #'params': self.model_params,
             'state_dict': self.model.state_dict(),
             'training_metrics': self.best_batch_metrics,
             'epoch': epoch,

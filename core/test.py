@@ -1,12 +1,13 @@
 import torch
 from core.utils import calculate_metrics
 from tqdm import tqdm
+from core.utils import process_batch
 
 # Main test function that forwards to test_nvae
-def test(model, test_loader, device):
-    return test_nvae(model, test_loader, device)
+def test(model, test_loader, dataset_type, device):
+    return test_nvae(model, test_loader, dataset_type, device)
 
-def test_nvae(model, test_loader, device):
+def test_nvae(model, test_loader, dataset_type, device):
     model.eval()
     test_loss = 0
     metrics_sum = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
@@ -14,13 +15,13 @@ def test_nvae(model, test_loader, device):
     test_pbar = tqdm(enumerate(test_loader), total=len(test_loader), desc="Final evaluation")
     
     with torch.no_grad():
-        for batch_idx, (x, y, c, r) in test_pbar:
-            x, y, c, r = x.to(device), y.to(device), c.to(device), r.to(device)
-            
-            loss = model.loss_function(y, x, r)
+        for batch_idx, batch in test_pbar:
+            #x, y, c, r = x.to(device), y.to(device), c.to(device), r.to(device)
+            x, y, domain = process_batch(batch, device, dataset_type=dataset_type)
+            loss = model.loss_function(y, x, domain)
             test_loss += loss.item()
 
-            batch_metrics = calculate_metrics(model, y, x, r)
+            batch_metrics = calculate_metrics(model, y, x, domain)
             for k, v in batch_metrics.items():
                 metrics_sum[k] += v
             
@@ -31,7 +32,7 @@ def test_nvae(model, test_loader, device):
 
     return test_loss, metrics_avg
 
-def test_dann(model, test_loader, device):
+def test_dann(model, test_loader, dataset_type, device):
     model.eval()
     test_loss = 0
     test_y_loss = 0
@@ -41,8 +42,9 @@ def test_dann(model, test_loader, device):
     test_pbar = tqdm(enumerate(test_loader), total=len(test_loader), desc="Final evaluation")
 
     with torch.no_grad():
-        for batch_idx, (x, y, c, r) in test_pbar:
-            x, y, c, r = x.to(device), y.to(device), c.to(device), r.to(device)
+        for batch_idx, batch in test_pbar:
+            #x, y, c, r = x.to(device), y.to(device), c.to(device), r.to(device)
+            x, y, r = process_batch(batch, device, dataset_type=dataset_type)
             
             # Convert one-hot encoded labels to class indices
             if len(y.shape) > 1 and y.shape[1] > 1:

@@ -8,7 +8,9 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from tqdm import tqdm
-
+import os
+from typing import Dict
+import datetime
 
 def get_parser(description):
     parser = argparse.ArgumentParser(description=description)
@@ -77,10 +79,10 @@ def kl_divergence(loc, scale): # assumes scale is logscale
     return total_kl, dim_wise_kls, mean_kl
                                
 # Function to calculate additional metrics
-def calculate_metrics(model, y, x, r):
+def calculate_metrics(model, y, x, domain):
     """Calculate additional metrics beyond just loss"""
     with torch.no_grad():
-        x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(y, x, r)
+        x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(y, x, domain)
         
         # Reconstruction MSE
         recon_mse = F.mse_loss(x_recon, x).item()
@@ -95,10 +97,10 @@ def calculate_metrics(model, y, x, r):
         
         # Attribute accuracy
         _, a_pred = a_hat.max(1)
-        if len(r.shape) > 1 and r.shape[1] > 1:
-            _, a_true = r.max(1)
+        if len(domain.shape) > 1 and domain.shape[1] > 1:
+            _, a_true = domain.max(1)
         else:
-            a_true = r.long()
+            a_true = domain.long()
         a_accuracy = (a_pred == a_true).float().mean().item()
         
         return {
@@ -566,23 +568,22 @@ def sample_wild(model, dataloader, num_samples, device):
     
     with torch.no_grad():
         pbar = tqdm(dataloader, desc="Sampling WILD data")
-        for x, y, c, r in pbar:
+        for batch in pbar:
             # Only check max_samples after we have enough samples for each combination
+            x, y, domain = process_batch(batch, device, dataset_type='wild')
             if all_combinations_satisfied and total_collected >= num_samples:
                 break
                 
             x = x.to(device)
             y = y.to(device)
-            c = c.to(device)
-            r = r.to(device)
-            
+            domain = domain.to(device)
+
             # Convert to indices if one-hot encoded
             if len(y.shape) > 1:
                 y = torch.argmax(y, dim=1)
-            if len(c.shape) > 1:
-                c = torch.argmax(c, dim=1)
-            if len(r.shape) > 1:
-                r = torch.argmax(r, dim=1)
+
+            if len(domain.shape) > 1:
+                domain = torch.argmax(domain, dim=1)
             
             # Create mask for samples we want to keep
             keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
@@ -778,9 +779,58 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
         print(f"Latent space visualization saved to {save_path}")
     plt.close()
 
+def get_model_name(args, model_type=None):
+    """
+    Generate a model name based on the arguments and model type.
+    
+    Args:
+        args: Arguments object containing model parameters
+        model_type: Type of model ('nvae', 'diva', 'dann', or 'irm')
+    
+    Returns:
+        str: Model name string
+    """
+    if model_type is None:
+        raise ValueError("Model type must be specified")
+    
+    # Create parameter string
+    param_str = f"alpha1-{args.alpha_1}_alpha2-{args.alpha_2}_zy{args.zy_dim}_zx{args.zx_dim}_zay{args.zay_dim}_za{args.za_dim}_b1-{args.beta_1}_b2-{args.beta_2}_b3-{args.beta_3}_b4-{args.beta_4}_ep{args.epochs}_bs{args.batch_size}_lr{args.learning_rate}"
+    
+    # Add timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    return f"{param_str}_{timestamp}"
 
-
-
+def _calculate_metrics(model, y, x, r) -> Dict[str, float]:
+    """Calculate metrics for a batch."""
+    with torch.no_grad():
+        x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(y, x, r)
+        
+        # Reconstruction MSE
+        recon_mse = torch.nn.functional.mse_loss(x_recon, x).item()
+        
+        # Classification accuracy
+        _, y_pred = y_hat.max(1)
+        if len(y.shape) > 1 and y.shape[1] > 1:
+            _, y_true = y.max(1)
+        else:
+            y_true = y.long()
+        y_accuracy = (y_pred == y_true).float().mean().item()
+        
+        # Attribute accuracy
+        _, a_pred = a_hat.max(1)
+        if len(r.shape) > 1 and r.shape[1] > 1:
+            _, a_true = r.max(1)
+        else:
+            a_true = r.long()
+        a_accuracy = (a_pred == a_true).float().mean().item()
+        
+        return {
+            'recon_mse': recon_mse,
+            'y_accuracy': y_accuracy,
+            'a_accuracy': a_accuracy
+        }
+    
 
 def process_batch(batch, device, dataset_type='crmnist'):
     """
@@ -803,9 +853,7 @@ def process_batch(batch, device, dataset_type='crmnist'):
     """
 
     
-    
-    
-    
+
     # Dataset-specific processing
     if dataset_type == 'crmnist':
         # IRM specific processing if needed
@@ -818,7 +866,7 @@ def process_batch(batch, device, dataset_type='crmnist'):
         x = x.to(device)
         y = y.to(device)
         #metadata = metadata.to(device)
-        d = metadata[:, 0]
+        d = metadata[:, 0].to(device)
     
     # Convert one-hot encoded labels to indices if needed
     if len(y.shape) > 1 and y.shape[1] > 1:

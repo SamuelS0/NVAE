@@ -229,7 +229,6 @@ class VAE(NModule):
         total_loss = x_recon_loss + self.beta_1 * kl_zy + self.beta_2 * kl_zx \
                     + self.beta_3 * kl_zay + self.beta_4 * kl_za \
                     + self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy
-
         return total_loss
     
     def classifier(self, x):

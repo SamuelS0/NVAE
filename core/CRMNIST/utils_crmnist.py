@@ -639,24 +639,3 @@ def save_domain_samples_visualization(x, y, c, r, epoch, output_dir):
     
     print(f"Saved domain samples visualization for epoch {epoch}")
 
-def get_model_name(args, model_type=None):
-    """
-    Generate a model name based on the arguments and model type.
-    
-    Args:
-        args: Arguments object containing model parameters
-        model_type: Type of model ('nvae', 'diva', 'dann', or 'irm')
-    
-    Returns:
-        str: Model name string
-    """
-    if model_type is None:
-        raise ValueError("Model type must be specified")
-    
-    # Create parameter string
-    param_str = f"alpha1-{args.alpha_1}_alpha2-{args.alpha_2}_zy{args.zy_dim}_zx{args.zx_dim}_zay{args.zay_dim}_za{args.za_dim}_b1-{args.beta_1}_b2-{args.beta_2}_b3-{args.beta_3}_b4-{args.beta_4}_ep{args.epochs}_bs{args.batch_size}_lr{args.learning_rate}"
-    
-    # Add timestamp
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    return f"{param_str}_{timestamp}"
