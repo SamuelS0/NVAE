@@ -6,7 +6,7 @@ from core.CRMNIST.trainer import CRMNISTTrainer
 from core.WILD.trainer import WILDTrainer
 
 
-def train(args, model, optimizer, train_loader, val_loader, device, patience):
+def train(args, model, optimizer, train_loader, val_loader, device, patience, trainer_class=None):
     """
     Train a model with early stopping.
     
@@ -24,10 +24,6 @@ def train(args, model, optimizer, train_loader, val_loader, device, patience):
     # Create output directories
     os.makedirs(args.out, exist_ok=True)
     
-    if args.dataset == 'crmnist':
-        trainer_class = CRMNISTTrainer
-    elif args.dataset == 'wild':
-        trainer_class = WILDTrainer
     # Initialize trainer
     
     trainer = trainer_class(

@@ -31,6 +31,7 @@ from core.WILD.utils_wild import (
 from core.train import train
 from core.test import test
 from core.utils import visualize_latent_spaces
+from core.comparison.train import train_nvae, train_diva, train_dann, train_irm
 """
 WILD VAE training script.
 
@@ -127,7 +128,7 @@ def run_experiment(dataset, args):
     patience = 10  # Number of epochs to wait for improvement
     
     print(f"\n🎯 Starting training for {args.epochs} epochs with patience={patience}...")
-    training_metrics = train(args, model, optimizer, train_loader, val_loader, args.device, patience)
+    training_metrics = train(args, model, optimizer, train_loader, val_loader, args.device, patience, trainer_class=WILDTrainer)
      
     # Save the best model
     print("\n💾 Saving final model...")
@@ -155,7 +156,7 @@ def run_experiment(dataset, args):
     
     final_test_loss, final_metrics, test_sample_batch = test_loss, metrics_avg, test_sample_batch
     
-    # Generate final reconstructions with progress
+    #Generate final reconstructions with progress
     print("\n🎨 Generating visualizations...")
     with tqdm(total=2, desc="Visualizations", unit="plot") as pbar:
         pbar.set_postfix_str("Test reconstructions")
@@ -219,8 +220,8 @@ def get_args():
     parser.add_argument('--alpha_1', type=float, default=1.0, help='y label loss multiplier')
     parser.add_argument('--alpha_2', type=float, default=1.0, help='domain label loss multiplier')
     parser.add_argument('--recon_weight', type=float, default=1.0, help='Weight for reconstruction loss (VAE only)')
-    parser.add_argument('--d_dim', type=int, default=5, help='Domain dimension for DIVA_VAE')
-    parser.add_argument('--y_dim', type=int, default=2, help='Class dimension for DIVA_VAE')
+    parser.add_argument('--num_y_classes', type=int, default=2, help='Class dimension for DIVA_VAE')
+    parser.add_argument('--num_r_classes', type=int, default=5, help='Domain dimension for DIVA_VAE')
     parser.add_argument('--z_dim', type=int, default=64,
                     help='size of latent space 1')
     parser.add_argument('--x_dim', type=int, default=96 * 96 * 3,
@@ -317,44 +318,63 @@ if __name__ == "__main__":
     print("✅ Dataset loaded successfully!")
     
     # Run main experiment
-    print("\n🎯 Running main experiment...")
-    model = run_experiment(dataset, args)
+    #print("\n🎯 Running main experiment...")
+    #model = run_experiment(dataset, args)
     
+    
+    
+    
+    
+    
+    
+    #run comparison experiments
+    print("\n🎯 Running comparison experiments...")
+    
+    train_loader, val_loader, test_loader = prepare_data(dataset, args)
+    spec_data = {'class_map': None, 'num_y_classes': 2, 'num_r_classes': 5}
+    train_dann(args, spec_data, train_loader, test_loader, dataset='wild')
+
+    
+    
+
+
+
+
+
+
+
     # Post-training analysis with progress bars
     print("\n🔬 Running post-training analysis...")
     
-    model.eval()
+    # model.eval()
     
-    # Prepare validation data for latent analysis
+    #Prepare validation data for latent analysis
     # print("  📊 Preparing validation data for latent analysis...")
-    transform = transforms.Compose([transforms.ToTensor()])
-    final_val_data = dataset.get_subset(args.val_type, transform=transform)
-    val_loader = get_train_loader("standard", final_val_data, batch_size=10)
-    val_x, val_y, val_metadata = next(iter(val_loader))
+    # transform = transforms.Compose([transforms.ToTensor()])
+    # final_val_data = dataset.get_subset(args.val_type, transform=transform)
+    # val_loader = get_train_loader("standard", final_val_data, batch_size=10)
+    # val_x, val_y, val_metadata = next(iter(val_loader))
     
-    # Generate latent space analysis with progress
-    latent_recon_dir = os.path.join(args.out, 'latent_visualization')
-    os.makedirs(latent_recon_dir, exist_ok=True)
+    # # # Generate latent space analysis with progress
+    # # latent_recon_dir = os.path.join(args.out, 'latent_visualization')
+    # # os.makedirs(latent_recon_dir, exist_ok=True)
 
-    latent_space_dir = os.path.join(args.out, 'latent_space', 'wild_latent_space')
-    os.makedirs(latent_space_dir, exist_ok=True)
+    # latent_space_dir = os.path.join(args.out, 'latent_space', 'wild_latent_space')
+    # os.makedirs(latent_space_dir, exist_ok=True)
 
-    visualize_latent_spaces(model=model, dataloader=val_loader, device=args.device, type='wild', save_path=latent_space_dir)
+    # visualize_latent_spaces(model=model, dataloader=val_loader, device=args.device, type='wild', save_path=latent_space_dir)
     
-    latent_analysis_tasks = [
-        ("Latent analysis (without components)", lambda: generate_images_latent(
-            model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='without', args=args)),
-        ("Latent analysis (individual components)", lambda: generate_images_latent(
-            model, args.device, 'id_val', latent_recon_dir, val_x, val_y, val_metadata, mode='only', args=args))
-    ]
+    # latent_analysis_tasks = [
+    #     ("Latent analysis (without components)", lambda: generate_images_latent(
+    #         model, args.device, 'id_val', latent_recon_dir, (val_x, val_y, val_metadata), 'without', args)),
+    #     ("Latent analysis (individual components)", lambda: generate_images_latent(
+    #         model, args.device, 'id_val', latent_recon_dir, (val_x, val_y, val_metadata), 'only', args))
+    # ]
     
-    for desc, task in tqdm(latent_analysis_tasks, desc="Latent Analysis", unit="analysis"):
-        task()
+    # for desc, task in tqdm(latent_analysis_tasks, desc="Latent Analysis", unit="analysis"):
+    #     task()
     
-    print("\n🎉 Training and analysis complete!")
-    print(f"📁 All results saved to: {args.out}")
-    print(f"💾 Dataset cached at: {args.data_dir}")
-    print("=" * 50)
-
-
-
+    # print("\n🎉 Training and analysis complete!")
+    # print(f"📁 All results saved to: {args.out}")
+    # print(f"💾 Dataset cached at: {args.data_dir}")
+    # print

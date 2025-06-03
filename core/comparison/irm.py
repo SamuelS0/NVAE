@@ -6,10 +6,10 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
 class IRM(nn.Module):
-    def __init__(self, spec_data, z_dim, penalty_weight=1e4, penalty_anneal_iters=0):
+    def __init__(self, z_dim, num_y_classes, num_r_classes, dataset, penalty_weight=1e4, penalty_anneal_iters=0):
         super(IRM, self).__init__()
-        self.num_y_classes = spec_data['num_y_classes']
-        self.num_r_classes = spec_data['num_r_classes'] 
+        self.num_y_classes = num_y_classes
+        self.num_r_classes = num_r_classes
         self.z_dim = z_dim
         self.penalty_weight = penalty_weight
         self.penalty_anneal_iters = penalty_anneal_iters
@@ -18,26 +18,70 @@ class IRM(nn.Module):
 
         # Feature extractor - EXACT same architecture as the VAE encoder (qz)
         # This matches the encoder in VAE model.py lines 796-820
-        self.feature_extractor = nn.Sequential(
-            # Block 1 - matching the qz encoder exactly
-            nn.Conv2d(in_channels=3, out_channels=96, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(96),
-            nn.ReLU(),
-            # Block 2
-            nn.MaxPool2d(2, 2),
-            # Block 3
-            nn.Conv2d(96, 192, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(192),
-            nn.ReLU(),
-            # Block 4
-            nn.MaxPool2d(2, 2),
+        if self.dataset == 'crmnist':
+            self.feature_extractor = nn.Sequential(
+                # Block 1 - matching the qz encoder exactly
+                nn.Conv2d(in_channels=3, out_channels=96, kernel_size=5, stride=1, padding=2),
+                nn.BatchNorm2d(96),
+                nn.ReLU(),
+                # Block 2
+                nn.MaxPool2d(2, 2),
+                # Block 3
+                nn.Conv2d(96, 192, kernel_size=5, stride=1, padding=2),
+                nn.BatchNorm2d(192),
+                nn.ReLU(),
+                # Block 4
+                nn.MaxPool2d(2, 2),
+                nn.Flatten(),
+                # Block 5 - Linear projection to z_dim
+                nn.Linear(192 * 7 * 7, self.z_dim)
+            )
+
+            self.classifier = nn.Linear(self.z_dim, self.num_y_classes)
+
+        elif self.dataset == 'wild':
+            self.feature_extractor = nn.Sequential(
+            # Block 1: 96x96x3 -> 48x48x64
+            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.2),
+            nn.MaxPool2d(2),
+            
+            # Block 2: 48x48x64 -> 24x24x128
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2),
+            nn.MaxPool2d(2),
+            
+            # Block 3: 24x24x128 -> 12x12x256
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2),
+            nn.MaxPool2d(2),
+            
+            # Block 4: 12x12x256 -> 6x6x512
+            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2),
+            nn.MaxPool2d(2),
+            
             nn.Flatten(),
-            # Block 5 - Linear projection to z_dim
-            nn.Linear(192 * 7 * 7, self.z_dim)
+            nn.Linear(512 * 6 * 6, self.z_dim)  # Project to z_dim
+        )
+
+        # Classifier matching VAE's qy architecture
+        self.classifier = nn.Sequential(
+            nn.Linear(self.z_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, self.num_y_classes)
         )
 
         # Classifier head
-        self.classifier = nn.Linear(self.z_dim, self.num_y_classes)
+        torch.nn.init.xavier_uniform_(self.classifier[0].weight)
+        with torch.no_grad():
+            self.classifier[0].bias.zero_()
 
     def forward(self, x, y=None, r=None):
         """

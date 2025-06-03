@@ -1,4 +1,4 @@
-from core.CRMNIST.trainer import CRMNISTTrainer
+from core.WILD.trainer import WILDTrainer
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -6,12 +6,13 @@ import sys
 import os
 from core.utils import process_batch
 
-class DANNTrainer(CRMNISTTrainer):
-    def __init__(self, model, optimizer, device, args, patience=5, model_params=None):
-        super().__init__(model, optimizer, device, args, patience, model_params)
+class DANNTrainer(WILDTrainer):
+    def __init__(self, model, optimizer, device, args, patience=5):
+        super().__init__(model, optimizer, device, args, patience)
         self.dataset = args.dataset
+        self.optimizer = optimizer
     
-    def _train_epoch(self, train_loader):
+    def _train_epoch(self, train_loader, epoch, current_beta):
         self.model.train()
         total_loss = 0
         total_y_loss = 0
@@ -79,7 +80,7 @@ class DANNTrainer(CRMNISTTrainer):
 
         return avg_train_loss, avg_train_metrics
     
-    def _validate(self, val_loader):
+    def _validate(self, val_loader, epoch, current_beta):
         self.model.eval()
         total_loss = 0
         total_y_loss = 0

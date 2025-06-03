@@ -1,3 +1,4 @@
+from core.WILD.trainer import WILDTrainer
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -7,24 +8,14 @@ import os
 import matplotlib.pyplot as plt
 import sys
 from core.utils import process_batch
+import torch.nn.functional as F
 
 
-class IRMTrainer:
-    def __init__(self, model, train_loader, val_loader, test_loader, device, args,
-                 lr=1e-3, weight_decay=1e-4, save_dir='./checkpoints', model_params=None):
-        self.model = model
-        self.train_loader = train_loader
-        self.val_loader = val_loader
-        self.test_loader = test_loader
-        self.device = device
-        self.save_dir = save_dir
-        self.model_params = model_params
+class IRMTrainer(WILDTrainer):
+    def __init__(self, model, optimizer, device, args, patience=5):
+        super().__init__(model, optimizer, device, args, patience)
         self.dataset = args.dataset
-        # Create save directory
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # Optimizer
-        self.optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        self.optimizer = optimizer
         
         # Training history
         self.train_losses = []
@@ -32,98 +23,159 @@ class IRMTrainer:
         self.val_accuracies = []
         self.test_accuracies = []
         
-    def train_epoch(self):
-        """Train for one epoch"""
+    def _train_epoch(self, train_loader, epoch, current_beta):
         self.model.train()
-        total_loss = 0.0
-        total_penalty = 0.0
+        total_loss = 0
+        total_class_loss = 0
+        total_penalty = 0
+       
+        # Initialize counters for accuracy
         total_samples = 0
-        
-        pbar = tqdm(self.train_loader, desc="Training")
-        for batch_idx, batch in enumerate(pbar):
+        correct_y = 0
+
+        train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training")
+
+        for batch_idx, batch in train_pbar:
             x, y, d = process_batch(batch, self.device, dataset_type=self.dataset)
             
-            self.optimizer.zero_grad()
-            
+            # Convert one-hot encoded labels to class indices
+            if len(y.shape) > 1 and y.shape[1] > 1:
+                y = torch.argmax(y, dim=1)
+            if len(d.shape) > 1 and d.shape[1] > 1:
+                d = torch.argmax(d, dim=1)
+
             # Forward pass and loss computation
             irm_loss, class_loss, penalty = self.model.loss_function(x, y, d)
-            
-            # Backward pass
+            penalty = torch.tensor(penalty)
+            self.optimizer.zero_grad()
             irm_loss.backward()
             self.optimizer.step()
+
+            # Get predictions for accuracy calculation
+            logits, _ = self.model.forward(x, y, d)
+            y_pred = torch.argmax(logits, dim=1)
+
+            # Update loss totals
+            total_loss += irm_loss.item()
+            total_class_loss += class_loss.item()
+            total_penalty += penalty.item()
             
-            # Accumulate statistics
-            batch_size = x.size(0)
-            total_loss += class_loss.item() * batch_size
-            total_penalty += penalty.item() * batch_size
+            # Update accuracy counts
+            batch_size = len(y)
             total_samples += batch_size
-            
-            # Update progress bar
-            pbar.set_postfix({
-                'Loss': f'{class_loss.item():.4f}',
-                'Penalty': f'{penalty.item():.4f}',
-                'IRM_Loss': f'{irm_loss.item():.4f}'
+            correct_y += (y_pred == y).sum().item()
+
+            train_pbar.set_postfix({
+                'loss': irm_loss.item(),
+                'class_loss': class_loss.item(),
+                'penalty': penalty.item(),
+                'y_acc': (correct_y / total_samples) * 100
             })
-        
-        avg_loss = total_loss / total_samples
-        avg_penalty = total_penalty / total_samples
-        
-        return avg_loss, avg_penalty
+
+        # Calculate final metrics
+        avg_train_loss = total_loss / len(train_loader)
+        avg_class_loss = total_class_loss / len(train_loader)
+        avg_penalty = total_penalty / len(train_loader)
+        y_accuracy = (correct_y / total_samples) * 100
+
+        avg_train_metrics = {
+            'y_accuracy': y_accuracy,
+            'class_loss': avg_class_loss,
+            'penalty': avg_penalty
+        }
+
+        return avg_train_loss, avg_train_metrics
     
-    def evaluate(self, dataloader, split_name="Validation"):
-        """Evaluate the model on a dataset"""
+    def _validate(self, val_loader, epoch, current_beta):
         self.model.eval()
-        correct = 0
-        total = 0
-        total_loss = 0.0
+        total_loss = 0
+        total_class_loss = 0
+        total_penalty = 0
         
+        # Initialize counters for accuracy
+        total_samples = 0
+        correct_y = 0
+
+        val_pbar = tqdm(enumerate(val_loader), total=len(val_loader), desc="Validating")
+
         with torch.no_grad():
-            for batch in dataloader:
+            for batch_idx, batch in val_pbar:
                 x, y, d = process_batch(batch, self.device, dataset_type=self.dataset)
-                
+
+                # Convert one-hot encoded labels to class indices
+                if len(y.shape) > 1 and y.shape[1] > 1:
+                    y = torch.argmax(y, dim=1)
+                if len(d.shape) > 1 and d.shape[1] > 1:
+                    d = torch.argmax(d, dim=1)
+
+                # Forward pass and loss computation
+                irm_loss, class_loss, penalty = self.model.loss_function(x, y, d)
+
+                # Get predictions for accuracy calculation
                 logits, _ = self.model.forward(x, y, d)
-                loss = torch.nn.functional.cross_entropy(logits, y)
+                y_pred = torch.argmax(logits, dim=1)
+
+                # Update loss totals
+                total_loss += irm_loss.item()
+                total_class_loss += class_loss.item()
+                total_penalty += penalty.item()
                 
-                predictions = torch.argmax(logits, dim=1)
-                correct += (predictions == y).sum().item()
-                total += y.size(0)
-                total_loss += loss.item() * y.size(0)
-        
-        accuracy = correct / total if total > 0 else 0.0
-        avg_loss = total_loss / total if total > 0 else 0.0
-        
-        print(f"{split_name} - Accuracy: {accuracy:.4f}, Loss: {avg_loss:.4f}")
-        return accuracy, avg_loss
+                # Update accuracy counts
+                batch_size = len(y)
+                total_samples += batch_size
+                correct_y += (y_pred == y).sum().item()
+
+                val_pbar.set_postfix({
+                    'loss': irm_loss.item(),
+                    'class_loss': class_loss.item(),
+                    'penalty': penalty.item(),
+                    'y_acc': (correct_y / total_samples) * 100
+                })
+
+        # Calculate final metrics
+        avg_val_loss = total_loss / len(val_loader)
+        avg_class_loss = total_class_loss / len(val_loader)
+        avg_penalty = total_penalty / len(val_loader)
+        y_accuracy = (correct_y / total_samples) * 100
+
+        avg_val_metrics = {
+            'y_accuracy': y_accuracy,
+            'class_loss': avg_class_loss,
+            'penalty': avg_penalty
+        }
+
+        return avg_val_loss, avg_val_metrics
     
-    def train(self, num_epochs, save_every=10, visualize_every=20):
+    def train(self, train_loader, val_loader, num_epochs):
         """Train the model for multiple epochs"""
         print(f"Training IRM model for {num_epochs} epochs...")
         print(f"Penalty weight: {self.model.penalty_weight}")
         print(f"Penalty annealing iterations: {self.model.penalty_anneal_iters}")
-        
+        save_every=10
+        visualize_every=20
         best_val_acc = 0.0
         
         for epoch in range(num_epochs):
             print(f"\nEpoch {epoch+1}/{num_epochs}")
             
             # Train
-            train_loss, train_penalty = self.train_epoch()
+            train_loss, train_metrics = self._train_epoch(train_loader, epoch, self.model.penalty_weight)
             self.train_losses.append(train_loss)
-            self.train_penalties.append(train_penalty)
+            self.train_penalties.append(train_metrics['penalty'])
             
             # Evaluate
-            val_acc, val_loss = self.evaluate(self.val_loader, "Validation")
+            val_loss, val_metrics = self._validate(val_loader, epoch, self.model.penalty_weight)
             test_acc, test_loss = self.evaluate(self.test_loader, "Test")
             
-            self.val_accuracies.append(val_acc)
+            self.val_accuracies.append(val_metrics['y_accuracy'])
             self.test_accuracies.append(test_acc)
             
-            print(f"Train Loss: {train_loss:.4f}, Train Penalty: {train_penalty:.4f}")
-            print(f"Val Acc: {val_acc:.4f}, Test Acc: {test_acc:.4f}")
+            print(f"Train Loss: {train_loss:.4f}, Train Penalty: {train_metrics['penalty']:.4f}")
+            print(f"Val Loss: {val_loss:.4f}, Test Acc: {test_acc:.4f}")
             
             # Save best model
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
+            if val_metrics['y_accuracy'] > best_val_acc:
+                best_val_acc = val_metrics['y_accuracy']
                 self.save_model(f'best_irm_model.pth')
                 print(f"New best validation accuracy: {best_val_acc:.4f}")
             

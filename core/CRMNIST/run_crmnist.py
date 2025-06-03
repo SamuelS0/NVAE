@@ -18,6 +18,7 @@ from core.CRMNIST.model import VAE
 from core.train import train
 from core.test import test
 from core.CRMNIST.utils_crmnist import select_diverse_sample_batch, visualize_reconstructions, visualize_conditional_generation
+from core.CRMNIST.trainer import CRMNISTTrainer
 """
 CRMNIST VAE training script.
 
@@ -126,7 +127,7 @@ def run_experiment(args):
     patience = 5
 
     # Train the model
-    training_metrics = train(args, model, optimizer, train_loader, val_loader, args.device, patience)
+    training_metrics = train(args, model, optimizer, train_loader, val_loader, args.device, patience, trainer_class=CRMNISTTrainer)
 
     # Load best model for final evaluation
     if training_metrics['best_model_state'] is not None:
