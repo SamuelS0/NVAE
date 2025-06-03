@@ -332,8 +332,18 @@ if __name__ == "__main__":
     
     train_loader, val_loader, test_loader = prepare_data(dataset, args)
     spec_data = {'class_map': None, 'num_y_classes': 2, 'num_r_classes': 5}
+    
+    #run dann
     train_dann(args, spec_data, train_loader, test_loader, dataset='wild')
 
+    #run irm
+    train_irm(args, spec_data, train_loader, test_loader, dataset='wild')
+
+    #run diva
+    train_diva(args, spec_data, train_loader, test_loader, dataset='wild')
+
+    #run nvae   
+    train_nvae(args, spec_data, train_loader, test_loader, dataset='wild')
     
     
 
