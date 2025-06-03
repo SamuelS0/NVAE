@@ -529,59 +529,49 @@ def sample_dann(model, dataloader, num_samples, device):
     
     return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
 
-def sample_wild(model, dataloader, num_samples, device):
+def sample_wild(model, dataloader, max_samples=5000, device=None):
     """
-    Sample data from WILD model and collect domain information.
+    Sample from a WILD model and collect latent representations.
     
     Args:
         model: WILD model
-        dataloader: DataLoader containing (x, y, c, r) tuples
-        num_samples: Maximum number of samples to collect
+        dataloader: DataLoader containing (x, y, domain) tuples
+        max_samples: Maximum number of samples to collect
         device: torch device
-    
+        
     Returns:
-        zy_list, za_list, zay_list, zx_list: Lists of latent vectors
-        y_list: List of digit labels
-        domain_dict: Dictionary of domain labels
-        labels_dict: Dictionary of domain label names
+        Lists of latent vectors and corresponding labels
     """
     model.eval()
+    
+    # Initialize lists to store latent vectors and labels
     zy_list, za_list, zay_list, zx_list = [], [], [], []
     y_list = []
-    domain_dict = {"color": [], "rotation": []}
-    labels_dict = {
-        "color": ['black', 'blue', 'green', 'red', 'white', 'yellow', 'gray'],
-        "rotation": ['0°', '15°', '30°', '45°', '60°', '75°']
-    }
+    domain_dict = {"hospital": []}
+    labels_dict = {"digit": [], "hospital": []}
     
     # Initialize counters for each combination
     counts = {}
-    for digit in range(10):
-        for color in range(7):
-            for rotation in range(6):
-                counts[(digit, color, rotation)] = 0
+    for digit in range(10):  # 10 digits
+        for hospital in range(6):  # 6 hospitals
+            counts[(digit, hospital)] = 0
     
-    # Target samples per combination - ensure we get enough for visualization
-    target_samples = 50  # Minimum samples per combination for good visualization
+    # Target samples per combination
+    target_samples = min(50, max_samples // 60)  # 60 combinations total (10 digits * 6 hospitals)
     total_collected = 0
-    all_combinations_satisfied = False
     
+    # Collect data in batches
     with torch.no_grad():
-        pbar = tqdm(dataloader, desc="Sampling WILD data")
-        for batch in pbar:
-            # Only check max_samples after we have enough samples for each combination
-            x, y, domain = process_batch(batch, device, dataset_type='wild')
-            if all_combinations_satisfied and total_collected >= num_samples:
+        for batch_idx, batch in enumerate(dataloader):
+            # Early stopping if we've collected enough samples
+            if total_collected >= max_samples:
                 break
                 
-            x = x.to(device)
-            y = y.to(device)
-            domain = domain.to(device)
-
+            x, y, domain = process_batch(batch, device, dataset_type='wild')
+            
             # Convert to indices if one-hot encoded
             if len(y.shape) > 1:
                 y = torch.argmax(y, dim=1)
-
             if len(domain.shape) > 1:
                 domain = torch.argmax(domain, dim=1)
             
@@ -590,83 +580,71 @@ def sample_wild(model, dataloader, num_samples, device):
             
             # Check each sample
             for j in range(len(y)):
+                if total_collected >= max_samples:
+                    break
+                    
                 digit = y[j].item()
-                color = c[j].item()
-                rotation = r[j].item()
+                hospital = domain[j].item()
                 
-                # Check if we need more samples for this specific combination
-                combination = (digit, color, rotation)
-                should_keep = counts[combination] < target_samples
-                
-                if should_keep:
+                # Only keep if we need more samples for this combination
+                if counts[(digit, hospital)] < target_samples:
                     keep_mask[j] = True
-                    counts[combination] += 1
+                    counts[(digit, hospital)] += 1
                     total_collected += 1
             
             # Apply mask to get only samples we want to keep
             if keep_mask.any():
                 x_batch = x[keep_mask]
                 y_batch = y[keep_mask]
-                c_batch = c[keep_mask]
-                r_batch = r[keep_mask]
+                domain_batch = domain[keep_mask]
                 
-                # Get latent representations
-                features = model.get_features(x_batch)
+                # Get latent representations for this batch
+                z_loc, _ = model.qz(x_batch)
+                zy = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
+                zx = z_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
+                if model.diva:
+                    zay = None
+                else:
+                    zay = z_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
+                za = z_loc[:, model.za_index_range[0]:model.za_index_range[1]]
                 
-                # For WILD, we only have one latent space (features)
-                # We'll use it for all latent spaces in visualization
-                zy_list.append(features.cpu())
-                za_list.append(features.cpu())
-                zay_list.append(features.cpu())
-                zx_list.append(features.cpu())
+                # Move to CPU and store
+                zy_list.append(zy.cpu())
+                za_list.append(za.cpu())
+                if not model.diva:
+                    zay_list.append(zay.cpu())
+                zx_list.append(zx.cpu())
                 y_list.append(y_batch.cpu())
-                domain_dict["color"].append(c_batch.cpu())
-                domain_dict["rotation"].append(r_batch.cpu())
+                
+                # Convert hospital IDs to strings for better visualization
+                hospital_labels = [f"Hospital {h.item() + 1}" for h in domain_batch]
+                domain_dict["hospital"].append(hospital_labels)
+                labels_dict["digit"].append(y_batch.cpu())
+                labels_dict["hospital"].append(hospital_labels)
+                
+                # Clear GPU cache periodically
+                if batch_idx % 10 == 0:
+                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
             
-            # Check if we have enough samples for all combinations
-            all_combinations_satisfied = all(count >= target_samples for count in counts.values())
-            
-            # Update progress bar with more detailed information
-            min_count = min(counts.values())
-            max_count = max(counts.values())
-            pbar.set_postfix({
-                'total': total_collected,
-                'min_count': min_count,
-                'max_count': max_count,
-                'target': target_samples,
-                'satisfied': all_combinations_satisfied
-            })
+            # Memory management: limit the number of batches we process
+            if batch_idx > 100:  # Process at most 100 batches
+                break
     
-    # Print detailed statistics about the sampling
-    print("\nSampling Statistics:")
-    print(f"Total samples collected: {total_collected}")
-    print(f"Target samples per combination: {target_samples}")
-    print(f"Minimum samples per combination: {min(counts.values())}")
-    print(f"Maximum samples per combination: {max(counts.values())}")
+    # Check if we collected any data
+    if not zy_list:
+        raise ValueError("No data was collected for visualization. Check your dataloader and sampling criteria.")
     
-    # Print distribution of samples across digits
-    digit_counts = {i: 0 for i in range(10)}
-    for (digit, _, _), count in counts.items():
-        digit_counts[digit] += count
-    print("\nSamples per digit:")
-    for digit, count in digit_counts.items():
-        print(f"Digit {digit}: {count} samples")
+    print(f"\nCollected {total_collected} samples total")
     
-    # Print distribution of samples across colors
-    color_counts = {i: 0 for i in range(7)}
-    for (_, color, _), count in counts.items():
-        color_counts[color] += count
-    print("\nSamples per color:")
-    for color, count in color_counts.items():
-        print(f"{labels_dict['color'][color]}: {count} samples")
+    # Print sample counts
+    print("\nNumber of samples per combination:")
+    for (digit, hospital), count in counts.items():
+        print(f"Digit {digit}, Hospital {hospital + 1}: {count} samples")
     
-    # Print distribution of samples across rotations
-    rotation_counts = {i: 0 for i in range(6)}
-    for (_, _, rotation), count in counts.items():
-        rotation_counts[rotation] += count
-    print("\nSamples per rotation:")
-    for rotation, count in rotation_counts.items():
-        print(f"{labels_dict['rotation'][rotation]}: {count} samples")
+    # Calculate total samples
+    total_samples = sum(counts.values())
+    print(f"\nTotal samples: {total_samples}")
+    print(f"Average samples per combination: {total_samples / len(counts):.1f}")
     
     return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
 
@@ -700,8 +678,18 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     za = torch.cat(za_list, dim=0)
     zx = torch.cat(zx_list, dim=0)
     y_labels = torch.cat(y_list, dim=0)
-    for domain_name in domain_dict:
-        domain_dict[domain_name] = torch.cat(domain_dict[domain_name], dim=0)
+    
+    # Handle domain labels differently for WILD dataset
+    if type == "wild":
+        # For WILD, domain_dict contains lists of strings
+        hospital_labels = []
+        for batch_labels in domain_dict["hospital"]:
+            hospital_labels.extend(batch_labels)
+        domain_dict["hospital"] = hospital_labels
+    else:
+        # For other datasets, concatenate tensors as before
+        for domain_name in domain_dict:
+            domain_dict[domain_name] = torch.cat(domain_dict[domain_name], dim=0)
     
     # Print sample counts for all collected samples
     print("\nNumber of samples per category:")
@@ -712,17 +700,34 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     
     for domain_name in domain_dict.keys():
         print(f"\n{domain_name.capitalize()}:")
-        domain_counts = torch.bincount(domain_dict[domain_name])
-        for value, count in enumerate(domain_counts):
-            print(f"{labels_dict[domain_name][value]}: {count} samples")
+        if type == "wild":
+            # Count occurrences of each hospital label
+            from collections import Counter
+            hospital_counts = Counter(domain_dict[domain_name])
+            for hospital, count in sorted(hospital_counts.items()):
+                print(f"{hospital}: {count} samples")
+        else:
+            domain_counts = torch.bincount(domain_dict[domain_name])
+            for value, count in enumerate(domain_counts):
+                print(f"{labels_dict[domain_name][value]}: {count} samples")
     
     # Convert to numpy
     zy = zy.numpy()
     za = za.numpy()
     zx = zx.numpy()
     y_labels = y_labels.numpy()
-    for domain_name in domain_dict:
-        domain_dict[domain_name] = domain_dict[domain_name].numpy()
+    
+    # Convert domain labels to numeric values for WILD dataset
+    if type == "wild":
+        # Create a mapping from hospital labels to numeric values
+        # Extract hospital numbers from labels (e.g., "Hospital 1" -> 1)
+        hospital_numbers = [int(label.split()[-1]) for label in domain_dict["hospital"]]
+        unique_hospitals = sorted(set(hospital_numbers))
+        hospital_to_num = {num: i for i, num in enumerate(unique_hospitals)}
+        domain_dict["hospital"] = np.array([hospital_to_num[num] for num in hospital_numbers])
+    else:
+        for domain_name in domain_dict:
+            domain_dict[domain_name] = domain_dict[domain_name].numpy()
     
     # Run t-SNE
     print("\nRunning t-SNE (this may take a few minutes)...")
@@ -760,21 +765,35 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
         for row_idx, (domain_name, domain_values) in enumerate(domain_dict.items(), 1):
             scatter = axes[row_idx, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
                                                    c=domain_values, cmap='tab10',
-                                                   vmin=0, vmax=len(labels_dict[domain_name])-1,
+                                                   vmin=0, vmax=len(unique_hospitals)-1 if type == "wild" else len(labels_dict[domain_name])-1,
                                                    alpha=0.7)
             axes[row_idx, col_idx].set_title(f'{title}\nColored by {domain_name.capitalize()}')
             
             # Create custom legend for domain values
-            legend_elements = [
-                plt.Line2D([0], [0], marker='o', color='w',
-                          markerfacecolor=plt.cm.tab10(i/len(labels_dict[domain_name])),
-                          label=labels_dict[domain_name][i], markersize=10)
-                for i in range(len(labels_dict[domain_name]))
-            ]
+            if type == "wild":
+                # For WILD, use the original hospital numbers
+                # Get the actual colors used in the scatter plot
+                norm = plt.Normalize(0, len(unique_hospitals)-1)
+                colors = plt.cm.tab10(norm(range(len(unique_hospitals))))
+                
+                legend_elements = [
+                    plt.Line2D([0], [0], marker='o', color='w',
+                              markerfacecolor=colors[i],
+                              label=f"Hospital {h}", markersize=10)
+                    for i, h in enumerate(unique_hospitals)
+                ]
+            else:
+                legend_elements = [
+                    plt.Line2D([0], [0], marker='o', color='w',
+                              markerfacecolor=plt.cm.tab10(i/len(labels_dict[domain_name])),
+                              label=labels_dict[domain_name][i], markersize=10)
+                    for i in range(len(labels_dict[domain_name]))
+                ]
             axes[row_idx, col_idx].legend(handles=legend_elements, title=domain_name.capitalize())
     
     plt.tight_layout()
     if save_path:
+        print(f"Saving latent space visualization to {save_path}")
         plt.savefig(save_path, bbox_inches='tight', dpi=100)
         print(f"Latent space visualization saved to {save_path}")
     plt.close()

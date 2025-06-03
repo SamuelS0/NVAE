@@ -326,7 +326,7 @@ if __name__ == "__main__":
     model.eval()
     
     # Prepare validation data for latent analysis
-    print("  📊 Preparing validation data for latent analysis...")
+    # print("  📊 Preparing validation data for latent analysis...")
     transform = transforms.Compose([transforms.ToTensor()])
     final_val_data = dataset.get_subset(args.val_type, transform=transform)
     val_loader = get_train_loader("standard", final_val_data, batch_size=10)
@@ -336,7 +336,7 @@ if __name__ == "__main__":
     latent_recon_dir = os.path.join(args.out, 'latent_visualization')
     os.makedirs(latent_recon_dir, exist_ok=True)
 
-    latent_space_dir = os.path.join(args.out, 'latent_space')
+    latent_space_dir = os.path.join(args.out, 'latent_space', 'wild_latent_space')
     os.makedirs(latent_space_dir, exist_ok=True)
 
     visualize_latent_spaces(model=model, dataloader=val_loader, device=args.device, type='wild', save_path=latent_space_dir)
@@ -355,13 +355,6 @@ if __name__ == "__main__":
     print(f"📁 All results saved to: {args.out}")
     print(f"💾 Dataset cached at: {args.data_dir}")
     print("=" * 50)
-
-
-
-
-
-
-
 
 
 
