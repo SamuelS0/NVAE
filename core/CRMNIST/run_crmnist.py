@@ -12,13 +12,15 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import os
 import random
+import glob
 import core.CRMNIST.utils_crmnist
 from core.CRMNIST.data_generation import generate_crmnist_dataset
 from core.CRMNIST.model import VAE
-from core.train import train
-from core.test import test
-from core.CRMNIST.utils_crmnist import select_diverse_sample_batch, visualize_reconstructions, visualize_conditional_generation
-from core.CRMNIST.trainer import CRMNISTTrainer
+from core.comparison.train import train_nvae, train_diva, train_dann, train_irm
+from core.CRMNIST.latent_expressiveness import evaluate_latent_expressiveness
+from core.comparison.dann import DANN
+from core.comparison.irm import IRM
+from core.utils import visualize_latent_spaces
 """
 CRMNIST VAE training script.
 
@@ -29,8 +31,168 @@ Run with:
 python -m core.CRMNIST.run_crmnist --out results/ --config conf/crmnist.json
 """
 
-def run_experiment(args):
-    # Create output directories
+def load_model_checkpoint(models_dir, model_name, spec_data, args):
+    """
+    Load a pre-trained model checkpoint.
+    
+    Args:
+        models_dir: Directory containing model checkpoints
+        model_name: Name of the model ('nvae', 'diva', 'dann', 'irm')
+        spec_data: Dataset specification data
+        args: Command line arguments
+    
+    Returns:
+        Loaded model and metrics (if available)
+    """
+    # Look for model files with different naming patterns
+    model_patterns = [
+        f"{model_name}_model_epoch_*.pt",
+        f"{model_name}_model.pt",
+        f"{model_name}.pt"
+    ]
+    
+    model_path = None
+    for pattern in model_patterns:
+        matches = glob.glob(os.path.join(models_dir, pattern))
+        if matches:
+            # Get the most recent model file
+            model_path = max(matches, key=os.path.getctime)
+            break
+    
+    if model_path is None:
+        print(f"❌ No {model_name.upper()} model checkpoint found in {models_dir}")
+        print(f"   Looking for patterns: {model_patterns}")
+        return None, None
+    
+    print(f"📁 Loading {model_name.upper()} model from: {model_path}")
+    
+    try:
+        # Load checkpoint
+        checkpoint = torch.load(model_path, map_location=args.device)
+        
+        # Initialize model based on type
+        if model_name == 'nvae':
+            model = VAE(
+                class_map=spec_data['class_map'],
+                zy_dim=args.zy_dim,
+                zx_dim=args.zx_dim,
+                zay_dim=args.zay_dim,
+                za_dim=args.za_dim,
+                y_dim=spec_data['num_y_classes'],
+                a_dim=spec_data['num_r_classes'],
+                beta_1=args.beta_1,
+                beta_2=args.beta_2,
+                beta_3=args.beta_3,
+                beta_4=args.beta_4,
+                alpha_1=args.alpha_1,
+                alpha_2=args.alpha_2,
+                diva=False
+            )
+            
+        elif model_name == 'diva':
+            model = VAE(
+                class_map=spec_data['class_map'],
+                zy_dim=args.zy_dim,
+                zx_dim=args.zx_dim,
+                zay_dim=args.zay_dim,
+                za_dim=args.za_dim,
+                y_dim=spec_data['num_y_classes'],
+                a_dim=spec_data['num_r_classes'],
+                beta_1=args.beta_1,
+                beta_2=args.beta_2,
+                beta_3=args.beta_3,
+                beta_4=args.beta_4,
+                alpha_1=args.alpha_1,
+                alpha_2=args.alpha_2,
+                diva=True
+            )
+            
+        elif model_name == 'dann':
+            z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
+            model = DANN(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'crmnist')
+            
+        elif model_name == 'irm':
+            z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
+            model = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'crmnist', 
+                       penalty_weight=1e4, penalty_anneal_iters=500)
+        
+        # Load state dict
+        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['state_dict'])
+            metrics = checkpoint.get('training_metrics', {})
+            print(f"✅ Loaded {model_name.upper()} model with metrics: {metrics}")
+        else:
+            # Assume it's just the state dict
+            model.load_state_dict(checkpoint)
+            metrics = {}
+            print(f"✅ Loaded {model_name.upper()} model")
+        
+        # Move to device
+        model = model.to(args.device)
+        model.eval()
+        
+        return model, metrics
+        
+    except Exception as e:
+        print(f"❌ Error loading {model_name.upper()} model: {str(e)}")
+        return None, None
+
+
+
+if __name__ == "__main__":
+    parser = core.utils.get_parser('CRMNIST')
+    parser.add_argument('--intensity', '-i', type=float, default=1.5)
+    parser.add_argument('--intensity_decay', '-d', type=float, default=1.0)
+    parser.add_argument('--config', type=str, default = 'conf/crmnist.json')
+    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--zy_dim', type=int, default=32)
+    parser.add_argument('--zx_dim', type=int, default=32)
+    parser.add_argument('--zay_dim', type=int, default=32)
+    parser.add_argument('--za_dim', type=int, default=32)
+    parser.add_argument('--beta_1', type=float, default=1.0)
+    parser.add_argument('--beta_2', type=float, default=1.0)
+    parser.add_argument('--beta_3', type=float, default=1.0)
+    parser.add_argument('--beta_4', type=float, default=1.0)
+    parser.add_argument('--alpha_1', type=float, default=100.0)
+    parser.add_argument('--alpha_2', type=float, default=100.0)
+    parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
+    parser.add_argument('--dataset', type=str, default='crmnist')
+    parser.add_argument('--use_cache', action='store_true', default=True, 
+                       help='Use cached datasets if available (default: True)')
+    parser.add_argument('--no_cache', action='store_true', default=False,
+                       help='Disable dataset caching and force regeneration')
+    parser.add_argument('--patience', type=int, default=5)
+    parser.add_argument('--beta_annealing', type=str)
+    parser.add_argument('--beta_scale', type=float, default=1.0)
+    
+    # Model selection arguments
+    parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'irm'],
+                       choices=['nvae', 'diva', 'dann', 'irm'],
+                       help='Which models to train and test (default: all)')
+    parser.add_argument('--skip_training', action='store_true', default=False,
+                       help='Skip training and only do visualization (requires pre-trained models)')
+    args = parser.parse_args()
+    
+    # Set cache behavior based on arguments
+    use_cache = args.use_cache and not args.no_cache
+    
+    # Set up CUDA if available
+    args.cuda = args.cuda and torch.cuda.is_available()
+    args.device = torch.device("cuda" if args.cuda else "cpu")
+    
+    if args.cuda:
+        print(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+    else:
+        print("Using CPU")
+
+    # Run experiment
+    #model = run_experiment(args)
+
+
+
+    #run comparison experiments
+    print("\n🎯 Running comparison experiments...")
+    
     os.makedirs(args.out, exist_ok=True)
     reconstructions_dir = os.path.join(args.out, 'reconstructions')
     os.makedirs(reconstructions_dir, exist_ok=True)
@@ -38,9 +200,11 @@ def run_experiment(args):
     os.makedirs(models_dir, exist_ok=True)
     domain_samples_dir = os.path.join(args.out, 'domain_samples')
     os.makedirs(domain_samples_dir, exist_ok=True)
+    latent_space_dir = os.path.join(args.out, 'latent_space')
+    os.makedirs(latent_space_dir, exist_ok=True)
     
     # Log some information
-    print(f"Starting CRMNIST VAE training...")
+    print(f"Starting CRMNIST model comparison...")
     print(f"Config file: {args.config}")
     print(f"Output directory: {args.out}")
     print(f"Batch size: {args.batch_size}")
@@ -64,9 +228,16 @@ def run_experiment(args):
         if i in domain_data:
             domain_data[i]['subset'] = subset
             
-    # Generate dataset
-    train_dataset = generate_crmnist_dataset(spec_data, train=True)
-    test_dataset = generate_crmnist_dataset(spec_data, train=False)
+    # Generate dataset (with caching)
+    print("Loading/generating datasets for comparison experiments...")
+    train_dataset = generate_crmnist_dataset(spec_data, train=True, 
+                                            transform_intensity=args.intensity,
+                                            transform_decay=args.intensity_decay, 
+                                            use_cache=args.use_cache)
+    test_dataset = generate_crmnist_dataset(spec_data, train=False, 
+                                           transform_intensity=args.intensity,
+                                           transform_decay=args.intensity_decay, 
+                                           use_cache=args.use_cache)
     
     # Create validation split from training data to avoid data leakage
     train_size = len(train_dataset)
@@ -89,25 +260,10 @@ def run_experiment(args):
 
     print(f"Dataset dimensions: y_dim={num_y_classes}, r_dim=num_domains={num_r_classes}")
     
-    # Initialize model
-    model = VAE(class_map=class_map,
-               zy_dim=args.zy_dim,
-               zx_dim=args.zx_dim,
-               zay_dim=args.zay_dim,
-               za_dim=args.za_dim,
-               y_dim=num_y_classes,
-               a_dim=num_r_classes,
-               beta_1=args.beta_1,
-               beta_2=args.beta_2,
-               beta_3=args.beta_3,
-               beta_4=args.beta_4)
+    # Dictionary to store all trained models
+    trained_models = {}
     
-    # Move model to device
-    if args.cuda:
-        model = model.to(args.device)
-    
-    # Setup optimizer
-    optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+    # Model parameters for saving
     model_params = {
         'zy_dim': args.zy_dim,
         'zx_dim': args.zx_dim,
@@ -117,96 +273,242 @@ def run_experiment(args):
         'beta_2': args.beta_2,
         'beta_3': args.beta_3,
         'beta_4': args.beta_4,
-        #'alpha_1': args.alpha_1,
-        #'alpha_2': args.alpha_2,
-        'diva': False
-        }
-    with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
-        json.dump(model_params, f)
-    
-    patience = 5
-
-    # Train the model
-    training_metrics = train(args, model, optimizer, train_loader, val_loader, args.device, patience, trainer_class=CRMNISTTrainer)
-
-    # Load best model for final evaluation
-    if training_metrics['best_model_state'] is not None:
-        model.load_state_dict(training_metrics['best_model_state'])
-        print("Loaded best model for final evaluation")
-    
-    # Save the final model
-    final_model_path = os.path.join(models_dir, f"model_checkpoint_epoch_{training_metrics['best_model_epoch']}.pt")
-    torch.save(model.state_dict(), final_model_path)
-    
-    # Final evaluation
-    print("\nEvaluating model on test set...")
-    
-    # Select a diverse sample batch with images from all domains
-    sample_batch = select_diverse_sample_batch(test_loader, args)
-    
-    test_loss, metrics_avg = test(model, test_loader, args.device)
-    
-    print(f'Test Loss: {test_loss:.4f}')
-    for k, v in metrics_avg.items():
-        print(f'Test {k}: {v:.4f}')
-    
-    final_test_loss, final_metrics, sample_batch = test_loss, metrics_avg, sample_batch
-    
-    # Generate final reconstructions
-    visualize_reconstructions(model, 'final', sample_batch, args, reconstructions_dir)
-    
-    # Generate and visualize conditional samples
-    visualize_conditional_generation(model, args.device, reconstructions_dir)
-    
-    # Save training results as JSON
-    results = {
-        'final_test_loss': final_test_loss,
-        'final_metrics': final_metrics,
-        'best_val_loss': training_metrics['best_val_loss'],
-        'epochs_trained': training_metrics['epochs_trained']
+        'alpha_1': args.alpha_1,
+        'alpha_2': args.alpha_2,
     }
     
-    results_path = os.path.join(args.out, 'results.json')
-    with open(results_path, 'w') as f:
-        # Convert values to strings since some may not be JSON serializable
-        serializable_results = {
-            k: str(v) if not isinstance(v, dict) else {k2: str(v2) for k2, v2 in v.items()}
-            for k, v in results.items()
-        }
-        json.dump(serializable_results, f, indent=2)
+    print(f"\nSelected models to run: {args.models}")
+    if args.skip_training:
+        print("⚠️  Skipping training - will only do visualization")
     
-    print(f"Results saved to {results_path}")
+    # =============================================================================
+    # 1. TRAIN AND TEST NVAE MODEL
+    # =============================================================================
+    if 'nvae' in args.models:
+        print("\n" + "="*60)
+        print("🔥 TRAINING NVAE MODEL")
+        print("="*60)
+        
+        model_params['diva'] = False
+        with open(os.path.join(args.out, 'nvae_model_params.json'), 'w') as f:
+            json.dump(model_params, f)
+        
+        if not args.skip_training:
+            nvae_model, nvae_metrics = train_nvae(args, spec_data, train_loader, val_loader, dataset='crmnist')
+            trained_models['nvae'] = nvae_model
+            
+            # Save NVAE model
+            nvae_model_path = os.path.join(models_dir, f"nvae_model_epoch_{nvae_metrics['best_model_epoch']}.pt")
+            torch.save(nvae_model.state_dict(), nvae_model_path)
+            print(f"NVAE model saved to: {nvae_model_path}")
+        else:
+            # Load pre-trained model for visualization
+            print("Loading pre-trained NVAE model for visualization...")
+            nvae_model, nvae_metrics = load_model_checkpoint(models_dir, 'nvae', spec_data, args)
+            if nvae_model is None:
+                print("⚠️  Skipping NVAE visualization - no pre-trained model found")
+                nvae_model = None
+            
+        # Visualize NVAE latent spaces
+        if 'nvae_model' in locals() and nvae_model is not None:
+            print("🎨 Generating NVAE latent space visualization...")
+            nvae_latent_path = os.path.join(latent_space_dir, 'nvae_latent_spaces.png')
+            visualize_latent_spaces(nvae_model, val_loader, args.device, type='crmnist', save_path=nvae_latent_path)
+            
+            # Evaluate latent expressiveness for NVAE
+            print("🧪 Evaluating NVAE latent expressiveness...")
+            nvae_expressiveness_dir = os.path.join(args.out, 'nvae_expressiveness')
+            os.makedirs(nvae_expressiveness_dir, exist_ok=True)
+            nvae_expressiveness = evaluate_latent_expressiveness(
+                nvae_model, train_loader, val_loader, test_loader, args.device, nvae_expressiveness_dir
+            )
     
-    return model
+    # =============================================================================
+    # 2. TRAIN AND TEST DIVA MODEL
+    # =============================================================================
+    if 'diva' in args.models:
+        print("\n" + "="*60)
+        print("🔥 TRAINING DIVA MODEL")
+        print("="*60)
+        
+        model_params['diva'] = True
+        with open(os.path.join(args.out, 'diva_model_params.json'), 'w') as f:
+            json.dump(model_params, f)
+        
+        if not args.skip_training:
+            diva_model, diva_metrics = train_diva(args, spec_data, train_loader, val_loader, dataset='crmnist')
+            trained_models['diva'] = diva_model
+            
+            # Save DIVA model
+            diva_model_path = os.path.join(models_dir, f"diva_model_epoch_{diva_metrics['best_model_epoch']}.pt")
+            torch.save(diva_model.state_dict(), diva_model_path)
+            print(f"DIVA model saved to: {diva_model_path}")
+        else:
+            # Load pre-trained model for visualization
+            print("Loading pre-trained DIVA model for visualization...")
+            diva_model, diva_metrics = load_model_checkpoint(models_dir, 'diva', spec_data, args)
+            if diva_model is None:
+                print("⚠️  Skipping DIVA visualization - no pre-trained model found")
+                diva_model = None
+            
+        # Visualize DIVA latent spaces
+        if 'diva_model' in locals() and diva_model is not None:
+            print("🎨 Generating DIVA latent space visualization...")
+            diva_latent_path = os.path.join(latent_space_dir, 'diva_latent_spaces.png')
+            visualize_latent_spaces(diva_model, val_loader, args.device, type='crmnist', save_path=diva_latent_path)
+            
+            # Evaluate latent expressiveness for DIVA
+            print("🧪 Evaluating DIVA latent expressiveness...")
+            diva_expressiveness_dir = os.path.join(args.out, 'diva_expressiveness')
+            os.makedirs(diva_expressiveness_dir, exist_ok=True)
+            diva_expressiveness = evaluate_latent_expressiveness(
+                diva_model, train_loader, val_loader, test_loader, args.device, diva_expressiveness_dir
+            )
+    
+    # =============================================================================
+    # 3. TRAIN AND TEST DANN MODEL
+    # =============================================================================
+    if 'dann' in args.models:
+        print("\n" + "="*60)
+        print("🔥 TRAINING DANN MODEL")
+        print("="*60)
+        
+        with open(os.path.join(args.out, 'dann_model_params.json'), 'w') as f:
+            json.dump(model_params, f)
+        
+        if not args.skip_training:
+            dann_model, dann_metrics = train_dann(args, spec_data, train_loader, test_loader, dataset='crmnist')
+            trained_models['dann'] = dann_model
+            
+            # Save DANN model
+            dann_model_path = os.path.join(models_dir, f"dann_model_epoch_{dann_metrics['best_model_epoch']}.pt")
+            torch.save(dann_model.state_dict(), dann_model_path)
+            print(f"DANN model saved to: {dann_model_path}")
+        else:
+            # Load pre-trained model for visualization
+            print("Loading pre-trained DANN model for visualization...")
+            dann_model, dann_metrics = load_model_checkpoint(models_dir, 'dann', spec_data, args)
+            if dann_model is None:
+                print("⚠️  Skipping DANN visualization - no pre-trained model found")
+                dann_model = None
+            
+        # Visualize DANN latent space
+        if 'dann_model' in locals() and dann_model is not None:
+            print("🎨 Generating DANN latent space visualization...")
+            dann_latent_path = os.path.join(latent_space_dir, 'dann_latent_spaces.png')
+            dann_model.visualize_latent_space(val_loader, args.device, save_path=dann_latent_path)
+    
+    # =============================================================================
+    # 4. TRAIN AND TEST IRM MODEL
+    # =============================================================================
+    if 'irm' in args.models:
+        print("\n" + "="*60)
+        print("🔥 TRAINING IRM MODEL")
+        print("="*60)
+        
+        with open(os.path.join(args.out, 'irm_model_params.json'), 'w') as f:
+            json.dump(model_params, f)
+        
+        if not args.skip_training:
+            irm_model, irm_metrics = train_irm(args, spec_data, train_loader, test_loader, dataset='crmnist')
+            trained_models['irm'] = irm_model
+            
+            # Save IRM model
+            irm_model_path = os.path.join(models_dir, f"irm_model_epoch_{irm_metrics['best_model_epoch']}.pt")
+            torch.save(irm_model.state_dict(), irm_model_path)
+            print(f"IRM model saved to: {irm_model_path}")
+        else:
+            # Load pre-trained model for visualization
+            print("Loading pre-trained IRM model for visualization...")
+            irm_model, irm_metrics = load_model_checkpoint(models_dir, 'irm', spec_data, args)
+            if irm_model is None:
+                print("⚠️  Skipping IRM visualization - no pre-trained model found")
+                irm_model = None
+            
+        # Visualize IRM latent space
+        if 'irm_model' in locals() and irm_model is not None:
+            print("🎨 Generating IRM latent space visualization...")
+            irm_latent_path = os.path.join(latent_space_dir, 'irm_latent_spaces.png')
+            if hasattr(irm_model, 'visualize_latent_space'):
+                irm_model.visualize_latent_space(val_loader, args.device, save_path=irm_latent_path)
+            else:
+                # Use the generic visualization function
+                from core.utils import balanced_sample_for_visualization
+                features_dict, labels_dict, stats = balanced_sample_for_visualization(
+                    model=irm_model, dataloader=val_loader, device=args.device, 
+                    model_type="irm", max_samples=3000
+                )
+                print(f"IRM features extracted: {features_dict['features'].shape}")
+    
+    # =============================================================================
+    # 5. SUMMARY AND COMPARISON
+    # =============================================================================
+    print("\n" + "="*60)
+    print("📊 EXPERIMENT SUMMARY")
+    print("="*60)
+    
+    print("Models trained and saved:")
+    for model_name, model in trained_models.items():
+        print(f"  ✅ {model_name.upper()}: {model.__class__.__name__}")
+    
+    print(f"\nVisualization files created:")
+    for model_name in args.models:
+        if model_name == 'nvae' and 'nvae_model' in locals() and nvae_model is not None:
+            print(f"  📈 NVAE latent spaces: {os.path.join(latent_space_dir, 'nvae_latent_spaces.png')}")
+        elif model_name == 'diva' and 'diva_model' in locals() and diva_model is not None:
+            print(f"  📈 DIVA latent spaces: {os.path.join(latent_space_dir, 'diva_latent_spaces.png')}")
+        elif model_name == 'dann' and 'dann_model' in locals() and dann_model is not None:
+            print(f"  📈 DANN latent spaces: {os.path.join(latent_space_dir, 'dann_latent_spaces.png')}")
+        elif model_name == 'irm' and 'irm_model' in locals() and irm_model is not None:
+            print(f"  📈 IRM latent spaces: {os.path.join(latent_space_dir, 'irm_latent_spaces.png')}")
+    
+    print(f"\nModel files saved:")
+    for model_name in args.models:
+        '''if model_name == 'nvae' and 'nvae_model' in locals():
+            print(f"  💾 NVAE model: {os.path.join(models_dir, f'nvae_model_epoch_{nvae_metrics["best_model_epoch"]}.pt')}")
+        elif model_name == 'diva' and 'diva_model' in locals():
+            print(f"  💾 DIVA model: {os.path.join(models_dir, f'diva_model_epoch_{diva_metrics["best_model_epoch"]}.pt')}")
+        elif model_name == 'dann' and 'dann_model' in locals():
+            print(f"  💾 DANN model: {os.path.join(models_dir, f'dann_model_epoch_{dann_metrics["best_model_epoch"]}.pt')}")
+        elif model_name == 'irm' and 'irm_model' in locals():
+            print(f"  💾 IRM model: {os.path.join(models_dir, f'irm_model_epoch_{irm_metrics["best_model_epoch"]}.pt')}")'''
+    
+    # Training metrics summary
+    print(f"\nTraining metrics:")
 
-
-if __name__ == "__main__":
-    parser = core.utils.get_parser('CRMNIST')
-    parser.add_argument('--intensity', '-i', type=float, default=1.5)
-    parser.add_argument('--intensity_decay', '-d', type=float, default=1.0)
-    parser.add_argument('--config', type=str, default='../conf/crmnist.json')
-    parser.add_argument('--epochs', type=int, default=20)
-    parser.add_argument('--zy_dim', type=int, default=32)
-    parser.add_argument('--zx_dim', type=int, default=32)
-    parser.add_argument('--zay_dim', type=int, default=32)
-    parser.add_argument('--za_dim', type=int, default=32)
-    parser.add_argument('--beta_1', type=float, default=1.0)
-    parser.add_argument('--beta_2', type=float, default=1.0)
-    parser.add_argument('--beta_3', type=float, default=1.0)
-    parser.add_argument('--beta_4', type=float, default=1.0)
-    parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
-    parser.add_argument('--dataset', type=str, default='crmnist')
-    
-    args = parser.parse_args()
-    
-    # Set up CUDA if available
-    args.cuda = args.cuda and torch.cuda.is_available()
-    args.device = torch.device("cuda" if args.cuda else "cpu")
-    
-    if args.cuda:
-        print(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+    if not args.skip_training:
+        metrics_summary = {}
+        if 'nvae' in args.models and 'nvae_metrics' in locals():
+            metrics_summary['NVAE'] = nvae_metrics
+        if 'diva' in args.models and 'diva_metrics' in locals():
+            metrics_summary['DIVA'] = diva_metrics
+        if 'dann' in args.models and 'dann_metrics' in locals():
+            metrics_summary['DANN'] = dann_metrics
+        if 'irm' in args.models and 'irm_metrics' in locals():
+            metrics_summary['IRM'] = irm_metrics
+        
+        for model_name, metrics in metrics_summary.items():
+            print(f"  {model_name}:")
+            print(f"    Best epoch: {metrics.get('best_model_epoch', 'N/A')}")
+            print(f"    Best val accuracy: {float(metrics.get('best_val_accuracy', 'N/A')):.4f}")
+            print(f"    Epochs trained: {metrics.get('epochs_trained', 'N/A')}")
     else:
-        print("Using CPU")
-
-    # Run experiment
-    model = run_experiment(args)
+        print("  Training was skipped - no metrics available")
+    
+    print(f"\n🎉 All experiments completed!")
+    print(f"Results saved to: {args.out}")
+    
+    # Store trained models for potential future use
+    print(f"\nTrained models available in memory: {list(trained_models.keys())}")
+    
+    # =============================================================================
+    # 6. COMPREHENSIVE EXPRESSIVENESS COMPARISON
+    # =============================================================================
+    if not args.skip_training:
+        print("\n" + "="*60)
+        print("📊 COMPREHENSIVE EXPRESSIVENESS ANALYSIS")
+        print("="*60)
+        
+        # Import and run comprehensive comparison
+        from core.CRMNIST.compare_all_expressiveness import main as compare_expressiveness
+        compare_expressiveness(args.out)

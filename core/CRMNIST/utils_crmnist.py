@@ -428,7 +428,7 @@ def select_diverse_sample_batch(loader, args, samples_per_domain=10):
     
     return (selected_x, selected_y, selected_c, selected_r)
 
-def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_dir):
+def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_dir, model_name):
     """
     Visualize original images and their reconstructions, organized by domain.
     Each domain shows 10 samples with their reconstructions.
@@ -438,12 +438,21 @@ def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_di
         batch_data: Tuple of (x, y, c, r) tensors
     """
     x, y, c, r = batch_data
+    #import pdb; pdb.set_trace()
     if args.cuda:
         x, y, c, r = x.to(args.device), y.to(args.device), c.to(args.device), r.to(args.device)
     
     model.eval()
     with torch.no_grad():
-        x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(y, x, r)
+        if model_name == 'dann':
+            y_logits, domain_predictions = model.forward(y = y, x = x, r = r)
+            x_recon = y_logits
+        elif model_name == 'irm':
+            x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(y = y, x = x, r = r)
+        elif model_name == 'nvae':
+            x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(y = y, x = x, r = r)
+        elif model_name == 'diva':
+            x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(y = y, x = x, r = r)
     
     # Get labels in the right format
     if len(y.shape) > 1 and y.shape[1] > 1:
@@ -527,7 +536,7 @@ def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_di
     
     plt.suptitle(f'Reconstructions - Epoch {epoch}', y=1.02)
     plt.tight_layout()
-    plt.savefig(os.path.join(reconstructions_dir, f'epoch_{epoch}.png'))
+    plt.savefig(os.path.join(reconstructions_dir, f'{model_name}_epoch_{epoch}.png'))
     plt.close()
     
     print(f"Saved reconstructions visualization for epoch {epoch}")

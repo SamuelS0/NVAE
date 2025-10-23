@@ -8,7 +8,7 @@ from core.WILD.utils_wild import (
     visualize_reconstructions,
     select_diverse_sample_batch
 )
-from core.utils import process_batch, get_model_name, _calculate_metrics
+from core.utils import process_batch, get_model_name, _calculate_metrics, visualize_latent_spaces
 
 class WILDTrainer:
     def __init__(self, model, optimizer, device, args, patience=5):
@@ -27,12 +27,18 @@ class WILDTrainer:
         
         # Create output directories
         self.models_dir = os.path.join(args.out, 'models')
+                
         self.reconstructions_dir = os.path.join(args.out, 'reconstructions')
         self.max_epochs = args.epochs
         self.beta_annealing = args.beta_annealing
         self.beta_scale = args.beta_scale
         print(f'Beta annealing: {self.beta_annealing}')
         os.makedirs(self.models_dir, exist_ok=True)
+        os.makedirs(self.reconstructions_dir, exist_ok=True)
+        
+        # Create latent visualization directory
+        self.latent_viz_dir = os.path.join(args.out, 'latent_epoch_viz')
+        os.makedirs(self.latent_viz_dir, exist_ok=True)
     
     def train(self, train_loader, val_loader, num_epochs: int):
 
@@ -59,6 +65,10 @@ class WILDTrainer:
             print(f'  Val Loss: {val_loss:.4f}')
             for k, v in val_metrics.items():
                 print(f'  Val {k}: {v:.4f}')
+            
+            # Visualize latent spaces after each epoch
+            self.visualize_latent_epoch(val_loader, epoch)
+            
             # Early stopping check
             if self._check_early_stopping(val_loss, epoch, num_epochs, val_metrics):
                 break
@@ -69,7 +79,6 @@ class WILDTrainer:
     def _train_epoch(self, train_loader, epoch, current_beta) -> Tuple[float, Dict[str, float]]:
         train_loss = 0
         train_metrics_sum = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
-        num_batches = 0
         
         train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), 
                          desc=f"Epoch {epoch+1} [Train]")
@@ -89,16 +98,15 @@ class WILDTrainer:
             self.optimizer.step()
             train_loss += loss.item()
             
-            if batch_idx % 10 == 0:
-                batch_metrics = _calculate_metrics(self.model, y, x, hospital_id)
-                for k, v in batch_metrics.items():
-                    train_metrics_sum[k] += v
-                num_batches += 1
+            # Calculate metrics for every batch to be consistent with validation
+            batch_metrics = _calculate_metrics(self.model, y, x, hospital_id, 'train')
+            for k, v in batch_metrics.items():
+                train_metrics_sum[k] += v
             
             train_pbar.set_postfix(loss=loss.item())
         
         avg_train_loss = train_loss / len(train_loader)
-        avg_train_metrics = {k: v / num_batches for k, v in train_metrics_sum.items()}
+        avg_train_metrics = {k: v / len(train_loader) for k, v in train_metrics_sum.items()}
         
 
         trn_sample_batch = select_diverse_sample_batch(train_loader, data_type = 'train', samples_per_domain=10)
@@ -128,7 +136,7 @@ class WILDTrainer:
                 loss = self.model.loss_function(y, x, hospital_id, current_beta)
                 val_loss += loss.item()
                 
-                batch_metrics = _calculate_metrics(self.model, y, x, hospital_id)
+                batch_metrics = _calculate_metrics(self.model, y, x, hospital_id, 'val')
                 for k, v in batch_metrics.items():
                     val_metrics_sum[k] += v
                 
@@ -214,3 +222,19 @@ class WILDTrainer:
         if epoch + 1>= self.max_epochs:
             return self.beta_scale
         return self.beta_scale * (epoch / self.max_epochs)
+    
+    def visualize_latent_epoch(self, val_loader, epoch):
+        """Visualize latent spaces for the current epoch."""
+        try:
+            latent_path = os.path.join(self.latent_viz_dir, f'wild_latent_epoch_{epoch+1:03d}.png')
+            visualize_latent_spaces(
+                model=self.model,
+                dataloader=val_loader,
+                device=self.device,
+                type='wild',
+                save_path=latent_path,
+                max_samples=1000  # Reduce samples for faster visualization
+            )
+            print(f"  Latent visualization saved to {latent_path}")
+        except Exception as e:
+            print(f"  Warning: Could not generate latent visualization for epoch {epoch+1}: {e}")

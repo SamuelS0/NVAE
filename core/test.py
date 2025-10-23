@@ -1,5 +1,5 @@
 import torch
-from core.utils import calculate_metrics
+from core.utils import _calculate_metrics
 from tqdm import tqdm
 from core.utils import process_batch
 
@@ -21,7 +21,7 @@ def test_nvae(model, test_loader, dataset_type, device):
             loss = model.loss_function(y, x, domain)
             test_loss += loss.item()
 
-            batch_metrics = calculate_metrics(model, y, x, domain)
+            batch_metrics = _calculate_metrics(model, y, x, domain, 'test')
             for k, v in batch_metrics.items():
                 metrics_sum[k] += v
             

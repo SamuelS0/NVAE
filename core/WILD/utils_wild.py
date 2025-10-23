@@ -415,6 +415,10 @@ def prepare_data(dataset, args):
     val_loader = get_train_loader("standard", val_data, batch_size=args.batch_size)
     test_loader = get_train_loader("standard", test_data, batch_size=args.batch_size)
     
+    print("Train hospitals:", np.unique(train_data.dataset.metadata_array[train_data.indices, 0]))
+    print("Val hospitals:", np.unique(val_data.dataset.metadata_array[val_data.indices, 0]))
+    print("Test hospitals:", np.unique(test_data.dataset.metadata_array[test_data.indices, 0]))
+
     return train_loader, val_loader, test_loader
 
 '''def initialize_model(args, num_classes, num_domains):

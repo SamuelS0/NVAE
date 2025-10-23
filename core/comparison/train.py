@@ -11,7 +11,8 @@ from core.comparison.irm_trainer import IRMTrainer
 import numpy as np
 from core.CRMNIST.trainer import CRMNISTTrainer
 import json
-from core.WILD.trainer import WILDTrainer   
+from core.WILD.trainer import WILDTrainer
+from core.WILD.staged_trainer import StagedWILDTrainer   
 
 """
     Train NVAE and comparison models
@@ -97,7 +98,7 @@ def train_nvae(args, spec_data, train_loader, test_loader, dataset):
     nvae = nvae.to(args.device)
     
     optimizer = optim.Adam(nvae.parameters(), lr=args.learning_rate)
-    patience = 5
+    patience = args.patience
     
     # Define model parameters for saving
     
@@ -107,6 +108,100 @@ def train_nvae(args, spec_data, train_loader, test_loader, dataset):
     if training_metrics['best_model_state'] is not None:
         nvae.load_state_dict(training_metrics['best_model_state'])
         print("Loaded best model for final evaluation")
+
+    return nvae, training_metrics
+
+def train_staged_nvae(args, spec_data, train_loader, test_loader, dataset):
+    """Train NVAE with staged training for better disentanglement."""
+    print("Training NVAE with staged training...")
+    
+    if dataset == 'crmnist':
+        nvae = crmnist_model.VAE(class_map=spec_data['class_map'],
+                zy_dim=args.zy_dim,
+                zx_dim=args.zx_dim,
+                zay_dim=args.zay_dim,
+                za_dim=args.za_dim,
+                y_dim=spec_data['num_y_classes'],
+                a_dim=spec_data['num_r_classes'],
+                beta_1=args.beta_1,
+                beta_2=args.beta_2,
+                beta_3=args.beta_3,
+                beta_4=args.beta_4,
+                alpha_1=args.alpha_1,
+                alpha_2=args.alpha_2,
+                diva=False)
+        
+        model_params = {
+            'class_map': spec_data['class_map'],
+            'zy_dim': args.zy_dim,
+            'zx_dim': args.zx_dim,
+            'zay_dim': args.zay_dim,
+            'za_dim': args.za_dim,
+            'y_dim': spec_data['num_y_classes'],
+            'a_dim': spec_data['num_r_classes'],
+            'beta_1': args.beta_1,
+            'beta_2': args.beta_2,
+            'beta_3': args.beta_3,
+            'beta_4': args.beta_4,
+            'alpha_1': args.alpha_1,
+            'alpha_2': args.alpha_2,
+            'diva': False,
+            'staged_training': True
+        }
+        trainer_class = CRMNISTTrainer  # Note: Would need staged version for CRMNIST
+        
+    elif dataset == 'wild':
+        nvae = wild_model.VAE(class_map=None,
+                zy_dim=args.zy_dim,
+                zx_dim=args.zx_dim,
+                zay_dim=args.zay_dim,
+                za_dim=args.za_dim,
+                y_dim=args.num_y_classes,
+                a_dim=args.num_r_classes,
+                beta_1=args.beta_1,
+                beta_2=args.beta_2,
+                beta_3=args.beta_3,
+                beta_4=args.beta_4,
+                alpha_1=args.alpha_1,
+                alpha_2=args.alpha_2,
+                recon_weight=args.recon_weight,
+                device=args.device, 
+                resolution=args.resolution, 
+                model='vae')
+        
+        model_params = {
+            'recon_weight': args.recon_weight,
+            'zy_dim': args.zy_dim,
+            'zx_dim': args.zx_dim,
+            'zay_dim': args.zay_dim,
+            'za_dim': args.za_dim,
+            'y_dim': args.num_y_classes,
+            'a_dim': args.num_r_classes,
+            'beta_1': args.beta_1,
+            'beta_2': args.beta_2,
+            'beta_3': args.beta_3,
+            'beta_4': args.beta_4,
+            'alpha_1': args.alpha_1,
+            'alpha_2': args.alpha_2,
+            'beta_scale': args.beta_scale,
+            'diva': False,
+            'staged_training': True
+        }
+        trainer_class = StagedWILDTrainer
+        
+    # Move model to device
+    with open(os.path.join(args.out, 'model_params_staged.json'), 'w') as f:
+        json.dump(model_params, f)
+    nvae = nvae.to(args.device)
+    
+    optimizer = optim.Adam(nvae.parameters(), lr=args.learning_rate)
+    patience = args.patience
+    training_metrics = train(args, nvae, optimizer, train_loader, test_loader, args.device, patience, trainer_class=trainer_class)
+    
+
+    if training_metrics['best_model_state'] is not None:
+        nvae.load_state_dict(training_metrics['best_model_state'])
+        print("Loaded best staged model for final evaluation")
 
     return nvae, training_metrics
 
@@ -188,7 +283,7 @@ def train_diva(args, spec_data, train_loader, test_loader, dataset):
     diva = diva.to(args.device)
     
     optimizer = optim.Adam(diva.parameters(), lr=args.learning_rate)
-    patience = 5
+    patience = args.patience
     
     # Define model parameters for saving
     
@@ -210,7 +305,7 @@ def train_dann(args, spec_data, train_loader, test_loader, dataset):
     dann = DANN(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], dataset)
     dann = dann.to(args.device)
     optimizer = optim.Adam(dann.parameters(), lr=args.learning_rate)
-    patience = 5
+    patience = args.patience
     
     # Define model parameters for saving
     model_params = {
@@ -248,7 +343,7 @@ def train_irm(args, spec_data, train_loader, test_loader, dataset, seed=None):
     irm = irm.to(args.device)
 
     optimizer = optim.Adam(irm.parameters(), lr=args.learning_rate)
-    patience = 5
+    patience = args.patience
     
     # Define model parameters for saving
     model_params = {

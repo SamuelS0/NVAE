@@ -5,7 +5,7 @@ import numpy as np
 from typing import Dict, Tuple, Any
 from tqdm import tqdm
 import core.CRMNIST.utils_crmnist as utils_crmnist
-from core.utils import process_batch, get_model_name, _calculate_metrics
+from core.utils import process_batch, get_model_name, _calculate_metrics, visualize_latent_spaces
 
 class CRMNISTTrainer:
     def __init__(
@@ -32,12 +32,16 @@ class CRMNISTTrainer:
         self.best_batch_metrics = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
         
         # Create output directories with simpler structure
-        self.models_dir = os.path.join(args.out, 'comparison_models', args.setting)
+        self.models_dir = os.path.join(args.out, 'comparison_models')
         os.makedirs(self.models_dir, exist_ok=True)
         
         # Create reconstructions directory
         self.reconstructions_dir = os.path.join(args.out, 'reconstructions')
         os.makedirs(self.reconstructions_dir, exist_ok=True)
+        
+        # Create latent visualization directory
+        self.latent_viz_dir = os.path.join(args.out, 'latent_epoch_viz')
+        os.makedirs(self.latent_viz_dir, exist_ok=True)
     
     def train(self, train_loader, val_loader, num_epochs: int) -> torch.nn.Module:
         """Train the model with early stopping and model checkpointing."""
@@ -59,6 +63,9 @@ class CRMNISTTrainer:
             print(f'  Val Loss: {val_loss:.4f}')
             for k, v in val_metrics.items():
                 print(f'  Val {k}: {v:.4f}')
+            
+            # Visualize latent spaces after each epoch
+            self.visualize_latent_epoch(val_loader, epoch)
             
             # Generate and visualize reconstructions after each epoch
             # Skip for DANN models which don't do reconstructions
@@ -99,7 +106,7 @@ class CRMNISTTrainer:
             
             # Calculate metrics
             if batch_idx % 10 == 0:  # Calculate every 10 batches to save computation
-                batch_metrics = _calculate_metrics(self.model, y, x, r)
+                batch_metrics = _calculate_metrics(self.model, y, x, r, 'train')
                 for k, v in batch_metrics.items():
                     train_metrics_sum[k] += v
                 num_batches += 1
@@ -201,4 +208,26 @@ class CRMNISTTrainer:
             'epoch': epoch,
             'model_type': model_type
         }, final_model_path)
-        print(f"Final model saved to {final_model_path}") 
+        print(f"Final model saved to {final_model_path}")
+    
+    def visualize_latent_epoch(self, val_loader, epoch):
+        """
+        Visualize latent spaces for the current epoch using balanced sampling.
+        
+        The visualization uses balanced sampling to collect equal numbers of samples
+        for each (digit × color × rotation) combination, ensuring good representation
+        of all data variations. Works for both NVAE and DIVA models.
+        """
+        try:
+            latent_path = os.path.join(self.latent_viz_dir, f'crmnist_latent_epoch_{epoch+1:03d}.png')
+            visualize_latent_spaces(
+                model=self.model,
+                dataloader=val_loader,
+                device=self.device,
+                type='crmnist',  # Uses balanced sampling for color × rotation combinations
+                save_path=latent_path,
+                max_samples=1000
+            )
+            print(f"  Latent visualization saved to {latent_path}")
+        except Exception as e:
+            print(f"  Warning: Could not generate latent visualization for epoch {epoch+1}: {e}") 

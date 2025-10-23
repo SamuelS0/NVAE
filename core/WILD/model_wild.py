@@ -255,7 +255,7 @@ class VAE(NModule):
             zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
             zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
             if self.diva:
-                zay = torch.zeros_like(zy)
+                zay = None  # Keep consistent with forward method
             else:
                 zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
             za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]
@@ -327,6 +327,120 @@ class VAE(NModule):
         
         return generated_images_full, y
 
+    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=5000):
+        """
+        Visualize the latent spaces using t-SNE with balanced sampling for WILD dataset
+        Args:
+            dataloader: DataLoader containing (x, y, metadata) tuples where:
+                x: input images
+                y: label (0=normal, 1=tumor)
+                metadata: contains hospital ID in metadata[:, 0]
+            device: torch device
+            save_path: Optional path to save the visualization
+            max_samples: Maximum number of samples to use for visualization
+        """
+        # Import the reusable sampling function
+        from core.utils import balanced_sample_for_visualization
+        import numpy as np
+        
+        # Use the generic balanced sampling function with WILD dataset type
+        features_dict, labels_dict, sampling_stats = balanced_sample_for_visualization(
+            model=self,
+            dataloader=dataloader,
+            device=device,
+            model_type="nvae" if not self.diva else "diva",
+            max_samples=max_samples,
+            target_samples_per_combination=50,
+            dataset_type="wild"
+        )
+        
+        # Extract the latent spaces
+        zy_features = features_dict['zy'].numpy()
+        za_features = features_dict['za'].numpy()
+        zx_features = features_dict['zx'].numpy()
+        y_labels = labels_dict['y'].numpy()
+        r_labels = labels_dict['r'].numpy()  # Hospital IDs
+        
+        if not self.diva:
+            zay_features = features_dict['zay'].numpy()
+        
+        print(f"Final features shapes: zy={zy_features.shape}, za={za_features.shape}, zx={zx_features.shape}")
+        if not self.diva:
+            print(f"zay={zay_features.shape}")
+        
+        # Convert labels to single dimension (if needed)
+        if len(y_labels.shape) > 1:
+            y_labels = np.argmax(y_labels, axis=1)
+        if len(r_labels.shape) > 1:
+            r_labels = np.argmax(r_labels, axis=1)
+        
+        # Ensure all labels are 1D arrays
+        y_labels = y_labels.reshape(-1)
+        r_labels = r_labels.reshape(-1)
+        
+        # Verify dimensions match
+        assert len(y_labels) == len(zy_features), f"Label dimension mismatch: {len(y_labels)} vs {len(zy_features)}"
+        assert len(r_labels) == len(zy_features), f"Hospital label dimension mismatch: {len(r_labels)} vs {len(zy_features)}"
+        
+        # Apply t-SNE to each latent space
+        from sklearn.manifold import TSNE
+        import matplotlib.pyplot as plt
+        
+        tsne = TSNE(n_components=2, random_state=42)
+        
+        # Determine number of subplots based on DIVA mode
+        if self.diva:
+            fig, axes = plt.subplots(2, 3, figsize=(18, 12))  # 2 rows, 3 columns for DIVA
+            spaces = ['zy', 'za', 'zx']
+            features_list = [zy_features, za_features, zx_features]
+        else:
+            fig, axes = plt.subplots(2, 4, figsize=(24, 12))  # 2 rows, 4 columns for full VAE
+            spaces = ['zy', 'za', 'zay', 'zx']
+            features_list = [zy_features, za_features, zay_features, zx_features]
+        
+        # Create visualizations for each latent space
+        for i, (space_name, features) in enumerate(zip(spaces, features_list)):
+            features_2d = tsne.fit_transform(features)
+            
+            # Plot colored by labels (tumor/normal) in first row
+            scatter1 = axes[0, i].scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='RdYlBu', alpha=0.6)
+            axes[0, i].set_title(f'{space_name} - Colored by Label\n(Blue=Normal, Red=Tumor)')
+            axes[0, i].legend(*scatter1.legend_elements(), title="Labels", loc='upper right')
+            
+            # Plot colored by hospital in second row
+            scatter2 = axes[1, i].scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='tab10', alpha=0.6)
+            axes[1, i].set_title(f'{space_name} - Colored by Hospital')
+            axes[1, i].legend(*scatter2.legend_elements(), title="Hospitals", loc='upper right')
+        
+        # Add overall title
+        model_type = "DIVA" if self.diva else "VAE"
+        plt.suptitle(f'WILD {model_type} Latent Space Visualization (t-SNE)', fontsize=16, y=0.98)
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Latent space visualization saved to {save_path}")
+        else:
+            plt.show()
+        plt.close()
+        
+        # Print sampling statistics
+        print("\nSampling Statistics:")
+        for combination, count in sampling_stats.items():
+            if isinstance(combination, tuple) and len(combination) == 2:
+                label, hospital = combination
+                label_name = "Normal" if label == 0 else "Tumor"
+                print(f"  {label_name} + Hospital {hospital}: {count} samples")
+
+    def is_diva_mode(self):
+        """Check if the model is in DIVA mode"""
+        return self.diva
+
+    def visualize_latent_spaces_diva(self, dataloader, device, save_path=None, max_samples=5000):
+        """Convenience method for DIVA-specific visualization"""
+        if not self.diva:
+            print("Warning: Model is not in DIVA mode. Using regular VAE visualization.")
+        return self.visualize_latent_spaces(dataloader, device, save_path, max_samples)
 
 
 #Encoder module 
@@ -391,9 +505,9 @@ class qz(NModule):
         z_loc = self.loc(h)
         z_scale = F.softplus(self.scale(h)) + 1e-6
         
-        # h = self.encoder(x)
-        # z_loc = self.loc(h)
-        # z_scale = F.softplus(self.scale(h)) + 1e-7
+        # Add numerical stability checks
+        z_loc = torch.clamp(z_loc, min=-10, max=10)  # Prevent extreme values
+        z_scale = torch.clamp(z_scale, min=1e-6, max=10)  # Ensure positive and bounded
         
         return z_loc, z_scale
 
@@ -456,7 +570,14 @@ class qz_new(NModule):
         # Get mean and variance
         mu = self.fc_mu(x)
         log_var = self.fc_var(x)
-        std = torch.exp(0.5 * log_var)
+        
+        # Add numerical stability
+        log_var = torch.clamp(log_var, min=-10, max=10)  # Prevent extreme log variance
+        std = torch.exp(0.5 * log_var) + 1e-6  # Ensure positive std
+        
+        # Clamp outputs for stability
+        mu = torch.clamp(mu, min=-10, max=10)
+        std = torch.clamp(std, min=1e-6, max=10)
         
         return mu, std
 
@@ -465,19 +586,37 @@ class qy(NModule):
     def __init__(self, y_dim, zy_dim, zay_dim, diva=False):
         super().__init__()
         self.diva = diva
+        
+        # Fix dimension calculation based on DIVA mode
+        if self.diva:
+            self.zay_dim = 0
+            self.z_combined_dim = zy_dim  # When diva=True, we only use zy_dim
+        else:
+            self.zay_dim = zay_dim
+            self.z_combined_dim = zy_dim + zay_dim
 
-        self.fc1 = nn.Linear(zy_dim + zay_dim, 64)
-        self.fc2 = nn.Linear(64, y_dim)
-        self.fc3 = nn.Linear(y_dim, y_dim)
+        self.fc1 = nn.Linear(self.z_combined_dim, 64)
+        self.fc2 = nn.Linear(64, 64)  # Add intermediate layer
+        self.fc3 = nn.Linear(64, y_dim)  # Output layer
 
+        # Initialize all layers properly
         torch.nn.init.xavier_uniform_(self.fc1.weight)
+        torch.nn.init.xavier_uniform_(self.fc2.weight)
+        torch.nn.init.xavier_uniform_(self.fc3.weight)
         with torch.no_grad():
             self.fc1.bias.zero_()
+            self.fc2.bias.zero_()
+            self.fc3.bias.zero_()
 
     def forward(self, zy, zay):
         if self.diva:
+            # When diva=True, we only use zy (zay should be None or zeros)
+            if zay is not None:
+                assert torch.all(zay == 0), "zay should be None or all zeros in DIVA mode"
             z_combined = zy
         else:
+            # When diva=False, concatenate zy and zay
+            assert zay is not None, "zay cannot be None in non-DIVA mode"
             z_combined = torch.cat((zy, zay), -1)
         
         h = self.fc1(z_combined)
@@ -485,41 +624,64 @@ class qy(NModule):
         h = self.fc2(h)
         h = F.relu(h)
         logits = self.fc3(h)
-        y_hat = torch.softmax(logits, dim=1)
-        return y_hat
+        # Return raw logits for numerical stability with cross_entropy loss
+        return logits
+    
+    def get_probabilities(self, zy, zay):
+        """Get probability distributions (for interpretation/inference)"""
+        logits = self.forward(zy, zay)
+        return torch.softmax(logits, dim=1)
 
 
 class qa(NModule):
     def __init__(self, a_dim, za_dim, zay_dim, diva=False):
         super().__init__()
         self.diva = diva
-
-        self.z_combined_dim = za_dim + zay_dim
+        
+        # Fix dimension calculation based on DIVA mode
+        if self.diva:
+            self.zay_dim = 0
+            self.z_combined_dim = za_dim  # When diva=True, we only use za_dim
+        else:
+            self.zay_dim = zay_dim
+            self.z_combined_dim = za_dim + zay_dim
 
         self.fc1 = nn.Linear(self.z_combined_dim, 64)
-        self.fc2 = nn.Linear(64, a_dim)
-        self.fc3 = nn.Linear(a_dim, a_dim)
+        self.fc2 = nn.Linear(64, 64)  # Add intermediate layer like qy
+        self.fc3 = nn.Linear(64, a_dim)  # Output layer
 
+        # Initialize all layers properly
         torch.nn.init.xavier_uniform_(self.fc1.weight)
+        torch.nn.init.xavier_uniform_(self.fc2.weight)
+        torch.nn.init.xavier_uniform_(self.fc3.weight)
         with torch.no_grad():
             self.fc1.bias.zero_()
+            self.fc2.bias.zero_()
+            self.fc3.bias.zero_()
 
     def forward(self, za, zay):
         if self.diva:
-            # When diva=True, we only use za
+            # When diva=True, we only use za (zay should be None or zeros)
+            if zay is not None:
+                assert torch.all(zay == 0), "zay should be None or all zeros in DIVA mode"
             z_combined = za
         else:
             # When diva=False, concatenate za and zay
+            assert zay is not None, "zay cannot be None in non-DIVA mode"
             z_combined = torch.cat((za, zay), -1)
 
-    
         h = self.fc1(z_combined)
         h = F.relu(h)
         h = self.fc2(h)
         h = F.relu(h)
         logits = self.fc3(h)
-        a_hat = torch.softmax(logits, dim=1)
-        return a_hat
+        # Return raw logits for numerical stability with cross_entropy loss
+        return logits
+    
+    def get_probabilities(self, za, zay):
+        """Get probability distributions (for interpretation/inference)"""
+        logits = self.forward(za, zay)
+        return torch.softmax(logits, dim=1)
 
 
 
@@ -1041,7 +1203,7 @@ class pza(NModule):
             zy = z_loc[:, self.zy_index_range[0]:self.zy_index_range[1]]
             zx = z_loc[:, self.zx_index_range[0]:self.zx_index_range[1]]
             if self.diva:
-                zay = torch.zeros_like(zy)
+                zay = None  # Keep consistent with forward method
             else:
                 zay = z_loc[:, self.zay_index_range[0]:self.zay_index_range[1]]
             za = z_loc[:, self.za_index_range[0]:self.za_index_range[1]]

@@ -11,6 +11,7 @@ class IRM(nn.Module):
         self.num_y_classes = num_y_classes
         self.num_r_classes = num_r_classes
         self.z_dim = z_dim
+        self.dataset = dataset
         self.penalty_weight = penalty_weight
         self.penalty_anneal_iters = penalty_anneal_iters
         self.step_count = 0
@@ -41,33 +42,33 @@ class IRM(nn.Module):
 
         elif self.dataset == 'wild':
             self.feature_extractor = nn.Sequential(
-            # Block 1: 96x96x3 -> 48x48x64
-            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(64),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(2),
-            
-            # Block 2: 48x48x64 -> 24x24x128
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(2),
-            
-            # Block 3: 24x24x128 -> 12x12x256
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(2),
-            
-            # Block 4: 12x12x256 -> 6x6x512
-            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(2),
-            
-            nn.Flatten(),
-            nn.Linear(512 * 6 * 6, self.z_dim)  # Project to z_dim
-        )
+                # Block 1: 96x96x3 -> 48x48x64
+                nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(64),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+                
+                # Block 2: 48x48x64 -> 24x24x128
+                nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(128),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+                
+                # Block 3: 24x24x128 -> 12x12x256
+                nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(256),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+                
+                # Block 4: 12x12x256 -> 6x6x512
+                nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(512),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+                
+                nn.Flatten(),
+                nn.Linear(512 * 6 * 6, self.z_dim)  # Project to z_dim
+            )
 
         # Classifier matching VAE's qy architecture
         self.classifier = nn.Sequential(
@@ -82,6 +83,10 @@ class IRM(nn.Module):
         torch.nn.init.xavier_uniform_(self.classifier[0].weight)
         with torch.no_grad():
             self.classifier[0].bias.zero_()
+
+    def get_features(self, x):
+        """Extract features from the feature extractor"""
+        return self.feature_extractor(x)
 
     def forward(self, x, y=None, r=None):
         """
@@ -165,10 +170,6 @@ class IRM(nn.Module):
         self.step_count += 1
         
         return irm_loss, total_loss, total_penalty
-
-    def get_features(self, x):
-        """Extract features from the feature extractor"""
-        return self.feature_extractor(x)
 
     def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=5000):
         """
