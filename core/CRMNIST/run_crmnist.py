@@ -15,18 +15,21 @@ import random
 import core.CRMNIST.utils_crmnist
 from core.CRMNIST.data_generation import generate_crmnist_dataset
 from core.CRMNIST.model import VAE
+from core.CRMNIST.dann_model import AugmentedDANN
 from core.train import train
 from core.test import test
 from core.CRMNIST.utils_crmnist import select_diverse_sample_batch, visualize_reconstructions, visualize_conditional_generation
 from core.CRMNIST.trainer import CRMNISTTrainer
+from core.CRMNIST.dann_trainer import DANNTrainer
 """
-CRMNIST VAE training script.
+CRMNIST model training script.
 
-This script trains a Variational Autoencoder (VAE) on the CRMNIST dataset,
+This script trains various models (NVAE, DIVA, DANN) on the CRMNIST dataset,
 a custom version of MNIST with color and rotation transformations.
 
 Run with:
-python -m core.CRMNIST.run_crmnist --out results/ --config conf/crmnist.json
+python -m core.CRMNIST.run_crmnist --out results/ --config conf/crmnist.json --model_type nvae
+python -m core.CRMNIST.run_crmnist --out results/ --config conf/crmnist.json --model_type dann
 """
 
 def run_experiment(args):
@@ -40,13 +43,20 @@ def run_experiment(args):
     os.makedirs(domain_samples_dir, exist_ok=True)
     
     # Log some information
-    print(f"Starting CRMNIST VAE training...")
+    print(f"Starting CRMNIST {args.model_type.upper()} training...")
+    print(f"Model type: {args.model_type}")
     print(f"Config file: {args.config}")
     print(f"Output directory: {args.out}")
     print(f"Batch size: {args.batch_size}")
     print(f"Learning rate: {args.learning_rate}")
     print(f"Epochs: {args.epochs}")
     print(f"Device: {args.device}")
+    
+    if args.model_type == 'dann':
+        print(f"DANN-specific parameters:")
+        print(f"  Lambda reversal: {args.lambda_reversal}")
+        print(f"  Sparsity weight: {args.sparsity_weight}")
+        print(f"  Beta adversarial: {args.beta_adv}")
     
     # Load configuration from JSON
     with open(args.config, 'r') as file:
@@ -89,18 +99,51 @@ def run_experiment(args):
 
     print(f"Dataset dimensions: y_dim={num_y_classes}, r_dim=num_domains={num_r_classes}")
     
-    # Initialize model
-    model = VAE(class_map=class_map,
-               zy_dim=args.zy_dim,
-               zx_dim=args.zx_dim,
-               zay_dim=args.zay_dim,
-               za_dim=args.za_dim,
-               y_dim=num_y_classes,
-               a_dim=num_r_classes,
-               beta_1=args.beta_1,
-               beta_2=args.beta_2,
-               beta_3=args.beta_3,
-               beta_4=args.beta_4)
+    # Initialize model based on model_type
+    if args.model_type == 'dann':
+        model = AugmentedDANN(
+            class_map=class_map,
+            zy_dim=args.zy_dim,
+            zd_dim=args.za_dim,  # Use za_dim for domain-specific features
+            zdy_dim=args.zay_dim,  # Use zay_dim for domain-class interaction
+            y_dim=num_y_classes,
+            d_dim=num_r_classes,
+            lambda_reversal=args.lambda_reversal,
+            sparsity_weight=args.sparsity_weight,
+            alpha_y=args.alpha_1,
+            alpha_d=args.alpha_2,
+            beta_adv=args.beta_adv
+        )
+    elif args.model_type == 'diva':
+        model = VAE(class_map=class_map,
+                   zy_dim=args.zy_dim,
+                   zx_dim=args.zx_dim,
+                   zay_dim=args.zay_dim,
+                   za_dim=args.za_dim,
+                   y_dim=num_y_classes,
+                   a_dim=num_r_classes,
+                   beta_1=args.beta_1,
+                   beta_2=args.beta_2,
+                   beta_3=args.beta_3,
+                   beta_4=args.beta_4,
+                   alpha_1=args.alpha_1,
+                   alpha_2=args.alpha_2,
+                   diva=True)
+    else:  # Default to VAE (NVAE)
+        model = VAE(class_map=class_map,
+                   zy_dim=args.zy_dim,
+                   zx_dim=args.zx_dim,
+                   zay_dim=args.zay_dim,
+                   za_dim=args.za_dim,
+                   y_dim=num_y_classes,
+                   a_dim=num_r_classes,
+                   beta_1=args.beta_1,
+                   beta_2=args.beta_2,
+                   beta_3=args.beta_3,
+                   beta_4=args.beta_4,
+                   alpha_1=args.alpha_1,
+                   alpha_2=args.alpha_2,
+                   diva=False)
     
     # Move model to device
     if args.cuda:
@@ -108,7 +151,10 @@ def run_experiment(args):
     
     # Setup optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
+    
+    # Save model parameters
     model_params = {
+        'model_type': args.model_type,
         'zy_dim': args.zy_dim,
         'zx_dim': args.zx_dim,
         'zay_dim': args.zay_dim,
@@ -117,17 +163,37 @@ def run_experiment(args):
         'beta_2': args.beta_2,
         'beta_3': args.beta_3,
         'beta_4': args.beta_4,
-        #'alpha_1': args.alpha_1,
-        #'alpha_2': args.alpha_2,
-        'diva': False
-        }
+        'alpha_1': args.alpha_1,
+        'alpha_2': args.alpha_2,
+        'diva': args.model_type == 'diva'
+    }
+    
+    # Add DANN-specific parameters if applicable
+    if args.model_type == 'dann':
+        model_params.update({
+            'lambda_reversal': args.lambda_reversal,
+            'sparsity_weight': args.sparsity_weight,
+            'beta_adv': args.beta_adv
+        })
+    
     with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
         json.dump(model_params, f)
     
     patience = 5
 
-    # Train the model
-    training_metrics = train(args, model, optimizer, train_loader, val_loader, args.device, patience, trainer_class=CRMNISTTrainer)
+    # Train the model with appropriate trainer
+    trainer = None  # Initialize trainer variable
+    if args.model_type == 'dann':
+        trainer = DANNTrainer(model, optimizer, args.device, args, patience)
+        trainer.train(train_loader, val_loader, args.epochs)
+        training_metrics = {
+            'best_model_state': trainer.best_model_state,
+            'best_val_loss': trainer.best_val_loss,
+            'epochs_trained': trainer.epochs_trained,
+            'best_model_epoch': trainer.best_epoch
+        }
+    else:
+        training_metrics = train(args, model, optimizer, train_loader, val_loader, args.device, patience, trainer_class=CRMNISTTrainer)
 
     # Load best model for final evaluation
     if training_metrics['best_model_state'] is not None:
@@ -144,19 +210,34 @@ def run_experiment(args):
     # Select a diverse sample batch with images from all domains
     sample_batch = select_diverse_sample_batch(test_loader, args)
     
-    test_loss, metrics_avg = test(model, test_loader, args.device)
-    
-    print(f'Test Loss: {test_loss:.4f}')
-    for k, v in metrics_avg.items():
-        print(f'Test {k}: {v:.4f}')
-    
-    final_test_loss, final_metrics, sample_batch = test_loss, metrics_avg, sample_batch
-    
-    # Generate final reconstructions
-    visualize_reconstructions(model, 'final', sample_batch, args, reconstructions_dir)
-    
-    # Generate and visualize conditional samples
-    visualize_conditional_generation(model, args.device, reconstructions_dir)
+    if args.model_type == 'dann':
+        # For DANN, use the trainer's evaluation method
+        if trainer is not None:
+            trainer.model.eval()
+            final_metrics = trainer.evaluate_disentanglement(test_loader)
+            final_test_loss = trainer.best_val_loss  # Use best validation loss
+            
+            # Print DANN-specific metrics
+            print(f'Test Loss: {final_test_loss:.4f}')
+            for k, v in final_metrics.items():
+                print(f'Test {k}: {v:.4f}')
+        else:
+            raise RuntimeError("DANN trainer was not initialized properly")
+    else:
+        # For VAE models, use standard test function
+        test_loss, metrics_avg = test(model, test_loader, args.device)
+        
+        print(f'Test Loss: {test_loss:.4f}')
+        for k, v in metrics_avg.items():
+            print(f'Test {k}: {v:.4f}')
+        
+        final_test_loss, final_metrics = test_loss, metrics_avg
+        
+        # Generate final reconstructions (only for generative models)
+        visualize_reconstructions(model, 'final', sample_batch, args, reconstructions_dir)
+        
+        # Generate and visualize conditional samples (only for generative models)
+        visualize_conditional_generation(model, args.device, reconstructions_dir)
     
     # Save training results as JSON
     results = {
@@ -194,8 +275,26 @@ if __name__ == "__main__":
     parser.add_argument('--beta_2', type=float, default=1.0)
     parser.add_argument('--beta_3', type=float, default=1.0)
     parser.add_argument('--beta_4', type=float, default=1.0)
+    parser.add_argument('--alpha_1', type=float, default=1.0)
+    parser.add_argument('--alpha_2', type=float, default=2.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--dataset', type=str, default='crmnist')
+    
+    # Model selection
+    parser.add_argument('--model_type', type=str, default='nvae', choices=['nvae', 'diva', 'dann'],
+                        help='Type of model to train: nvae (default), diva, or dann')
+    
+    # DANN-specific arguments
+    parser.add_argument('--lambda_reversal', type=float, default=1.0,
+                        help='Initial gradient reversal lambda for DANN (default: 1.0)')
+    parser.add_argument('--sparsity_weight', type=float, default=0.01,
+                        help='Weight for sparsity penalty on zdy in DANN (default: 0.01)')
+    parser.add_argument('--beta_adv', type=float, default=1.0,
+                        help='Weight for adversarial losses in DANN (default: 1.0)')
+    
+    # Training setting identifier
+    parser.add_argument('--setting', type=str, default='default',
+                        help='Training setting identifier for output organization (default: default)')
     
     args = parser.parse_args()
     
