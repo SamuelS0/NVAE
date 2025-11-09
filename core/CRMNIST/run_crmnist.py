@@ -20,6 +20,8 @@ from core.comparison.train import train_nvae, train_diva, train_dann, train_irm
 from core.CRMNIST.latent_expressiveness import evaluate_latent_expressiveness
 from core.comparison.dann import DANN
 from core.comparison.irm import IRM
+from core.CRMNIST.dann_model import AugmentedDANN
+from core.CRMNIST.dann_trainer import DANNTrainer
 from core.utils import visualize_latent_spaces
 """
 CRMNIST VAE training script.
@@ -110,7 +112,22 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
         elif model_name == 'dann':
             z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
             model = DANN(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'crmnist')
-            
+
+        elif model_name == 'dann_augmented':
+            model = AugmentedDANN(
+                class_map=spec_data['class_map'],
+                zy_dim=args.zy_dim,
+                zd_dim=args.za_dim,  # Use za_dim for domain-specific features
+                zdy_dim=args.zay_dim,  # Use zay_dim for domain-class interaction
+                y_dim=spec_data['num_y_classes'],
+                d_dim=spec_data['num_r_classes'],
+                lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
+                sparsity_weight=getattr(args, 'sparsity_weight', 0.01),
+                alpha_y=args.alpha_1,
+                alpha_d=args.alpha_2,
+                beta_adv=getattr(args, 'beta_adv', 0.1)
+            )
+
         elif model_name == 'irm':
             z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
             model = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'crmnist', 
@@ -167,10 +184,19 @@ if __name__ == "__main__":
     
     # Model selection arguments
     parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'irm'],
-                       choices=['nvae', 'diva', 'dann', 'irm'],
+                       choices=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],
                        help='Which models to train and test (default: all)')
     parser.add_argument('--skip_training', action='store_true', default=False,
                        help='Skip training and only do visualization (requires pre-trained models)')
+
+    # AugmentedDANN-specific parameters
+    parser.add_argument('--lambda_reversal', type=float, default=1.0,
+                       help='Lambda parameter for gradient reversal in AugmentedDANN (default: 1.0)')
+    parser.add_argument('--sparsity_weight', type=float, default=0.01,
+                       help='Weight for sparsity penalty on zdy in AugmentedDANN (default: 0.01)')
+    parser.add_argument('--beta_adv', type=float, default=0.1,
+                       help='Weight for adversarial loss in AugmentedDANN (default: 0.1)')
+
     args = parser.parse_args()
     
     # Set cache behavior based on arguments
@@ -397,7 +423,78 @@ if __name__ == "__main__":
             print("🎨 Generating DANN latent space visualization...")
             dann_latent_path = os.path.join(latent_space_dir, 'dann_latent_spaces.png')
             dann_model.visualize_latent_space(val_loader, args.device, save_path=dann_latent_path)
-    
+
+    # =============================================================================
+    # 3.5. TRAIN AND TEST AUGMENTED DANN MODEL
+    # =============================================================================
+    if 'dann_augmented' in args.models:
+        print("\n" + "="*60)
+        print("🔥 TRAINING AUGMENTED DANN MODEL")
+        print("="*60)
+
+        dann_aug_params = {
+            **model_params,
+            'lambda_reversal': getattr(args, 'lambda_reversal', 1.0),
+            'sparsity_weight': getattr(args, 'sparsity_weight', 0.01),
+            'beta_adv': getattr(args, 'beta_adv', 0.1)
+        }
+
+        with open(os.path.join(args.out, 'dann_augmented_model_params.json'), 'w') as f:
+            json.dump(dann_aug_params, f)
+
+        if not args.skip_training:
+            # Create AugmentedDANN model
+            dann_aug_model = AugmentedDANN(
+                class_map=spec_data['class_map'],
+                zy_dim=args.zy_dim,
+                zd_dim=args.za_dim,
+                zdy_dim=args.zay_dim,
+                y_dim=spec_data['num_y_classes'],
+                d_dim=spec_data['num_r_classes'],
+                lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
+                sparsity_weight=getattr(args, 'sparsity_weight', 0.01),
+                alpha_y=args.alpha_1,
+                alpha_d=args.alpha_2,
+                beta_adv=getattr(args, 'beta_adv', 0.1)
+            ).to(args.device)
+
+            # Create optimizer
+            optimizer = optim.Adam(dann_aug_model.parameters(), lr=args.lr)
+
+            # Train using DANNTrainer
+            trainer = DANNTrainer(dann_aug_model, optimizer, args.device, args, patience=5)
+            trainer.train(train_loader, val_loader, args.epochs)
+
+            # Get metrics
+            dann_aug_metrics = {
+                'best_model_state': trainer.best_model_state,
+                'best_val_loss': trainer.best_val_loss,
+                'epochs_trained': trainer.epochs_trained,
+                'best_model_epoch': trainer.best_epoch
+            }
+
+            # Load best model
+            dann_aug_model.load_state_dict(trainer.best_model_state)
+            trained_models['dann_augmented'] = dann_aug_model
+
+            # Save model
+            dann_aug_model_path = os.path.join(models_dir, f"dann_augmented_model_epoch_{dann_aug_metrics['best_model_epoch']}.pt")
+            torch.save(dann_aug_model.state_dict(), dann_aug_model_path)
+            print(f"AugmentedDANN model saved to: {dann_aug_model_path}")
+        else:
+            # Load pre-trained model
+            print("Loading pre-trained AugmentedDANN model for visualization...")
+            dann_aug_model, dann_aug_metrics = load_model_checkpoint(models_dir, 'dann_augmented', spec_data, args)
+            if dann_aug_model is None:
+                print("⚠️  Skipping AugmentedDANN visualization - no pre-trained model found")
+                dann_aug_model = None
+
+        # Visualize AugmentedDANN latent spaces
+        if 'dann_aug_model' in locals() and dann_aug_model is not None:
+            print("🎨 Generating AugmentedDANN latent space visualization...")
+            dann_aug_latent_path = os.path.join(latent_space_dir, 'dann_augmented_latent_spaces.png')
+            visualize_latent_spaces(dann_aug_model, val_loader, args.device, type='dann_augmented', save_path=dann_aug_latent_path)
+
     # =============================================================================
     # 4. TRAIN AND TEST IRM MODEL
     # =============================================================================

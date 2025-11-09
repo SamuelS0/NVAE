@@ -79,35 +79,65 @@ def kl_divergence(loc, scale): # assumes scale is logscale
     return total_kl, dim_wise_kls, mean_kl
                                
 # Function to calculate additional metrics
-'''def calculate_metrics(model, y, x, domain):
-    """Calculate additional metrics beyond just loss"""
+def _calculate_metrics(model, y, x, r):
+    """Calculate metrics for a batch, handling both generative and discriminative models."""
     with torch.no_grad():
-        x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(y, x, domain)
-        
-        # Reconstruction MSE
-        recon_mse = F.mse_loss(x_recon, x).item()
-        
-        # Classification accuracy
-        _, y_pred = y_hat.max(1)
-        if len(y.shape) > 1 and y.shape[1] > 1:
-            _, y_true = y.max(1)
+        # Check if this is a DANN model by looking for the dann_forward method
+        if hasattr(model, 'dann_forward'):
+            # Handle DANN model (AugmentedDANN)
+            outputs = model.dann_forward(x)
+
+            # Convert one-hot to indices if necessary
+            if len(y.shape) > 1 and y.shape[1] > 1:
+                y_true = torch.argmax(y, dim=1)
+            else:
+                y_true = y.long()
+
+            if len(r.shape) > 1 and r.shape[1] > 1:
+                a_true = torch.argmax(r, dim=1)
+            else:
+                a_true = r.long()
+
+            # Main task accuracies
+            y_pred = outputs['y_pred_main'].argmax(dim=1)
+            y_accuracy = (y_pred == y_true).float().mean().item()
+
+            a_pred = outputs['d_pred_main'].argmax(dim=1)
+            a_accuracy = (a_pred == a_true).float().mean().item()
+
+            return {
+                'recon_mse': 0.0,  # DANN doesn't do reconstruction
+                'y_accuracy': y_accuracy,
+                'a_accuracy': a_accuracy
+            }
         else:
-            y_true = y.long()
-        y_accuracy = (y_pred == y_true).float().mean().item()
-        
-        # Attribute accuracy
-        _, a_pred = a_hat.max(1)
-        if len(domain.shape) > 1 and domain.shape[1] > 1:
-            _, a_true = domain.max(1)
-        else:
-            a_true = domain.long()
-        a_accuracy = (a_pred == a_true).float().mean().item()
-        
-        return {
-            'recon_mse': recon_mse,
-            'y_accuracy': y_accuracy,
-            'a_accuracy': a_accuracy
-        }'''
+            # Handle generative models (NVAE, DIVA)
+            x_recon, _, _, _, _, _, _, y_hat, a_hat, _, _, _, _ = model.forward(y, x, r)
+
+            # Reconstruction MSE
+            recon_mse = torch.nn.functional.mse_loss(x_recon, x).item()
+
+            # Classification accuracy
+            _, y_pred = y_hat.max(1)
+            if len(y.shape) > 1 and y.shape[1] > 1:
+                _, y_true = y.max(1)
+            else:
+                y_true = y.long()
+            y_accuracy = (y_pred == y_true).float().mean().item()
+
+            # Attribute accuracy
+            _, a_pred = a_hat.max(1)
+            if len(r.shape) > 1 and r.shape[1] > 1:
+                _, a_true = r.max(1)
+            else:
+                a_true = r.long()
+            a_accuracy = (a_pred == a_true).float().mean().item()
+
+            return {
+                'recon_mse': recon_mse,
+                'y_accuracy': y_accuracy,
+                'a_accuracy': a_accuracy
+            }
 
 def sample_nvae(model, dataloader, num_samples, device):
     """
@@ -529,6 +559,149 @@ def sample_dann(model, dataloader, num_samples, device):
     
     return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
 
+def sample_dann_augmented(model, dataloader, num_samples, device):
+    """
+    Sample data from Augmented DANN model and collect domain information.
+
+    Args:
+        model: Augmented DANN model with three-encoder architecture
+        dataloader: DataLoader containing (x, y, c, r) tuples
+        num_samples: Maximum number of samples to collect
+        device: torch device
+
+    Returns:
+        zy_list, zd_list, zdy_list, zd_list: Lists of latent vectors
+        y_list: List of digit labels
+        domain_dict: Dictionary of domain labels
+        labels_dict: Dictionary of domain label names
+    """
+    model.eval()
+    zy_list, zd_list, zdy_list = [], [], []
+    y_list = []
+    domain_dict = {"color": [], "rotation": []}  # DANN uses both color and rotation
+    labels_dict = {
+        "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
+        "rotation": ['0°', '15°', '30°', '45°', '60°', '75°']
+    }
+
+    # Initialize counters for each combination
+    counts = {}
+    for digit in range(10):
+        for color in range(7):
+            for rotation in range(6):
+                counts[(digit, color, rotation)] = 0
+
+    # Target samples per combination - ensure we get enough for visualization
+    target_samples = 50  # Minimum samples per combination for good visualization
+    total_collected = 0
+    all_combinations_satisfied = False
+
+    with torch.no_grad():
+        pbar = tqdm(dataloader, desc="Sampling Augmented DANN data")
+        for x, y, c, r in pbar:
+            # Only check max_samples after we have enough samples for each combination
+            if all_combinations_satisfied and total_collected >= num_samples:
+                break
+
+            x = x.to(device)
+            y = y.to(device)
+            c = c.to(device)
+            r = r.to(device)
+
+            # Convert to indices if one-hot encoded
+            if len(y.shape) > 1:
+                y = torch.argmax(y, dim=1)
+            if len(c.shape) > 1:
+                c = torch.argmax(c, dim=1)
+            if len(r.shape) > 1:
+                r = torch.argmax(r, dim=1)
+
+            # Create mask for samples we want to keep
+            keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
+
+            # Check each sample
+            for j in range(len(y)):
+                digit = y[j].item()
+                color = c[j].item()
+                rotation = r[j].item()
+
+                # Check if we need more samples for this specific combination
+                combination = (digit, color, rotation)
+                should_keep = counts[combination] < target_samples
+
+                if should_keep:
+                    keep_mask[j] = True
+                    counts[combination] += 1
+                    total_collected += 1
+
+            # Apply mask to get only samples we want to keep
+            if keep_mask.any():
+                x_batch = x[keep_mask]
+                y_batch = y[keep_mask]
+                c_batch = c[keep_mask]
+                r_batch = r[keep_mask]
+
+                # Get latent representations from Augmented DANN
+                zy, zd, zdy = model.extract_features(x_batch)
+
+                # Store the actual latent spaces
+                zy_list.append(zy.cpu())
+                zd_list.append(zd.cpu())
+                zdy_list.append(zdy.cpu())
+                y_list.append(y_batch.cpu())
+                domain_dict["color"].append(c_batch.cpu())
+                domain_dict["rotation"].append(r_batch.cpu())
+
+            # Check if we have enough samples for all combinations
+            all_combinations_satisfied = all(count >= target_samples for count in counts.values()) if counts else False
+
+            # Update progress bar with more detailed information
+            min_count = min(counts.values()) if counts else 0
+            max_count = max(counts.values()) if counts else 0
+            pbar.set_postfix({
+                'total': total_collected,
+                'min_count': min_count,
+                'max_count': max_count,
+                'target': target_samples,
+                'satisfied': all_combinations_satisfied
+            })
+
+    # Print detailed statistics about the sampling
+    print("\nSampling Statistics:")
+    print(f"Total samples collected: {total_collected}")
+    print(f"Target samples per combination: {target_samples}")
+    if counts:
+        print(f"Minimum samples per combination: {min(counts.values())}")
+        print(f"Maximum samples per combination: {max(counts.values())}")
+
+    # Print distribution of samples across digits
+    digit_counts = {i: 0 for i in range(10)}
+    for (digit, _, _), count in counts.items():
+        digit_counts[digit] += count
+    print("\nSamples per digit:")
+    for digit, count in digit_counts.items():
+        print(f"Digit {digit}: {count} samples")
+
+    # Print distribution of samples across colors
+    color_counts = {i: 0 for i in range(7)}
+    for (_, color, _), count in counts.items():
+        color_counts[color] += count
+    print("\nSamples per color:")
+    for color, count in color_counts.items():
+        print(f"{labels_dict['color'][color]}: {count} samples")
+
+    # Print distribution of samples across rotations
+    rotation_counts = {i: 0 for i in range(6)}
+    for (_, _, rotation), count in counts.items():
+        rotation_counts[rotation] += count
+    print("\nSamples per rotation:")
+    for rotation, count in rotation_counts.items():
+        print(f"{labels_dict['rotation'][rotation]}: {count} samples")
+
+    # Return in the expected format: zy, za, zay, zx
+    # For AugmentedDANN: zy=zy, za=zd, zay=zdy, zx=zd (domain features)
+    return zy_list, zd_list, zdy_list, zd_list, y_list, domain_dict, labels_dict
+
 def sample_wild(model, dataloader, max_samples=5000, device=None):
     """
     Sample from a WILD model and collect latent representations.
@@ -832,6 +1005,8 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
         zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_diva(model, dataloader, max_samples, device)
     elif type == "dann":
         zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_dann(model, dataloader, max_samples, device)
+    elif type == "dann_augmented":
+        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_dann_augmented(model, dataloader, max_samples, device)
     elif type == "wild":
         zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_wild(model, dataloader, max_samples, device)
     elif type == "crmnist":
