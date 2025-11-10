@@ -415,8 +415,8 @@ def prepare_data(dataset, args):
     test_data = dataset.get_subset("test", transform=transform)
     
     train_loader = get_train_loader("standard", train_data, batch_size=args.batch_size)
-    val_loader = get_train_loader("standard", val_data, batch_size=args.batch_size)
-    test_loader = get_train_loader("standard", test_data, batch_size=args.batch_size)
+    val_loader = get_eval_loader("standard", val_data, batch_size=args.batch_size)
+    test_loader = get_eval_loader("standard", test_data, batch_size=args.batch_size)
     
     print("Train hospitals:", np.unique(train_data.dataset.metadata_array[train_data.indices, 0]))
     print("Val hospitals:", np.unique(val_data.dataset.metadata_array[val_data.indices, 0]))

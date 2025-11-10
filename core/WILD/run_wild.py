@@ -282,7 +282,15 @@ if __name__ == "__main__":
     args = get_args()
     args.cuda = args.cuda and torch.cuda.is_available()
     args.device = torch.device("cuda" if args.cuda else "cpu")
-    
+
+    # Validate resolution argument
+    if args.resolution == 'high':
+        print("❌ ERROR: High resolution (448x448) is not supported for WILD dataset.")
+        print("   The Camelyon17-WILDS dataset provides 96x96 patches natively.")
+        print("   Upscaling would not add meaningful information and would only slow training.")
+        print("   Please use --resolution low (or omit the flag, as 'low' is the default).")
+        exit(1)
+
     # Setup data directory
     if args.data_dir is None:
         # Use default data directory in user's home folder
@@ -537,7 +545,7 @@ if __name__ == "__main__":
             print("  📊 Preparing validation data for latent analysis...")
             transform = transforms.Compose([transforms.ToTensor()])
             final_val_data = dataset.get_subset(args.val_type, transform=transform)
-            val_loader_analysis = get_train_loader("standard", final_val_data, batch_size=10)
+            val_loader_analysis = get_eval_loader("standard", final_val_data, batch_size=10)
             val_x, val_y, val_metadata = next(iter(val_loader_analysis))
             
             # Generate latent space analysis with progress
