@@ -9,6 +9,9 @@ from torchvision.transforms import functional, ToTensor
 from PIL import Image
 import torch.nn.functional as F
 import core.CRMNIST.utils_crmnist
+import pickle
+import hashlib
+import json
 
 data_path = os.path.join('.','data')
 crmnist_path = os.path.join(data_path,'crmnist')
@@ -29,7 +32,7 @@ class CRMNISTDataset(Dataset):
         """
         self.num_y_classes = 10
         self.num_c_classes = c_labels[0].shape[1] if len(c_labels) > 0 else 6
-        self.num_r_classes = r_labels[0].shape[1] if len(r_labels) > 0 else 5
+        self.num_r_classes = r_labels[0].shape[1] if len(r_labels) > 0 else 6
 
         # Debug print to check array sizes before concatenation
         img_sizes = [img.shape[0] for img in imgs]
@@ -81,23 +84,104 @@ class CRMNISTDataset(Dataset):
 
 
 
-def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transform_decay=1, p=0.5):
+def generate_cache_key(spec_data, train, transform_intensity, transform_decay, p):
     """
-    Generates CRMNIST dataset.
+    Generate a unique cache key based on dataset configuration parameters.
+    """
+    cache_dict = {
+        'domain_data': spec_data['domain_data'],
+        'class_map': spec_data['class_map'],
+        'unique_color': spec_data['unique_color'],
+        'y_c': spec_data.get('y_c'),
+        'train': train,
+        'transform_intensity': transform_intensity,
+        'transform_decay': transform_decay,
+        'p': p
+    }
+    
+    # Create a hash of the configuration
+    cache_str = json.dumps(cache_dict, sort_keys=True)
+    cache_hash = hashlib.md5(cache_str.encode()).hexdigest()
+    
+    return f"crmnist_{'train' if train else 'test'}_{cache_hash}.pkl"
+
+def save_dataset_cache(dataset, cache_path):
+    """
+    Save the dataset to cache.
+    """
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    
+    # Extract data from dataset
+    cache_data = {
+        'imgs': dataset.imgs,
+        'y_labels': dataset.y_labels,
+        'c_labels': dataset.c_labels,
+        'r_labels': dataset.r_labels,
+        'num_y_classes': dataset.num_y_classes,
+        'num_c_classes': dataset.num_c_classes,
+        'num_r_classes': dataset.num_r_classes
+    }
+    
+    with open(cache_path, 'wb') as f:
+        pickle.dump(cache_data, f)
+    
+    print(f"Dataset cached to: {cache_path}")
+
+def load_dataset_cache(cache_path):
+    """
+    Load the dataset from cache.
+    """
+    with open(cache_path, 'rb') as f:
+        cache_data = pickle.load(f)
+    
+    # Reconstruct dataset - create a new instance and set attributes directly
+    dataset = object.__new__(CRMNISTDataset)
+    dataset.imgs = cache_data['imgs']
+    dataset.y_labels = cache_data['y_labels']
+    dataset.c_labels = cache_data['c_labels'] 
+    dataset.r_labels = cache_data['r_labels']
+    dataset.num_y_classes = cache_data['num_y_classes']
+    dataset.num_c_classes = cache_data['num_c_classes']
+    dataset.num_r_classes = cache_data['num_r_classes']
+    dataset.transform = None
+    dataset.convert_y_to_one_hot = False
+    
+    print(f"Dataset loaded from cache: {cache_path}")
+    return dataset
+
+def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transform_decay=1, p=0.5, use_cache=True):
+    """
+    Generates CRMNIST dataset with caching support.
     
     Args:
-        domain_data (dict[int, dict]): Contains domain information in dict with keys: "rotation", "color"
-                                    "intensity", "name", "number", "y_c", "subset"
+        spec_data (dict): Dataset specification
         train (bool): Whether to generate training or test dataset
         transform_intensity (float): intensity of transform
         transform_decay (float): decay of transform
         p: probability with which an image which may be colored is colored
+        use_cache (bool): Whether to use cached datasets if available
     Returns:
         crmnist_dataset (dataset): 
             - if 'train' is 'true', returns training dataset.
             - if 'train' is 'false, returns test dataset.
-        crmnist_domain_data: Modified domain dictionary that contains additional keys with transform info
     """
+    
+
+    if train:
+        cache_path = os.path.join(crmnist_path, 'cache', 'crmnist_train.pkl')
+    else:
+        cache_path = os.path.join(crmnist_path, 'cache', 'crmnist_test.pkl')
+    
+    # Try to load from cache first
+
+    if use_cache and os.path.exists(cache_path):
+        print(f"Loading {'training' if train else 'test'} dataset from cache...")
+        try:
+            return load_dataset_cache(cache_path)
+        except Exception as e:
+            print(f"Failed to load cache: {e}. Regenerating dataset...")
+    
+    print(f"Generating {'training' if train else 'test'} dataset...")
 
     os.makedirs(data_path, exist_ok=True)
     os.makedirs(crmnist_path, exist_ok=True)
@@ -289,5 +373,10 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
     
     # Create dataset with integer y labels and one-hot c/r labels
     dataset = CRMNISTDataset(imgs, labels, c_labels, r_labels, convert_y_to_one_hot=False)
+    
+    # Save to cache for future use
+    if use_cache:
+        save_dataset_cache(dataset, cache_path)
+        
     return dataset
 

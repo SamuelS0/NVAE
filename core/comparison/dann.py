@@ -31,7 +31,7 @@ class DomainDiscriminator(nn.Module):
         )
 
     def forward(self, features, λ):
-        # reverse gradient here
+        # Apply gradient reversal
         reversed_features = grad_reverse(features, λ)
         return self.net(reversed_features)
 
@@ -44,8 +44,9 @@ class DANN(nn.Module):
         self.z_dim = z_dim
         self.name = 'dann'
         self.dataset = dataset
+        
         if self.dataset == 'crmnist':
-        # Feature extractor matching our VAE encoder architecture
+            # Feature extractor matching our VAE encoder architecture
             self.feature_extractor = nn.Sequential(
                 # Block 1
                 nn.Conv2d(in_channels=3, out_channels=96, kernel_size=5, stride=1, padding=2),
@@ -64,33 +65,33 @@ class DANN(nn.Module):
             )
         elif self.dataset == 'wild':
             self.feature_extractor = nn.Sequential(
-            # Block 1: 96x96x3 -> 48x48x64
-            nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(64),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(2),
-            
-            # Block 2: 48x48x64 -> 24x24x128
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(2),
-            
-            # Block 3: 24x24x128 -> 12x12x256
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(2),
-            
-            # Block 4: 12x12x256 -> 6x6x512
-            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.2),
-            nn.MaxPool2d(2),
-            
-            nn.Flatten(),
-            nn.Linear(512 * 6 * 6, self.z_dim)  # Project to z_dim
-        )
+                # Block 1: 96x96x3 -> 48x48x64
+                nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(64),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+                
+                # Block 2: 48x48x64 -> 24x24x128
+                nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(128),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+                
+                # Block 3: 24x24x128 -> 12x12x256
+                nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(256),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+                
+                # Block 4: 12x12x256 -> 6x6x512
+                nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(512),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+                
+                nn.Flatten(),
+                nn.Linear(512 * 6 * 6, self.z_dim)  # Project to z_dim
+            )
         else:
             raise ValueError(f"Dataset {self.dataset} not supported")
 
@@ -125,37 +126,43 @@ class DANN(nn.Module):
     
     def loss_function(self, y_predictions, domain_predictions, y, r, λ=1.0):
         """
-        Compute the DANN loss as a weighted sum of classification and domain losses.
+        Compute the DANN loss as a sum of classification and domain losses.
         Args:
             y_predictions: Raw logits for digit classification
             domain_predictions: Predictions for domain classification
             y: True digit labels
             r: True domain labels
-            λ: Weight for domain loss (should be scheduled during training)
+            λ: DEPRECATED - Lambda is now handled by the GRL during backpropagation.
+               This parameter is kept for backward compatibility but is not used.
         Returns:
-            total_loss: Weighted sum of classification and domain losses
+            total_loss: Sum of classification and domain losses
             y_loss: Classification loss
             domain_loss: Domain classification loss
+
+        Note: The adversarial aspect is handled by the Gradient Reversal Layer (GRL)
+        which multiplies domain gradients by -λ during backpropagation. Therefore,
+        we do NOT multiply domain_loss by λ here to avoid double application.
         """
         # Classification loss (digit prediction) - use raw logits
         y_loss = F.cross_entropy(y_predictions, y)
-        
+
         # Domain loss (rotation prediction)
         domain_loss = F.cross_entropy(domain_predictions, r)
-        
-        # Total loss: minimize classification error + domain adversarial loss
-        # The gradient reversal in domain discriminator handles the adversarial aspect
-        total_loss = y_loss + λ * domain_loss
-        
+
+        # Total loss: minimize classification error + domain loss
+        # The GRL handles the adversarial aspect via -λ gradient multiplication
+        # FIXED: Removed λ multiplication to avoid double lambda application
+        total_loss = y_loss + domain_loss
+
         return total_loss, y_loss, domain_loss
 
     def get_features(self, x):
         """Extract features from the feature extractor"""
         return self.feature_extractor(x)
 
-    def visualize_latent_space(self, dataloader, device, save_path=None):
+    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=5000):
         """
-        Visualize the latent space using t-SNE
+        Visualize the latent space using t-SNE with balanced sampling
         Args:
             dataloader: DataLoader containing (x, y, c, r) tuples where:
                 x: input images
@@ -164,28 +171,30 @@ class DANN(nn.Module):
                 r: rotation/domain labels (one-hot encoded)
             device: torch device
             save_path: Optional path to save the visualization
+            max_samples: Maximum number of samples to use for visualization
         """
-        self.eval()
-        features_list = []
-        y_list = []
-        c_list = []
-        r_list = []
+        # Import the reusable sampling function
+        from core.utils import balanced_sample_for_visualization
         
-        with torch.no_grad():
-            for x, y, c, r in dataloader:
-                x = x.to(device)
-                features = self.get_features(x)
-                features_list.append(features.cpu().numpy())
-                y_list.append(y.cpu().numpy())
-                c_list.append(c.cpu().numpy())
-                r_list.append(r.cpu().numpy())
+        # Use the generic balanced sampling function
+        features_dict, labels_dict, sampling_stats = balanced_sample_for_visualization(
+            model=self,
+            dataloader=dataloader,
+            device=device,
+            model_type="dann",
+            max_samples=max_samples,
+            target_samples_per_combination=50
+        )
         
-        features = np.concatenate(features_list, axis=0)
-        y_labels = np.concatenate(y_list, axis=0)
-        c_labels = np.concatenate(c_list, axis=0)
-        r_labels = np.concatenate(r_list, axis=0)
+        # Extract the features (DANN uses the same features for all spaces)
+        features = features_dict['features'].numpy()
+        y_labels = labels_dict['y'].numpy()
+        c_labels = labels_dict['c'].numpy()
+        r_labels = labels_dict['r'].numpy()
         
-        # Convert one-hot encoded labels to single dimension
+        print(f"Final features shape: {features.shape}")
+        
+        # Convert one-hot encoded labels to single dimension (if needed)
         if len(c_labels.shape) > 1:
             c_labels = np.argmax(c_labels, axis=1)
         if len(r_labels.shape) > 1:
