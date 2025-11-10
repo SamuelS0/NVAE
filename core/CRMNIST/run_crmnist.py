@@ -189,6 +189,8 @@ if __name__ == "__main__":
                        help='Which models to train and test (default: all)')
     parser.add_argument('--skip_training', action='store_true', default=False,
                        help='Skip training and only do visualization (requires pre-trained models)')
+    parser.add_argument('--setting', type=str, default='standard',
+                       help='Experimental setting name for organizing outputs (default: standard)')
 
     # AugmentedDANN-specific parameters
     parser.add_argument('--lambda_reversal', type=float, default=1.0,
@@ -238,13 +240,7 @@ if __name__ == "__main__":
     print(f"Learning rate: {args.learning_rate}")
     print(f"Epochs: {args.epochs}")
     print(f"Device: {args.device}")
-    
-    if args.model_type == 'dann':
-        print(f"DANN-specific parameters:")
-        print(f"  Lambda reversal: {args.lambda_reversal}")
-        print(f"  Sparsity weight: {args.sparsity_weight}")
-        print(f"  Beta adversarial: {args.beta_adv}")
-    
+
     # Load configuration from JSON
     with open(args.config, 'r') as file:
         spec_data = json.load(file)
@@ -263,14 +259,14 @@ if __name__ == "__main__":
             
     # Generate dataset (with caching)
     print("Loading/generating datasets for comparison experiments...")
-    train_dataset = generate_crmnist_dataset(spec_data, train=True, 
+    train_dataset = generate_crmnist_dataset(spec_data, train=True,
                                             transform_intensity=args.intensity,
-                                            transform_decay=args.intensity_decay, 
-                                            use_cache=args.use_cache)
-    test_dataset = generate_crmnist_dataset(spec_data, train=False, 
+                                            transform_decay=args.intensity_decay,
+                                            use_cache=use_cache)
+    test_dataset = generate_crmnist_dataset(spec_data, train=False,
                                            transform_intensity=args.intensity,
-                                           transform_decay=args.intensity_decay, 
-                                           use_cache=args.use_cache)
+                                           transform_decay=args.intensity_decay,
+                                           use_cache=use_cache)
     
     # Create validation split from training data to avoid data leakage
     train_size = len(train_dataset)
@@ -298,7 +294,6 @@ if __name__ == "__main__":
     
     # Model parameters for saving
     model_params = {
-        'model_type': args.model_type,
         'zy_dim': args.zy_dim,
         'zx_dim': args.zx_dim,
         'zay_dim': args.zay_dim,
