@@ -8,8 +8,6 @@ import matplotlib.pyplot as plt
 import os
 import datetime
 
-random.seed(42)
-
 class FixedRotate:
     def __init__(self, angle):
         # Convert angle to float if it's a string
@@ -217,11 +215,10 @@ class AddColor:
         
         return colored_img
 
-def choose_label_subset(spec_data, chosen=False):
+def choose_label_subset(spec_data):
     """Generates y_c and subsets of five labels to be colored in each domain
     Args:
         spec_data: dict containing domain_data and other configuration
-        chosen: boolean indicating if labels were already chosen
 
     Returns:
         y_c (int): The chosen label for special coloring
@@ -231,27 +228,23 @@ def choose_label_subset(spec_data, chosen=False):
     # Ensure we have domain_data
     if 'domain_data' not in spec_data:
         raise ValueError("spec_data must contain 'domain_data' key")
-        
+
     domain_data = spec_data['domain_data']
 
-    if not chosen:
-        y_c = random.choice(range(10))
-        spec_data['y_c'] = y_c
+    # Generate new random assignments
+    y_c = random.choice(range(10))
+    spec_data['y_c'] = y_c
 
-        all_labels = list(range(10))
-        if y_c in all_labels:
-            all_labels.remove(y_c)
+    all_labels = list(range(10))
+    if y_c in all_labels:
+        all_labels.remove(y_c)
 
-        spec_data['y_c'] = y_c
-        subsets = {}
-        for i in range(0,len(domain_data)):
-            subsets[i] = random.sample(all_labels, 5)
-            domain_data[i]['subset'] = subsets[i]
+    subsets = {}
+    for i in range(len(domain_data)):
+        subsets[i] = random.sample(all_labels, 5)
+        domain_data[i]['subset'] = subsets[i]
 
-        return y_c, subsets
-    else:
-        # If already chosen, just return the existing y_c
-        return spec_data.get('y_c')
+    return y_c, subsets
 
 def make_transform(domain_data, domain_number, style, transform_intensity = 1.5, transform_decay = 1):
     """

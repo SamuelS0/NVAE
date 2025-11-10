@@ -63,21 +63,10 @@ class View(nn.Module):
             current_shape = list(tensor.shape)
             raise RuntimeError(f"Cannot reshape tensor of shape {current_shape} to {self.size}")
 
-def kl_divergence(loc, scale): # assumes scale is logscale
-    batch_size = loc.size(0)
-    if loc.dim() == 4:
-        loc = loc.view(batch_size, -1)
-    if scale.dim() == 4:
-        scale = scale.view(batch_size, -1)
-    
-    # KL divergence formula for normal distribution
-    kls = -0.5 * (1 + 2 * scale - loc.pow(2) - scale.exp().pow(2))
-    total_kl = kls.sum(1).mean(0)
-    dim_wise_kls = kls.mean(0)
-    mean_kl = kls.mean(1).mean(0)
+# NOTE: The kl_divergence function was removed because it's never used in the codebase.
+# Models use PyTorch's built-in log_prob() method for KL divergence calculation instead.
+# If you need KL divergence, use: torch.distributions.kl_divergence(p, q)
 
-    return total_kl, dim_wise_kls, mean_kl
-                               
 # Function to calculate additional metrics
 def _calculate_metrics(model, y, x, r):
     """Calculate metrics for a batch, handling both generative and discriminative models."""

@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import torch.distributions as dist
-from core.utils import kl_divergence
 from torchsummary import summary
 import numpy as np
 from sklearn.manifold import TSNE

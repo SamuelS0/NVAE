@@ -32,7 +32,7 @@ class CRMNISTDataset(Dataset):
         """
         self.num_y_classes = 10
         self.num_c_classes = c_labels[0].shape[1] if len(c_labels) > 0 else 6
-        self.num_r_classes = r_labels[0].shape[1] if len(r_labels) > 0 else 5
+        self.num_r_classes = r_labels[0].shape[1] if len(r_labels) > 0 else 6
 
         # Debug print to check array sizes before concatenation
         img_sizes = [img.shape[0] for img in imgs]

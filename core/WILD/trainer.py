@@ -55,7 +55,7 @@ class WILDTrainer:
             train_loss, train_metrics = self._train_epoch(train_loader, epoch, current_beta=trn_current_beta)
             
             # Validation phase
-            val_loss, val_metrics = self._validate(val_loader, epoch, current_beta = 2)
+            val_loss, val_metrics = self._validate(val_loader, epoch, current_beta=trn_current_beta)
             
             print(f'Epoch {epoch+1}/{self.args.epochs}:')
             print(f'  Train Loss: {train_loss:.4f}')
@@ -121,9 +121,8 @@ class WILDTrainer:
         self.model.eval()
         val_loss = 0
         val_metrics_sum = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
-        val_pbar = tqdm(enumerate(val_loader), total=len(val_loader), 
+        val_pbar = tqdm(enumerate(val_loader), total=len(val_loader),
                        desc=f"Epoch {epoch+1} [Val]")
-        current_beta = self.get_current_beta(epoch)
         with torch.no_grad():
             for batch_idx, batch in val_pbar:
                 x, y, hospital_id = process_batch(batch, self.device, dataset_type='wild')
@@ -188,10 +187,10 @@ class WILDTrainer:
         else:
             self.patience_counter += 1
             print(f"  No improvement in validation accuracy. Patience: {self.patience_counter}/{self.patience}")
-            
+
             # Use min(10, num_epochs // 2) as minimum epochs requirement
             min_required_epochs = min(10, num_epochs // 2)
-            if self.patience_counter >= self.patience and epoch >= min_required_epochs:
+            if self.patience_counter >= self.patience and epoch + 1 >= min_required_epochs:
                 return True
             return False
 

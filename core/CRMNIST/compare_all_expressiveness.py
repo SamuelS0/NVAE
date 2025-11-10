@@ -96,10 +96,10 @@ def create_comprehensive_comparison(results, save_dir):
             })
     
     df = pd.DataFrame(comparison_data)
-    
+
     if df.empty:
         print("⚠️  No data available for comparison")
-        return
+        return None, None
     
     # Create comprehensive visualization
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))

@@ -26,64 +26,61 @@ def visualize_disentanglement(model, dataloader, device, save_path=None, num_var
     base_examples = _select_diverse_examples(dataloader, device, num_examples)
     
     # Create visualizations for each base example
-    for example_idx, (x_base, y_base, c_base, r_base) in enumerate(base_examples):
+    for example_idx, (x_base, y_base, metadata_base) in enumerate(base_examples):
         print(f"Creating disentanglement visualization for example {example_idx + 1}/{num_examples}")
-        
+
         # Get base latent representation
         with torch.no_grad():
             z_loc, z_scale = model.qz(x_base.unsqueeze(0))
-            
+
             # Extract individual latent components
             zy_base = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
             zx_base = z_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
             za_base = z_loc[:, model.za_index_range[0]:model.za_index_range[1]]
-            
+
             if model.diva:
                 zay_base = None
                 num_latent_spaces = 3
             else:
                 zay_base = z_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
                 num_latent_spaces = 4
-        
+
         # Create figure for this example
-        fig, axes = plt.subplots(num_latent_spaces + 1, num_variations, 
+        fig, axes = plt.subplots(num_latent_spaces + 1, num_variations,
                                 figsize=(2 * num_variations, 2 * (num_latent_spaces + 1)))
-        
+
         # Show original image in the first row, center column
         center_col = num_variations // 2
         original_img = x_base.cpu().permute(1, 2, 0).numpy()
         original_img = np.clip(original_img, 0, 1)
-        
+
         # Clear the first row and show original in center
         for col in range(num_variations):
             axes[0, col].axis('off')
         axes[0, center_col].imshow(original_img)
         axes[0, center_col].set_title('Original Image', fontsize=10, fontweight='bold')
         axes[0, center_col].axis('off')
-        
-        # Add example information
-        digit_label = y_base.item() if len(y_base.shape) == 0 else torch.argmax(y_base).item()
-        color_label = torch.argmax(c_base).item() if torch.max(c_base) > 0 else -1
-        rotation_label = torch.argmax(r_base).item() if torch.max(r_base) > 0 else -1
-        
-        color_names = ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red']
-        color_name = color_names[color_label] if 0 <= color_label < len(color_names) else 'None'
-        rotation_angle = rotation_label * 15 if rotation_label >= 0 else 0
-        
+
+        # Add example information for WILD dataset
+        label = y_base.item() if len(y_base.shape) == 0 else torch.argmax(y_base).item()
+        hospital_id = metadata_base[0].item() if len(metadata_base.shape) > 0 else metadata_base.item()
+
+        label_name = 'Tumor' if label == 1 else 'Normal'
+
         fig.suptitle(f'Disentanglement Analysis - Example {example_idx + 1}\n'
-                    f'Digit: {digit_label}, Color: {color_name}, Rotation: {rotation_angle}°', 
+                    f'Label: {label_name}, Hospital: {int(hospital_id)}',
                     fontsize=12, fontweight='bold')
         
         # Generate variations for each latent space
         latent_spaces = [
-            ('zy', zy_base, 'Label-specific (zy)\nShould change: Digit identity'),
-            ('za', za_base, 'Domain-specific (za)\nShould change: Rotation/Domain'),
+            ('zy', zy_base, 'Label-specific (zy)\nShould change: Tumor/Normal classification'),
+            ('za', za_base, 'Domain-specific (za)\nShould change: Hospital/Domain characteristics'),
         ]
-        
+
         if not model.diva:
             latent_spaces.append(('zay', zay_base, 'Domain-Label (zay)\nShould change: Interaction effects'))
-        
-        latent_spaces.append(('zx', zx_base, 'Residual (zx)\nShould change: Style/Noise'))
+
+        latent_spaces.append(('zx', zx_base, 'Residual (zx)\nShould change: Style/Texture'))
         
         # Create variations for each latent space
         for row_idx, (space_name, base_latent, description) in enumerate(latent_spaces):
@@ -137,42 +134,41 @@ def visualize_disentanglement(model, dataloader, device, save_path=None, num_var
 def _select_diverse_examples(dataloader, device, num_examples=3):
     """
     Select diverse examples from the dataloader for disentanglement analysis.
-    Tries to get examples with different digits, colors, and rotations.
+    Tries to get examples with different labels and hospitals for WILD dataset.
     """
     examples = []
     seen_combinations = set()
-    
+
     # Try to find diverse examples
     for batch_idx, (x, y, metadata) in enumerate(dataloader):
         hospital_id = metadata[:, 0]
         x, y, hospital_id = x.to(device), y.to(device), hospital_id.to(device)
-        
+
         for i in range(len(x)):
             # Get labels
-            digit = y[i].item() if len(y[i].shape) == 0 else torch.argmax(y[i]).item()
-            color = torch.argmax(c[i]).item() if torch.max(c[i]) > 0 else -1
-            rotation = torch.argmax(r[i]).item() if torch.max(r[i]) > 0 else -1
-            
-            combination = (digit, color, rotation)
-            
+            label = y[i].item() if len(y[i].shape) == 0 else torch.argmax(y[i]).item()
+            hospital = hospital_id[i].item()
+
+            combination = (label, hospital)
+
             # Add if we haven't seen this combination and need more examples
             if combination not in seen_combinations and len(examples) < num_examples:
-                examples.append((x[i], y[i], c[i], r[i]))
+                examples.append((x[i], y[i], metadata[i]))
                 seen_combinations.add(combination)
-                
+
                 if len(examples) >= num_examples:
                     break
-        
+
         if len(examples) >= num_examples:
             break
-    
+
     # If we couldn't find enough diverse examples, just take the first few
     if len(examples) < num_examples:
         print(f"Warning: Could only find {len(examples)} diverse examples, using first batch")
-        x, y, c, r = next(iter(dataloader))
-        x, y, c, r = x.to(device), y.to(device), c.to(device), r.to(device)
-        examples = [(x[i], y[i], c[i], r[i]) for i in range(min(num_examples, len(x)))]
-    
+        x, y, metadata = next(iter(dataloader))
+        x, y, metadata = x.to(device), y.to(device), metadata.to(device)
+        examples = [(x[i], y[i], metadata[i]) for i in range(min(num_examples, len(x)))]
+
     return examples
 
 
@@ -210,10 +206,10 @@ def _create_summary_visualization(model, base_examples, device, save_path, num_v
                             figsize=(2 * num_variations, 1.5 * num_examples * (num_latent_spaces + 1)))
     
     center_col = num_variations // 2
-    
-    for example_idx, (x_base, y_base, c_base, r_base) in enumerate(base_examples):
+
+    for example_idx, (x_base, y_base, metadata_base) in enumerate(base_examples):
         base_row = example_idx * (num_latent_spaces + 1)
-        
+
         with torch.no_grad():
             z_loc, _ = model.qz(x_base.unsqueeze(0))
             zy_base = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
@@ -283,8 +279,8 @@ def visualize_latent_interpolation(model, dataloader, device, save_path=None, nu
     if len(examples) < 2:
         print("Warning: Need at least 2 examples for interpolation")
         return
-    
-    (x1, y1, c1, r1), (x2, y2, c2, r2) = examples[:2]
+
+    (x1, y1, metadata1), (x2, y2, metadata2) = examples[:2]
     
     with torch.no_grad():
         # Get latent representations

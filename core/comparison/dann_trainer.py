@@ -11,19 +11,25 @@ class DANNTrainer(WILDTrainer):
         super().__init__(model, optimizer, device, args, patience)
         self.dataset = args.dataset
         self.optimizer = optimizer
-    
+        self.num_epochs = getattr(args, 'epochs', 100)  # Total epochs for lambda scheduling
+
     def _train_epoch(self, train_loader, epoch, current_beta):
         self.model.train()
         total_loss = 0
         total_y_loss = 0
         total_domain_loss = 0
-       
+
         # Initialize counters for accuracy
         total_samples = 0
         correct_y = 0
         correct_domain = 0
 
-        train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc="Training")
+        # Calculate lambda for this epoch using DANN's adaptive scheduling
+        # λ(p) = 2/(1+exp(-10p)) - 1, where p = epoch/total_epochs
+        current_lambda = self.model.get_lambda(epoch, self.num_epochs)
+
+        train_pbar = tqdm(enumerate(train_loader), total=len(train_loader),
+                         desc=f"Training (λ={current_lambda:.3f})")
 
         for batch_idx, batch in train_pbar:
             #x, y, c, d = x.to(self.device), y.to(self.device), c.to(self.device), d.to(self.device)
@@ -34,7 +40,8 @@ class DANNTrainer(WILDTrainer):
             if len(d.shape) > 1 and d.shape[1] > 1:
                 d = torch.argmax(d, dim=1)
 
-            y_logits, domain_logits = self.model(x, y, d)
+            # Pass scheduled lambda to model forward pass
+            y_logits, domain_logits = self.model(x, y, d, λ=current_lambda)
 
             y_pred = torch.argmax(y_logits, dim=1)
             domain_pred = torch.argmax(domain_logits, dim=1)
@@ -85,13 +92,17 @@ class DANNTrainer(WILDTrainer):
         total_loss = 0
         total_y_loss = 0
         total_domain_loss = 0
-        
+
         # Initialize counters for accuracy
         total_samples = 0
         correct_y = 0
         correct_domain = 0
 
-        val_pbar = tqdm(enumerate(val_loader), total=len(val_loader), desc="Validating")
+        # Use current scheduled lambda for validation (consistent with training)
+        current_lambda = self.model.get_lambda(epoch, self.num_epochs)
+
+        val_pbar = tqdm(enumerate(val_loader), total=len(val_loader),
+                       desc=f"Validating (λ={current_lambda:.3f})")
 
         with torch.no_grad():
             for batch_idx, batch in val_pbar:
@@ -103,7 +114,8 @@ class DANNTrainer(WILDTrainer):
                 if len(d.shape) > 1 and d.shape[1] > 1:
                     d = torch.argmax(d, dim=1)
 
-                y_logits, domain_logits = self.model(x, y, d)
+                # Pass scheduled lambda to model forward pass
+                y_logits, domain_logits = self.model(x, y, d, λ=current_lambda)
 
                 y_pred = torch.argmax(y_logits, dim=1)
                 domain_pred = torch.argmax(domain_logits, dim=1)

@@ -459,7 +459,7 @@ if __name__ == "__main__":
             ).to(args.device)
 
             # Create optimizer
-            optimizer = optim.Adam(dann_aug_model.parameters(), lr=args.lr)
+            optimizer = optim.Adam(dann_aug_model.parameters(), lr=args.learning_rate)
 
             # Train using DANNTrainer
             trainer = DANNTrainer(dann_aug_model, optimizer, args.device, args, patience=5)

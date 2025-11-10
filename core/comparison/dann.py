@@ -126,28 +126,34 @@ class DANN(nn.Module):
     
     def loss_function(self, y_predictions, domain_predictions, y, r, λ=1.0):
         """
-        Compute the DANN loss as a weighted sum of classification and domain losses.
+        Compute the DANN loss as a sum of classification and domain losses.
         Args:
             y_predictions: Raw logits for digit classification
             domain_predictions: Predictions for domain classification
             y: True digit labels
             r: True domain labels
-            λ: Weight for domain loss (should be scheduled during training)
+            λ: DEPRECATED - Lambda is now handled by the GRL during backpropagation.
+               This parameter is kept for backward compatibility but is not used.
         Returns:
-            total_loss: Weighted sum of classification and domain losses
+            total_loss: Sum of classification and domain losses
             y_loss: Classification loss
             domain_loss: Domain classification loss
+
+        Note: The adversarial aspect is handled by the Gradient Reversal Layer (GRL)
+        which multiplies domain gradients by -λ during backpropagation. Therefore,
+        we do NOT multiply domain_loss by λ here to avoid double application.
         """
         # Classification loss (digit prediction) - use raw logits
         y_loss = F.cross_entropy(y_predictions, y)
-        
+
         # Domain loss (rotation prediction)
         domain_loss = F.cross_entropy(domain_predictions, r)
-        
-        # Total loss: minimize classification error + domain adversarial loss
-        # The gradient reversal in domain discriminator handles the adversarial aspect
-        total_loss = y_loss + λ * domain_loss
-        
+
+        # Total loss: minimize classification error + domain loss
+        # The GRL handles the adversarial aspect via -λ gradient multiplication
+        # FIXED: Removed λ multiplication to avoid double lambda application
+        total_loss = y_loss + domain_loss
+
         return total_loss, y_loss, domain_loss
 
     def get_features(self, x):

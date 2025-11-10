@@ -84,40 +84,37 @@ class CRMNISTTrainer:
         self.model.train()
         train_loss = 0
         train_metrics_sum = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
-        num_batches = 0
-        
-        train_pbar = tqdm(enumerate(train_loader), total=len(train_loader), 
+
+        train_pbar = tqdm(enumerate(train_loader), total=len(train_loader),
                          desc=f"Training")
-        
+
         for batch_idx, batch in train_pbar:
             self.optimizer.zero_grad()
-            
+
             # Move data to device
             #x, y, c, r = x.to(self.device), y.to(self.device), c.to(self.device), r.to(self.device)
             x, y, r = process_batch(batch, self.device, dataset_type=self.dataset)
             # Forward pass and loss calculation
             loss = self.model.loss_function(y, x, r)
-            
+
             # Backward pass
             loss.backward()
             self.optimizer.step()
-            
+
             train_loss += loss.item()
-            
-            # Calculate metrics
-            if batch_idx % 10 == 0:  # Calculate every 10 batches to save computation
-                batch_metrics = _calculate_metrics(self.model, y, x, r, 'train')
-                for k, v in batch_metrics.items():
-                    train_metrics_sum[k] += v
-                num_batches += 1
-            
+
+            # Calculate metrics every batch for consistency
+            batch_metrics = _calculate_metrics(self.model, y, x, r, 'train')
+            for k, v in batch_metrics.items():
+                train_metrics_sum[k] += v
+
             # Update progress bar
             train_pbar.set_postfix(loss=loss.item())
-        
+
         # Calculate averages
         avg_train_loss = train_loss / len(train_loader)
-        avg_train_metrics = {k: v / num_batches for k, v in train_metrics_sum.items()}
-        
+        avg_train_metrics = {k: v / len(train_loader) for k, v in train_metrics_sum.items()}
+
         return avg_train_loss, avg_train_metrics
     
     def _validate(self, val_loader) -> Tuple[float, Dict[str, float]]:
@@ -187,7 +184,7 @@ class CRMNISTTrainer:
             
             # Use min(10, num_epochs // 2) as minimum epochs requirement
             min_required_epochs = min(10, num_epochs // 2)
-            if self.patience_counter >= self.patience and epoch >= min_required_epochs:
+            if self.patience_counter >= self.patience and epoch + 1 >= min_required_epochs:
                 return True
             return False
 

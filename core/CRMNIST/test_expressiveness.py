@@ -63,8 +63,12 @@ def load_model(model_path, config_path, model_params_path, device):
         diva=model_params.get('diva', False)
     )
     
-    # Load model state
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    # Load model state (handle both dict with metadata and raw state_dict)
+    checkpoint = torch.load(model_path, map_location=device)
+    if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
     model = model.to(device)
     model.eval()
     

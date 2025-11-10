@@ -9,7 +9,10 @@ from wilds import get_dataset
 from wilds.common.data_loaders import get_train_loader, get_eval_loader
 #from model_diva import DIVA_VAE
 
-def select_diverse_sample_batch(loader, data_type = 'id_val', samples_per_domain=10):
+def select_diverse_sample_batch(loader, data_type='id_val', samples_per_domain=10, seed=None):
+    # Create local random number generator for reproducibility
+    rng = random.Random(seed) if seed is not None else random
+
     # Initialize dictionaries to store samples for each domain AND label
     if data_type == 'train':
         domain_list = [0,3,4]
@@ -48,7 +51,7 @@ def select_diverse_sample_batch(loader, data_type = 'id_val', samples_per_domain
         for label in ['0', '1']:
             samples = label_samples[label]
             n_samples = min(samples_per_domain//2, len(samples))
-            selected = random.sample(samples, n_samples)
+            selected = rng.sample(samples, n_samples)
             
             for x_i, y_i, metadata_i in selected:
                 selected_x.append(x_i)
