@@ -165,13 +165,11 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
             - if 'train' is 'true', returns training dataset.
             - if 'train' is 'false, returns test dataset.
     """
-    
 
-    if train:
-        cache_path = os.path.join(crmnist_path, 'cache', 'crmnist_train.pkl')
-    else:
-        cache_path = os.path.join(crmnist_path, 'cache', 'crmnist_test.pkl')
-    
+    # Generate unique cache key based on all parameters
+    cache_filename = generate_cache_key(spec_data, train, transform_intensity, transform_decay, p)
+    cache_path = os.path.join(crmnist_path, 'cache', cache_filename)
+
     # Try to load from cache first
 
     if use_cache and os.path.exists(cache_path):
@@ -180,8 +178,15 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
             return load_dataset_cache(cache_path)
         except Exception as e:
             print(f"Failed to load cache: {e}. Regenerating dataset...")
-    
+
     print(f"Generating {'training' if train else 'test'} dataset...")
+
+    # Set random seeds for reproducibility based on parameters
+    # Use hash of cache filename to ensure same parameters = same seed
+    seed = int(hashlib.md5(cache_filename.encode()).hexdigest()[:8], 16) % (2**31)
+    random.seed(seed)
+    np.random.seed(seed)
+    print(f"Using random seed: {seed}")
 
     os.makedirs(data_path, exist_ok=True)
     os.makedirs(crmnist_path, exist_ok=True)

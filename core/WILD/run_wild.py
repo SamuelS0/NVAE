@@ -205,7 +205,7 @@ def get_args():
     parser.add_argument('--val_type', type=str, default='id_val', help='Validation type: id_val or val')
     
     # Data arguments
-    parser.add_argument('--data_dir', type=str, default='None', 
+    parser.add_argument('--data_dir', type=str, default=None,
                         help='Directory to store/load dataset (default: ~/data/wilds)')
     parser.add_argument('--download', action='store_true', default=True,
                         help='Download dataset if not found locally')
@@ -213,7 +213,7 @@ def get_args():
     # Model-specific arguments
     parser.add_argument('--zy_dim', type=int, default=128, help='Latent dimension for zy (VAE only)')
     parser.add_argument('--zx_dim', type=int, default=128, help='Latent dimension for zx (VAE only)')
-    parser.add_argument('--zay_dim', type=int, default=129, help='Latent dimension for zay (VAE only)')
+    parser.add_argument('--zay_dim', type=int, default=128, help='Latent dimension for zay (VAE only)')
     parser.add_argument('--za_dim', type=int, default=128, help='Latent dimension for za (VAE only)')
     parser.add_argument('--beta_1', type=float, default=1.0, help='Beta 1 for VAE loss')
     parser.add_argument('--beta_2', type=float, default=1.0, help='Beta 2 for VAE loss')
@@ -282,7 +282,15 @@ if __name__ == "__main__":
     args = get_args()
     args.cuda = args.cuda and torch.cuda.is_available()
     args.device = torch.device("cuda" if args.cuda else "cpu")
-    
+
+    # Validate resolution argument
+    if args.resolution == 'high':
+        print("❌ ERROR: High resolution (448x448) is not supported for WILD dataset.")
+        print("   The Camelyon17-WILDS dataset provides 96x96 patches natively.")
+        print("   Upscaling would not add meaningful information and would only slow training.")
+        print("   Please use --resolution low (or omit the flag, as 'low' is the default).")
+        exit(1)
+
     # Setup data directory
     if args.data_dir is None:
         # Use default data directory in user's home folder
@@ -463,7 +471,7 @@ if __name__ == "__main__":
             json.dump(model_params, f)
         
         if not args.skip_training:
-            dann_model, dann_metrics = train_dann(args, spec_data, train_loader, test_loader, dataset='wild')
+            dann_model, dann_metrics = train_dann(args, spec_data, train_loader, val_loader, dataset='wild')
             trained_models['dann'] = dann_model
             
             # Save DANN model
@@ -493,7 +501,7 @@ if __name__ == "__main__":
             json.dump(model_params, f)
         
         if not args.skip_training:
-            irm_model, irm_metrics = train_irm(args, spec_data, train_loader, test_loader, dataset='wild')
+            irm_model, irm_metrics = train_irm(args, spec_data, train_loader, val_loader, dataset='wild')
             trained_models['irm'] = irm_model
             
             # Save IRM model
@@ -537,7 +545,7 @@ if __name__ == "__main__":
             print("  📊 Preparing validation data for latent analysis...")
             transform = transforms.Compose([transforms.ToTensor()])
             final_val_data = dataset.get_subset(args.val_type, transform=transform)
-            val_loader_analysis = get_train_loader("standard", final_val_data, batch_size=10)
+            val_loader_analysis = get_eval_loader("standard", final_val_data, batch_size=10)
             val_x, val_y, val_metadata = next(iter(val_loader_analysis))
             
             # Generate latent space analysis with progress
