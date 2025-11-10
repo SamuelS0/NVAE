@@ -205,7 +205,7 @@ def get_args():
     parser.add_argument('--val_type', type=str, default='id_val', help='Validation type: id_val or val')
     
     # Data arguments
-    parser.add_argument('--data_dir', type=str, default='None', 
+    parser.add_argument('--data_dir', type=str, default=None,
                         help='Directory to store/load dataset (default: ~/data/wilds)')
     parser.add_argument('--download', action='store_true', default=True,
                         help='Download dataset if not found locally')
@@ -213,7 +213,7 @@ def get_args():
     # Model-specific arguments
     parser.add_argument('--zy_dim', type=int, default=128, help='Latent dimension for zy (VAE only)')
     parser.add_argument('--zx_dim', type=int, default=128, help='Latent dimension for zx (VAE only)')
-    parser.add_argument('--zay_dim', type=int, default=129, help='Latent dimension for zay (VAE only)')
+    parser.add_argument('--zay_dim', type=int, default=128, help='Latent dimension for zay (VAE only)')
     parser.add_argument('--za_dim', type=int, default=128, help='Latent dimension for za (VAE only)')
     parser.add_argument('--beta_1', type=float, default=1.0, help='Beta 1 for VAE loss')
     parser.add_argument('--beta_2', type=float, default=1.0, help='Beta 2 for VAE loss')
@@ -463,7 +463,7 @@ if __name__ == "__main__":
             json.dump(model_params, f)
         
         if not args.skip_training:
-            dann_model, dann_metrics = train_dann(args, spec_data, train_loader, test_loader, dataset='wild')
+            dann_model, dann_metrics = train_dann(args, spec_data, train_loader, val_loader, dataset='wild')
             trained_models['dann'] = dann_model
             
             # Save DANN model
@@ -493,7 +493,7 @@ if __name__ == "__main__":
             json.dump(model_params, f)
         
         if not args.skip_training:
-            irm_model, irm_metrics = train_irm(args, spec_data, train_loader, test_loader, dataset='wild')
+            irm_model, irm_metrics = train_irm(args, spec_data, train_loader, val_loader, dataset='wild')
             trained_models['irm'] = irm_model
             
             # Save IRM model
