@@ -157,7 +157,9 @@ class IRM(nn.Module):
             total_loss += env_loss
             
             # IRM penalty for this environment
-            if self.step_count >= self.penalty_anneal_iters:
+            # Only compute penalty if gradients are enabled (training mode)
+            # Validation runs with torch.no_grad() which breaks compute_irm_penalty()
+            if self.step_count >= self.penalty_anneal_iters and torch.is_grad_enabled():
                 env_penalty = self.compute_irm_penalty(env_logits, env_y)
                 total_penalty += env_penalty
         

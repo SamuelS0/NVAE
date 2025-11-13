@@ -40,7 +40,9 @@ class IRMTrainer(WILDTrainer):
 
             # Forward pass and loss computation
             irm_loss, class_loss, penalty = self.model.loss_function(x, y, d)
-            penalty = torch.tensor(penalty)
+            # Convert penalty to tensor if needed (avoids warning if already a tensor)
+            if not isinstance(penalty, torch.Tensor):
+                penalty = torch.tensor(penalty, device=self.device)
             self.optimizer.zero_grad()
             irm_loss.backward()
             self.optimizer.step()
@@ -104,6 +106,9 @@ class IRMTrainer(WILDTrainer):
 
                 # Forward pass and loss computation
                 irm_loss, class_loss, penalty = self.model.loss_function(x, y, d)
+                # Convert penalty to tensor if needed (avoids warning if already a tensor)
+                if not isinstance(penalty, torch.Tensor):
+                    penalty = torch.tensor(penalty, device=self.device)
 
                 # Get predictions for accuracy calculation
                 logits, _ = self.model.forward(x, y, d)
