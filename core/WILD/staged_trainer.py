@@ -23,17 +23,46 @@ class StagedWILDTrainer(WILDTrainer):
         super().__init__(model, optimizer, device, args, patience)
         
         # Staged training parameters
-        self.stage1_epochs = args.stage1_epochs if hasattr(args, 'stage1_epochs') else max(10, args.epochs // 3)
-        self.stage2_epochs = args.stage2_epochs if hasattr(args, 'stage2_epochs') else max(10, args.epochs // 3)
+        self.stage1_epochs = args.stage1_epochs if hasattr(args, 'stage1_epochs') and args.stage1_epochs is not None else max(10, args.epochs // 3)
+        self.stage2_epochs = args.stage2_epochs if hasattr(args, 'stage2_epochs') and args.stage2_epochs is not None else max(10, args.epochs // 3)
         self.stage3_epochs = args.epochs - self.stage1_epochs - self.stage2_epochs
+
+        # Validate stage epoch configuration
+        if self.stage1_epochs < 0:
+            raise ValueError(f"stage1_epochs cannot be negative: {self.stage1_epochs}")
+        if self.stage2_epochs < 0:
+            raise ValueError(f"stage2_epochs cannot be negative: {self.stage2_epochs}")
+        if self.stage3_epochs < 0:
+            raise ValueError(
+                f"Invalid stage configuration: Stage epochs exceed total epochs!\n"
+                f"  stage1_epochs ({self.stage1_epochs}) + stage2_epochs ({self.stage2_epochs}) = "
+                f"{self.stage1_epochs + self.stage2_epochs}\n"
+                f"  but total epochs = {args.epochs}\n"
+                f"  → stage3_epochs would be {self.stage3_epochs} (negative!)\n\n"
+                f"Please either:\n"
+                f"  1. Reduce --stage1_epochs or --stage2_epochs, OR\n"
+                f"  2. Increase total --epochs to at least {self.stage1_epochs + self.stage2_epochs}"
+            )
+
+        # Warning for edge case where stage3 has zero epochs
+        if self.stage3_epochs == 0:
+            print(f"⚠️  WARNING: Stage 3 has 0 epochs. Training will only use Stages 1 and 2.")
         
         # Learning rate scheduling for stability
         self.initial_lr = optimizer.param_groups[0]['lr']
         self.warmup_epochs = 3  # Warm up for first 3 epochs
         
-        # Capacity annealing parameters
-        self.zay_capacity_start = 0.0
-        self.zay_capacity_end = 1.0
+        # Capacity annealing parameters (toggleable)
+        self.use_zay_annealing = getattr(args, 'use_zay_annealing', True)  # Default True for backward compatibility
+        if self.use_zay_annealing:
+            self.zay_capacity_start = 0.0
+            self.zay_capacity_end = 1.0
+        else:
+            # No annealing: constant full capacity
+            self.zay_capacity_start = 1.0
+            self.zay_capacity_end = 1.0
+
+        # Independence penalty parameters
         self.independence_penalty_weight = args.independence_penalty if hasattr(args, 'independence_penalty') else 10.0
         self.use_independence_penalty = args.use_independence_penalty if hasattr(args, 'use_independence_penalty') else True
         
@@ -42,13 +71,28 @@ class StagedWILDTrainer(WILDTrainer):
         self.stage_epoch = 0
         
         print(f"🎯 Staged Training Configuration:")
-        print(f"  Stage 1 (za, zy only): {self.stage1_epochs} epochs")
-        print(f"  Stage 2 (gradual zay): {self.stage2_epochs} epochs") 
-        print(f"  Stage 3 (full training): {self.stage3_epochs} epochs")
-        if self.use_independence_penalty:
-            print(f"  Independence penalty weight: {self.independence_penalty_weight}")
+        print(f"  Stage 1 (warm-up): {self.stage1_epochs} epochs")
+        print(f"  Stage 2 (penalty): {self.stage2_epochs} epochs")
+        print(f"  Stage 3 (full): {self.stage3_epochs} epochs")
+
+        print(f"\n🔧 Zay Capacity Annealing:")
+        if self.use_zay_annealing:
+            print(f"  Status: ENABLED")
+            print(f"  Stage 1: Suppressed (0.1)")
+            print(f"  Stage 2: Ramp from {self.zay_capacity_start:.1f} → {self.zay_capacity_end:.1f}")
+            print(f"  Stage 3: Full capacity (1.0)")
         else:
-            print(f"  Independence penalty: DISABLED")
+            print(f"  Status: DISABLED")
+            print(f"  Stage 1: Suppressed (0.1)")
+            print(f"  Stage 2-3: Full capacity (1.0)")
+
+        print(f"\n🎯 Independence Penalty:")
+        if self.use_independence_penalty:
+            print(f"  Status: ENABLED")
+            print(f"  Weight: {self.independence_penalty_weight}")
+            print(f"  Applied in: Stage 2")
+        else:
+            print(f"  Status: DISABLED")
     
     def train(self, train_loader, val_loader, num_epochs: int):
         """Main training loop with staged approach."""
@@ -209,24 +253,31 @@ class StagedWILDTrainer(WILDTrainer):
         
         # Stage-specific loss computation
         if self.current_stage == 1:
-            # Stage 1: Only train za, zy with strong capacity
+            # Stage 1: Foundation - suppress zay to force za/zy to learn their factors
             # Suppress zay by setting its capacity to near zero
-            zay_capacity = 0.1  # Increased from 0.01 to avoid numerical instability
-            
-            total_loss = (self.model.recon_weight * x_recon_loss + 
-                         current_beta * (self.model.beta_1 * kl_zy + 
-                                       self.model.beta_2 * kl_zx + 
-                                       self.model.beta_3 * zay_capacity * kl_zay +  # Suppressed
+            zay_capacity = 0.1  # Small but non-zero for numerical stability
+
+            total_loss = (self.model.recon_weight * x_recon_loss +
+                         current_beta * (self.model.beta_1 * kl_zy +
+                                       self.model.beta_2 * kl_zx +
+                                       self.model.beta_3 * zay_capacity * kl_zay +
                                        self.model.beta_4 * kl_za) +
-                         self.model.alpha_1 * y_cross_entropy + 
+                         self.model.alpha_1 * y_cross_entropy +
                          self.model.alpha_2 * a_cross_entropy)
             
         elif self.current_stage == 2:
-            # Stage 2: Gradually introduce zay capacity with optional independence penalty
-            progress = self.stage_epoch / max(1, self.stage2_epochs - 1)
-            zay_capacity = self.zay_capacity_start + progress * (self.zay_capacity_end - self.zay_capacity_start)
-            
-            total_loss = (self.model.recon_weight * x_recon_loss + 
+            # Stage 2: Apply capacity annealing (if enabled) + independence penalty (if enabled)
+
+            # Compute zay capacity based on annealing setting
+            if self.use_zay_annealing:
+                # Linearly ramp from zay_capacity_start to zay_capacity_end
+                progress = self.stage_epoch / max(1, self.stage2_epochs - 1)
+                zay_capacity = self.zay_capacity_start + progress * (self.zay_capacity_end - self.zay_capacity_start)
+            else:
+                # No annealing: constant full capacity
+                zay_capacity = 1.0
+
+            total_loss = (self.model.recon_weight * x_recon_loss +
                          current_beta * (self.model.beta_1 * kl_zy + 
                                        self.model.beta_2 * kl_zx + 
                                        self.model.beta_3 * zay_capacity * kl_zay +
@@ -255,13 +306,14 @@ class StagedWILDTrainer(WILDTrainer):
         """
         Compute independence penalty to prevent zay from capturing za/zy information.
         This encourages zay to only capture synergistic information.
+
+        Note: Gradients are required for this penalty to influence training.
         """
-        # Get latent representations
-        with torch.no_grad():
-            qz_loc, qz_scale = self.model.qz(x)
-            zy = qz_loc[:, self.model.zy_index_range[0]:self.model.zy_index_range[1]]
-            za = qz_loc[:, self.model.za_index_range[0]:self.model.za_index_range[1]]
-            zay = qz_loc[:, self.model.zay_index_range[0]:self.model.zay_index_range[1]]
+        # Get latent representations (with gradients enabled)
+        qz_loc, qz_scale = self.model.qz(x)
+        zy = qz_loc[:, self.model.zy_index_range[0]:self.model.zy_index_range[1]]
+        za = qz_loc[:, self.model.za_index_range[0]:self.model.za_index_range[1]]
+        zay = qz_loc[:, self.model.zay_index_range[0]:self.model.zay_index_range[1]]
         
         # Compute mutual information approximation using correlation
         # Penalty = |corr(zay, zy)| + |corr(zay, za)|

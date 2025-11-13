@@ -52,11 +52,15 @@ class VAE(NModule):
             beta_3=1,
             beta_4=1,
             alpha_1=1,
-            alpha_2=1, 
+            alpha_2=1,
             recon_weight=1,
             device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
             resolution='high',  # Add resolution parameter
             model='vae',  # Add DIVA mode parameter
+            l1_lambda_zy=0.0,
+            l1_lambda_zx=0.0,
+            l1_lambda_zay=0.0,
+            l1_lambda_za=0.0
             ):
         
         super().__init__()
@@ -100,6 +104,12 @@ class VAE(NModule):
         self.beta_1, self.beta_2, self.beta_3, self.beta_4  = beta_1, beta_2, beta_3, beta_4
         self.alpha_1, self.alpha_2 = alpha_1, alpha_2
         self.recon_weight = recon_weight
+
+        # L1 sparsity penalty weights
+        self.l1_lambda_zy = l1_lambda_zy
+        self.l1_lambda_zx = l1_lambda_zx
+        self.l1_lambda_zay = l1_lambda_zay
+        self.l1_lambda_za = l1_lambda_za
 
         self.zy_index_range = [0, self.zy_dim]
         self.zx_index_range = [self.zy_dim, self.zy_dim + self.zx_dim]
@@ -239,13 +249,25 @@ class VAE(NModule):
         y_cross_entropy = F.cross_entropy(y_hat, y_target, reduction='sum')
         a_cross_entropy = F.cross_entropy(a_hat, a_target, reduction='sum')
 
+        # L1 sparsity penalties
+        l1_penalty = 0.0
+        if self.l1_lambda_zy > 0:
+            l1_penalty += self.l1_lambda_zy * torch.mean(torch.abs(zy))
+        if self.l1_lambda_zx > 0:
+            l1_penalty += self.l1_lambda_zx * torch.mean(torch.abs(zx))
+        if not self.diva and self.l1_lambda_zay > 0:
+            l1_penalty += self.l1_lambda_zay * torch.mean(torch.abs(zay))
+        if self.l1_lambda_za > 0:
+            l1_penalty += self.l1_lambda_za * torch.mean(torch.abs(za))
+
         # Calculate positive loss (removing negative sign)
         # In VAEs, we want to minimize the reconstruction loss + KL divergence
         # Apply current_beta to all KL terms
         total_loss = self.recon_weight * x_recon_loss + \
                     current_beta * (self.beta_1 * kl_zy + self.beta_2 * kl_zx + \
                     self.beta_3 * kl_zay + self.beta_4 * kl_za) + \
-                    self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy
+                    self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy + \
+                    l1_penalty
 
         return total_loss
     
@@ -1187,13 +1209,25 @@ class pza(NModule):
         y_cross_entropy = F.cross_entropy(y_hat, y_target, reduction='sum')
         a_cross_entropy = F.cross_entropy(a_hat, a_target, reduction='sum')
 
+        # L1 sparsity penalties
+        l1_penalty = 0.0
+        if self.l1_lambda_zy > 0:
+            l1_penalty += self.l1_lambda_zy * torch.mean(torch.abs(zy))
+        if self.l1_lambda_zx > 0:
+            l1_penalty += self.l1_lambda_zx * torch.mean(torch.abs(zx))
+        if not self.diva and self.l1_lambda_zay > 0:
+            l1_penalty += self.l1_lambda_zay * torch.mean(torch.abs(zay))
+        if self.l1_lambda_za > 0:
+            l1_penalty += self.l1_lambda_za * torch.mean(torch.abs(za))
+
         # Calculate positive loss (removing negative sign)
         # In VAEs, we want to minimize the reconstruction loss + KL divergence
         # Apply current_beta to all KL terms
         total_loss = self.recon_weight * x_recon_loss + \
                     current_beta * (self.beta_1 * kl_zy + self.beta_2 * kl_zx + \
                     self.beta_3 * kl_zay + self.beta_4 * kl_za) + \
-                    self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy
+                    self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy + \
+                    l1_penalty
 
         return total_loss
     

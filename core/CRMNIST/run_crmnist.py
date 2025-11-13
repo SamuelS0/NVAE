@@ -89,7 +89,11 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
                 beta_4=args.beta_4,
                 alpha_1=args.alpha_1,
                 alpha_2=args.alpha_2,
-                diva=False
+                diva=False,
+                l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
+                l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
+                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0)
             )
             
         elif model_name == 'diva':
@@ -107,7 +111,11 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
                 beta_4=args.beta_4,
                 alpha_1=args.alpha_1,
                 alpha_2=args.alpha_2,
-                diva=True
+                diva=True,
+                l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
+                l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
+                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0)
             )
             
         elif model_name == 'dann':
@@ -180,9 +188,19 @@ if __name__ == "__main__":
     parser.add_argument('--no_cache', action='store_true', default=False,
                        help='Disable dataset caching and force regeneration')
     parser.add_argument('--patience', type=int, default=5)
-    parser.add_argument('--beta_annealing', type=str)
+    parser.add_argument('--beta_annealing', action='store_true', help='Enable beta annealing for KL divergence')
     parser.add_argument('--beta_scale', type=float, default=1.0)
-    
+
+    # L1 sparsity penalty arguments
+    parser.add_argument('--l1_lambda_zy', type=float, default=0.0,
+                       help='L1 penalty weight for zy latent (default: 0.0 = disabled)')
+    parser.add_argument('--l1_lambda_zx', type=float, default=0.0,
+                       help='L1 penalty weight for zx latent (default: 0.0 = disabled)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=0.0,
+                       help='L1 penalty weight for zay latent (default: 0.0 = disabled)')
+    parser.add_argument('--l1_lambda_za', type=float, default=0.0,
+                       help='L1 penalty weight for za latent (default: 0.0 = disabled)')
+
     # Model selection arguments
     parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'irm'],
                        choices=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],
@@ -334,12 +352,14 @@ if __name__ == "__main__":
             # Load pre-trained model for visualization
             print("Loading pre-trained NVAE model for visualization...")
             nvae_model, nvae_metrics = load_model_checkpoint(models_dir, 'nvae', spec_data, args)
-            if nvae_model is None:
+            if nvae_model is not None:
+                trained_models['nvae'] = nvae_model
+            else:
                 print("⚠️  Skipping NVAE visualization - no pre-trained model found")
-                nvae_model = None
-            
+
         # Visualize NVAE latent spaces
-        if 'nvae_model' in locals() and nvae_model is not None:
+        if 'nvae' in trained_models:
+            nvae_model = trained_models['nvae']
             print("🎨 Generating NVAE latent space visualization...")
             nvae_latent_path = os.path.join(latent_space_dir, 'nvae_latent_spaces.png')
             visualize_latent_spaces(nvae_model, val_loader, args.device, type='crmnist', save_path=nvae_latent_path)
@@ -376,12 +396,14 @@ if __name__ == "__main__":
             # Load pre-trained model for visualization
             print("Loading pre-trained DIVA model for visualization...")
             diva_model, diva_metrics = load_model_checkpoint(models_dir, 'diva', spec_data, args)
-            if diva_model is None:
+            if diva_model is not None:
+                trained_models['diva'] = diva_model
+            else:
                 print("⚠️  Skipping DIVA visualization - no pre-trained model found")
-                diva_model = None
-            
+
         # Visualize DIVA latent spaces
-        if 'diva_model' in locals() and diva_model is not None:
+        if 'diva' in trained_models:
+            diva_model = trained_models['diva']
             print("🎨 Generating DIVA latent space visualization...")
             diva_latent_path = os.path.join(latent_space_dir, 'diva_latent_spaces.png')
             visualize_latent_spaces(diva_model, val_loader, args.device, type='crmnist', save_path=diva_latent_path)
@@ -417,12 +439,14 @@ if __name__ == "__main__":
             # Load pre-trained model for visualization
             print("Loading pre-trained DANN model for visualization...")
             dann_model, dann_metrics = load_model_checkpoint(models_dir, 'dann', spec_data, args)
-            if dann_model is None:
+            if dann_model is not None:
+                trained_models['dann'] = dann_model
+            else:
                 print("⚠️  Skipping DANN visualization - no pre-trained model found")
-                dann_model = None
-            
+
         # Visualize DANN latent space
-        if 'dann_model' in locals() and dann_model is not None:
+        if 'dann' in trained_models:
+            dann_model = trained_models['dann']
             print("🎨 Generating DANN latent space visualization...")
             dann_latent_path = os.path.join(latent_space_dir, 'dann_latent_spaces.png')
             dann_model.visualize_latent_space(val_loader, args.device, save_path=dann_latent_path)
@@ -488,12 +512,14 @@ if __name__ == "__main__":
             # Load pre-trained model
             print("Loading pre-trained AugmentedDANN model for visualization...")
             dann_aug_model, dann_aug_metrics = load_model_checkpoint(models_dir, 'dann_augmented', spec_data, args)
-            if dann_aug_model is None:
+            if dann_aug_model is not None:
+                trained_models['dann_augmented'] = dann_aug_model
+            else:
                 print("⚠️  Skipping AugmentedDANN visualization - no pre-trained model found")
-                dann_aug_model = None
 
         # Visualize AugmentedDANN latent spaces
-        if 'dann_aug_model' in locals() and dann_aug_model is not None:
+        if 'dann_augmented' in trained_models:
+            dann_aug_model = trained_models['dann_augmented']
             print("🎨 Generating AugmentedDANN latent space visualization...")
             dann_aug_latent_path = os.path.join(latent_space_dir, 'dann_augmented_latent_spaces.png')
             visualize_latent_spaces(dann_aug_model, val_loader, args.device, type='dann_augmented', save_path=dann_aug_latent_path)
@@ -521,12 +547,14 @@ if __name__ == "__main__":
             # Load pre-trained model for visualization
             print("Loading pre-trained IRM model for visualization...")
             irm_model, irm_metrics = load_model_checkpoint(models_dir, 'irm', spec_data, args)
-            if irm_model is None:
+            if irm_model is not None:
+                trained_models['irm'] = irm_model
+            else:
                 print("⚠️  Skipping IRM visualization - no pre-trained model found")
-                irm_model = None
-            
+
         # Visualize IRM latent space
-        if 'irm_model' in locals() and irm_model is not None:
+        if 'irm' in trained_models:
+            irm_model = trained_models['irm']
             print("🎨 Generating IRM latent space visualization...")
             irm_latent_path = os.path.join(latent_space_dir, 'irm_latent_spaces.png')
             if hasattr(irm_model, 'visualize_latent_space'):
@@ -552,27 +580,12 @@ if __name__ == "__main__":
         print(f"  ✅ {model_name.upper()}: {model.__class__.__name__}")
     
     print(f"\nVisualization files created:")
-    for model_name in args.models:
-        if model_name == 'nvae' and 'nvae_model' in locals() and nvae_model is not None:
-            print(f"  📈 NVAE latent spaces: {os.path.join(latent_space_dir, 'nvae_latent_spaces.png')}")
-        elif model_name == 'diva' and 'diva_model' in locals() and diva_model is not None:
-            print(f"  📈 DIVA latent spaces: {os.path.join(latent_space_dir, 'diva_latent_spaces.png')}")
-        elif model_name == 'dann' and 'dann_model' in locals() and dann_model is not None:
-            print(f"  📈 DANN latent spaces: {os.path.join(latent_space_dir, 'dann_latent_spaces.png')}")
-        elif model_name == 'irm' and 'irm_model' in locals() and irm_model is not None:
-            print(f"  📈 IRM latent spaces: {os.path.join(latent_space_dir, 'irm_latent_spaces.png')}")
+    for model_name in trained_models.keys():
+        latent_file = f"{model_name}_latent_spaces.png"
+        print(f"  📈 {model_name.upper()} latent spaces: {os.path.join(latent_space_dir, latent_file)}")
     
-    print(f"\nModel files saved:")
-    for model_name in args.models:
-        '''if model_name == 'nvae' and 'nvae_model' in locals():
-            print(f"  💾 NVAE model: {os.path.join(models_dir, f'nvae_model_epoch_{nvae_metrics["best_model_epoch"]}.pt')}")
-        elif model_name == 'diva' and 'diva_model' in locals():
-            print(f"  💾 DIVA model: {os.path.join(models_dir, f'diva_model_epoch_{diva_metrics["best_model_epoch"]}.pt')}")
-        elif model_name == 'dann' and 'dann_model' in locals():
-            print(f"  💾 DANN model: {os.path.join(models_dir, f'dann_model_epoch_{dann_metrics["best_model_epoch"]}.pt')}")
-        elif model_name == 'irm' and 'irm_model' in locals():
-            print(f"  💾 IRM model: {os.path.join(models_dir, f'irm_model_epoch_{irm_metrics["best_model_epoch"]}.pt')}")'''
-    
+    print(f"\nModel files saved to: {models_dir}")
+
     # Training metrics summary
     print(f"\nTraining metrics:")
 

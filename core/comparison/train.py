@@ -35,7 +35,11 @@ def train_nvae(args, spec_data, train_loader, test_loader, dataset):
                 beta_4=args.beta_4,
                 alpha_1=args.alpha_1,
                 alpha_2=args.alpha_2,
-                diva=False)
+                diva=False,
+                l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
+                l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
+                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
         
         model_params = {
             'class_map': spec_data['class_map'],
@@ -70,9 +74,13 @@ def train_nvae(args, spec_data, train_loader, test_loader, dataset):
                 alpha_1=args.alpha_1,
                 alpha_2=args.alpha_2,
                 recon_weight=args.recon_weight,
-                device=args.device, 
-                resolution=args.resolution, 
-                model='vae')
+                device=args.device,
+                resolution=args.resolution,
+                model='vae',
+                l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
+                l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
+                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
         
         model_params = {
             'recon_weight': args.recon_weight,
@@ -114,7 +122,7 @@ def train_nvae(args, spec_data, train_loader, test_loader, dataset):
 def train_staged_nvae(args, spec_data, train_loader, test_loader, dataset):
     """Train NVAE with staged training for better disentanglement."""
     print("Training NVAE with staged training...")
-    
+
     if dataset == 'crmnist':
         nvae = crmnist_model.VAE(class_map=spec_data['class_map'],
                 zy_dim=args.zy_dim,
@@ -129,7 +137,11 @@ def train_staged_nvae(args, spec_data, train_loader, test_loader, dataset):
                 beta_4=args.beta_4,
                 alpha_1=args.alpha_1,
                 alpha_2=args.alpha_2,
-                diva=False)
+                diva=False,
+                l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
+                l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
+                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
         
         model_params = {
             'class_map': spec_data['class_map'],
@@ -149,7 +161,7 @@ def train_staged_nvae(args, spec_data, train_loader, test_loader, dataset):
             'staged_training': True
         }
         trainer_class = CRMNISTTrainer  # Note: Would need staged version for CRMNIST
-        
+
     elif dataset == 'wild':
         nvae = wild_model.VAE(class_map=None,
                 zy_dim=args.zy_dim,
@@ -165,9 +177,13 @@ def train_staged_nvae(args, spec_data, train_loader, test_loader, dataset):
                 alpha_1=args.alpha_1,
                 alpha_2=args.alpha_2,
                 recon_weight=args.recon_weight,
-                device=args.device, 
-                resolution=args.resolution, 
-                model='vae')
+                device=args.device,
+                resolution=args.resolution,
+                model='vae',
+                l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
+                l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
+                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
         
         model_params = {
             'recon_weight': args.recon_weight,
@@ -221,7 +237,11 @@ def train_diva(args, spec_data, train_loader, test_loader, dataset):
                 beta_4=args.beta_4,
                 alpha_1=args.alpha_1,
                 alpha_2=args.alpha_2,
-                diva=True)
+                diva=True,
+                l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
+                l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
+                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
         
         model_params = {
         'class_map': spec_data['class_map'],
@@ -240,7 +260,7 @@ def train_diva(args, spec_data, train_loader, test_loader, dataset):
         'diva': True
     }
         trainer_class = CRMNISTTrainer
-        
+
     elif dataset == 'wild':
         diva = wild_model.VAE(class_map=None,
                 zy_dim=args.zy_dim,
@@ -256,9 +276,13 @@ def train_diva(args, spec_data, train_loader, test_loader, dataset):
                 alpha_1=args.alpha_1,
                 alpha_2=args.alpha_2,
                 recon_weight=args.recon_weight,
-                device=args.device, 
-                resolution=args.resolution, 
-                model='diva')
+                device=args.device,
+                resolution=args.resolution,
+                model='diva',
+                l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
+                l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
+                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
         model_params = {
         'recon_weight': args.recon_weight,
         'zy_dim': args.zy_dim,
@@ -309,8 +333,9 @@ def train_dann(args, spec_data, train_loader, test_loader, dataset):
     
     # Define model parameters for saving
     model_params = {
-        'spec_data': spec_data,
-        'z_dim': z_dim
+        'z_dim': z_dim,
+        'num_y_classes': spec_data['num_y_classes'],
+        'num_r_classes': spec_data['num_r_classes']
     }
     with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
         json.dump(model_params, f)

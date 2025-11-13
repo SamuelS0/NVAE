@@ -46,8 +46,8 @@ class VAE(NModule):
             zx_dim= 12,
             zay_dim = 12,
             za_dim=12,
-            y_dim=10,   
-            a_dim=6,    
+            y_dim=10,
+            a_dim=6,
             in_channels=3,
             out_channels=32,
             kernel=3,
@@ -59,7 +59,11 @@ class VAE(NModule):
             beta_4=1,
             alpha_1=1,
             alpha_2=2,
-            diva=False
+            diva=False,
+            l1_lambda_zy=0.0,
+            l1_lambda_zx=0.0,
+            l1_lambda_zay=0.0,
+            l1_lambda_za=0.0
             ):
         
         super().__init__()
@@ -101,6 +105,12 @@ class VAE(NModule):
         self.beta_1, self.beta_2, self.beta_3, self.beta_4  = beta_1, beta_2, beta_3, beta_4
         self.alpha_1, self.alpha_2 = alpha_1, alpha_2
         self.diva = diva
+
+        # L1 sparsity penalty weights
+        self.l1_lambda_zy = l1_lambda_zy
+        self.l1_lambda_zx = l1_lambda_zx
+        self.l1_lambda_zay = l1_lambda_zay
+        self.l1_lambda_za = l1_lambda_za
 
         self.zy_index_range = [0, self.zy_dim]
         self.zx_index_range = [self.zy_dim, self.zy_dim + self.zx_dim]
@@ -221,11 +231,23 @@ class VAE(NModule):
         y_cross_entropy = F.cross_entropy(y_hat, y_target, reduction='sum')
         a_cross_entropy = F.cross_entropy(a_hat, a_target, reduction='sum')
 
+        # L1 sparsity penalties
+        l1_penalty = 0.0
+        if self.l1_lambda_zy > 0:
+            l1_penalty += self.l1_lambda_zy * torch.mean(torch.abs(zy))
+        if self.l1_lambda_zx > 0:
+            l1_penalty += self.l1_lambda_zx * torch.mean(torch.abs(zx))
+        if not self.diva and self.l1_lambda_zay > 0:
+            l1_penalty += self.l1_lambda_zay * torch.mean(torch.abs(zay))
+        if self.l1_lambda_za > 0:
+            l1_penalty += self.l1_lambda_za * torch.mean(torch.abs(za))
+
         # Calculate positive loss (removing negative sign)
         # In VAEs, we want to minimize the reconstruction loss + KL divergence
         total_loss = x_recon_loss + self.beta_1 * kl_zy + self.beta_2 * kl_zx \
                     + self.beta_3 * kl_zay + self.beta_4 * kl_za \
-                    + self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy
+                    + self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy \
+                    + l1_penalty
         return total_loss
     
     def classifier(self, x):

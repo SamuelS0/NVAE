@@ -20,11 +20,13 @@ class WILDTrainer:
         
         # Early stopping setup
         self.best_val_accuracy = 0.0
+        self.best_val_loss = float('inf')
         self.best_model_state = None
         self.patience_counter = 0
         self.epochs_trained = 0
         self.best_epoch = 0
-        
+        self.best_batch_metrics = {'recon_mse': 0, 'y_accuracy': 0, 'a_accuracy': 0}
+
         # Create output directories
         self.models_dir = os.path.join(args.out, 'models')
                 
@@ -87,12 +89,7 @@ class WILDTrainer:
         for batch_idx, batch in train_pbar:
             x, y, hospital_id = process_batch(batch, self.device, dataset_type='wild')
             self.optimizer.zero_grad()
-            
-            if self.args.cuda:
-                x = x.to(self.device)
-                y = y.to(self.device)
-                hospital_id = hospital_id.to(self.device)
-            
+
             loss = self.model.loss_function(y, x, hospital_id, current_beta)
             loss.backward()
             self.optimizer.step()
@@ -126,12 +123,7 @@ class WILDTrainer:
         with torch.no_grad():
             for batch_idx, batch in val_pbar:
                 x, y, hospital_id = process_batch(batch, self.device, dataset_type='wild')
-                
-                if self.args.cuda:
-                    x = x.to(self.device)
-                    y = y.to(self.device)
-                    hospital_id = hospital_id.to(self.device)
-                
+
                 loss = self.model.loss_function(y, x, hospital_id, current_beta)
                 val_loss += loss.item()
                 

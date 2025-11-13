@@ -105,11 +105,11 @@ class AugmentedDANN(NModule):
         self.alpha_y = alpha_y
         self.alpha_d = alpha_d
         self.beta_adv = beta_adv
-        
-        # Three separate encoders for clean gradient flow
-        self.class_encoder = self._create_encoder(in_channels, zy_dim)
-        self.domain_encoder = self._create_encoder(in_channels, zd_dim)
-        self.interaction_encoder = self._create_encoder(in_channels, zdy_dim)
+
+        # Single shared encoder that outputs to combined latent space
+        # This matches the architecture pattern of NVAE/DIVA/DANN/IRM
+        total_latent_dim = zy_dim + zd_dim + zdy_dim
+        self.shared_encoder = self._create_encoder(in_channels, total_latent_dim)
         
         # System 1: Class-focused DANN components
         # Main class classifier (operates on Z_y ∪ Z_dy)
@@ -175,44 +175,59 @@ class AugmentedDANN(NModule):
         """Validate model dimensions for consistency"""
         if self.zy_dim <= 0 or self.zd_dim <= 0 or self.zdy_dim <= 0:
             raise ValueError("All latent dimensions must be positive")
-        
+
         if self.y_dim <= 0 or self.d_dim <= 0:
             raise ValueError("Output dimensions must be positive")
-        
+
+        # Validate shared encoder output dimension
+        total_latent_dim = self.zy_dim + self.zd_dim + self.zdy_dim
+        # Get the final layer of the shared encoder (should be the Linear layer)
+        encoder_layers = list(self.shared_encoder.modules())
+        final_linear = None
+        for layer in reversed(encoder_layers):
+            if isinstance(layer, nn.Linear):
+                final_linear = layer
+                break
+
+        if final_linear is not None:
+            if final_linear.out_features != total_latent_dim:
+                raise ValueError(f"Shared encoder output dimension mismatch: "
+                               f"expected {total_latent_dim}, got {final_linear.out_features}")
+
         # Validate classifier input dimensions match expected latent dimensions
         expected_class_input = self.zy_dim + self.zdy_dim
         expected_domain_input = self.zd_dim + self.zdy_dim
-        
+
         # Check main classifiers
         class_first_layer = self.class_classifier_main[0]
         domain_first_layer = self.domain_classifier_main[0]
-        
+
         if isinstance(class_first_layer, nn.Linear):
             if class_first_layer.in_features != expected_class_input:
                 raise ValueError(f"Class classifier expects {expected_class_input} features, "
                                f"got {class_first_layer.in_features}")
-        
+
         if isinstance(domain_first_layer, nn.Linear):
             if domain_first_layer.in_features != expected_domain_input:
                 raise ValueError(f"Domain classifier expects {expected_domain_input} features, "
                                f"got {domain_first_layer.in_features}")
-        
+
         # Check adversarial classifiers
         adv_domain_first = self.adversarial_domain_classifier[0]
         adv_class_first = self.adversarial_class_classifier[0]
-        
+
         if isinstance(adv_domain_first, nn.Linear):
             if adv_domain_first.in_features != self.zy_dim:
                 raise ValueError(f"Adversarial domain classifier expects {self.zy_dim} features, "
                                f"got {adv_domain_first.in_features}")
-        
+
         if isinstance(adv_class_first, nn.Linear):
             if adv_class_first.in_features != self.zd_dim:
                 raise ValueError(f"Adversarial class classifier expects {self.zd_dim} features, "
                                f"got {adv_class_first.in_features}")
     
     def _create_encoder(self, in_channels, out_dim):
-        """Create a CNN encoder for a specific latent space"""
+        """Create a CNN encoder that outputs to combined or individual latent space"""
         return nn.Sequential(
             # Block 1
             nn.Conv2d(in_channels, 96, kernel_size=5, stride=1, padding=2),
@@ -245,34 +260,39 @@ class AugmentedDANN(NModule):
                     nn.init.zeros_(module.bias)
     
     def extract_features(self, x):
-        """Extract features using three separate encoders"""
+        """Extract features using shared encoder and split into latent spaces"""
         # Input validation
         if not isinstance(x, torch.Tensor):
             raise TypeError("Input must be a torch.Tensor")
-        
+
         if x.dim() != 4:
             raise ValueError(f"Input must be 4D tensor (batch, channels, height, width), got {x.dim()}D")
-        
+
         if x.size(1) != 3:
             raise ValueError(f"Input must have 3 channels for RGB images, got {x.size(1)}")
-        
+
         if x.size(2) != 28 or x.size(3) != 28:
             raise ValueError(f"Input must be 28x28 images, got {x.size(2)}x{x.size(3)}")
-        
-        zy = self.class_encoder(x)
-        zd = self.domain_encoder(x)
-        zdy = self.interaction_encoder(x)
-        
+
+        # Single forward pass through shared encoder
+        z_combined = self.shared_encoder(x)
+
+        # Split the combined latent representation into separate spaces
+        # Order: zy, zd, zdy
+        zy = z_combined[:, :self.zy_dim]
+        zd = z_combined[:, self.zy_dim:self.zy_dim + self.zd_dim]
+        zdy = z_combined[:, self.zy_dim + self.zd_dim:]
+
         # Validate output dimensions
         if zy.size(1) != self.zy_dim:
-            raise RuntimeError(f"Class encoder output mismatch: expected {self.zy_dim}, got {zy.size(1)}")
-        
+            raise RuntimeError(f"Class latent output mismatch: expected {self.zy_dim}, got {zy.size(1)}")
+
         if zd.size(1) != self.zd_dim:
-            raise RuntimeError(f"Domain encoder output mismatch: expected {self.zd_dim}, got {zd.size(1)}")
-        
+            raise RuntimeError(f"Domain latent output mismatch: expected {self.zd_dim}, got {zd.size(1)}")
+
         if zdy.size(1) != self.zdy_dim:
-            raise RuntimeError(f"Interaction encoder output mismatch: expected {self.zdy_dim}, got {zdy.size(1)}")
-        
+            raise RuntimeError(f"Interaction latent output mismatch: expected {self.zdy_dim}, got {zdy.size(1)}")
+
         return zy, zd, zdy
     
     def forward(self, y, x, d):
@@ -336,11 +356,11 @@ class AugmentedDANN(NModule):
     def dann_forward(self, x):
         """
         DANN-specific forward pass with clean gradient flow
-        
+
         Returns:
             dict containing all predictions and features
         """
-        # Extract features using three separate encoders
+        # Extract features using shared encoder and split into latent spaces
         zy, zd, zdy = self.extract_features(x)
         
         # Main predictions (use combined features)

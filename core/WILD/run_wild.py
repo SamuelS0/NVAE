@@ -246,12 +246,24 @@ def get_args():
     parser.add_argument('--use_independence_penalty', action='store_true', default=True, help='Use independence penalty in stage 2')
     parser.add_argument('--no_independence_penalty', dest='use_independence_penalty', action='store_false', help='Disable independence penalty in stage 2')
     parser.add_argument('--independence_penalty', type=float, default=10.0, help='Weight for independence penalty in stage 2')
+    parser.add_argument('--use_zay_annealing', action='store_true', default=True, help='Enable zay capacity annealing in staged training (default: True)')
+    parser.add_argument('--no_zay_annealing', dest='use_zay_annealing', action='store_false', help='Disable zay capacity annealing in staged training')
     parser.add_argument('--patience', type=int, default=100, help='Patience for early stopping')
-    
+
+    # L1 sparsity penalty arguments
+    parser.add_argument('--l1_lambda_zy', type=float, default=0.0,
+                       help='L1 penalty weight for zy latent (default: 0.0 = disabled)')
+    parser.add_argument('--l1_lambda_zx', type=float, default=0.0,
+                       help='L1 penalty weight for zx latent (default: 0.0 = disabled)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=0.0,
+                       help='L1 penalty weight for zay latent (default: 0.0 = disabled)')
+    parser.add_argument('--l1_lambda_za', type=float, default=0.0,
+                       help='L1 penalty weight for za latent (default: 0.0 = disabled)')
+
     return parser.parse_args()
 
 def initialize_model(args, num_classes, num_domains):
-    
+
     model = VAE(class_map=None,
                 zy_dim=args.zy_dim,
                 zx_dim=args.zx_dim,
@@ -266,10 +278,14 @@ def initialize_model(args, num_classes, num_domains):
                 alpha_1=args.alpha_1,
                 alpha_2=args.alpha_2,
                 recon_weight=args.recon_weight,
-                device=args.device, 
-                resolution=args.resolution, 
-                model=args.model)
-    
+                device=args.device,
+                resolution=args.resolution,
+                model=args.model,
+                l1_lambda_zy=args.l1_lambda_zy,
+                l1_lambda_zx=args.l1_lambda_zx,
+                l1_lambda_zay=args.l1_lambda_zay,
+                l1_lambda_za=args.l1_lambda_za)
+
     return model
 
 
@@ -423,7 +439,8 @@ if __name__ == "__main__":
             # nvae_model = load_nvae_model(...)
             
         # Visualize NVAE latent spaces
-        if 'nvae_model' in locals():
+        if 'nvae' in trained_models:
+            nvae_model = trained_models['nvae']
             print("🎨 Generating NVAE latent space visualization...")
             nvae_latent_path = os.path.join(latent_space_dir, 'nvae_latent_spaces.png')
             nvae_model.visualize_latent_spaces(test_loader, args.device, save_path=nvae_latent_path)
@@ -454,7 +471,8 @@ if __name__ == "__main__":
             # diva_model = load_diva_model(...)
             
         # Visualize DIVA latent spaces
-        if 'diva_model' in locals():
+        if 'diva' in trained_models:
+            diva_model = trained_models['diva']
             print("🎨 Generating DIVA latent space visualization...")
             diva_latent_path = os.path.join(latent_space_dir, 'diva_latent_spaces.png')
             diva_model.visualize_latent_spaces_diva(test_loader, args.device, save_path=diva_latent_path)
@@ -484,7 +502,8 @@ if __name__ == "__main__":
             # dann_model = load_dann_model(...)
             
         # Visualize DANN latent space
-        if 'dann_model' in locals():
+        if 'dann' in trained_models:
+            dann_model = trained_models['dann']
             print("🎨 Generating DANN latent space visualization...")
             dann_latent_path = os.path.join(latent_space_dir, 'dann_latent_spaces.png')
             dann_model.visualize_latent_space(test_loader, args.device, save_path=dann_latent_path)
@@ -514,7 +533,8 @@ if __name__ == "__main__":
             # irm_model = load_irm_model(...)
             
         # Visualize IRM latent space
-        if 'irm_model' in locals():
+        if 'irm' in trained_models:
+            irm_model = trained_models['irm']
             print("🎨 Generating IRM latent space visualization...")
             irm_latent_path = os.path.join(latent_space_dir, 'irm_latent_spaces.png')
             if hasattr(irm_model, 'visualize_latent_space'):
@@ -531,13 +551,13 @@ if __name__ == "__main__":
     # =============================================================================
     # 5. POST-TRAINING ANALYSIS (for NVAE/DIVA models only)
     # =============================================================================
-    if ('nvae' in args.models and 'nvae_model' in locals()) or ('diva' in args.models and 'diva_model' in locals()):
+    if ('nvae' in args.models and 'nvae' in trained_models) or ('diva' in args.models and 'diva' in trained_models):
         print("\n" + "="*60)
         print("🔬 RUNNING POST-TRAINING ANALYSIS")
         print("="*60)
-        
+
         # Choose the model for analysis (prefer NVAE if available)
-        analysis_model = locals().get('nvae_model') or locals().get('diva_model')
+        analysis_model = trained_models.get('nvae') or trained_models.get('diva')
         if analysis_model:
             analysis_model.eval()
             
@@ -588,15 +608,9 @@ if __name__ == "__main__":
         print(f"  ✅ {model_name.upper()}: {model.__class__.__name__}")
     
     print(f"\nVisualization files created:")
-    for model_name in args.models:
-        if model_name == 'nvae' and 'nvae_model' in locals():
-            print(f"  📈 NVAE latent spaces: {os.path.join(latent_space_dir, 'nvae_latent_spaces.png')}")
-        elif model_name == 'diva' and 'diva_model' in locals():
-            print(f"  📈 DIVA latent spaces: {os.path.join(latent_space_dir, 'diva_latent_spaces.png')}")
-        elif model_name == 'dann' and 'dann_model' in locals():
-            print(f"  📈 DANN latent spaces: {os.path.join(latent_space_dir, 'dann_latent_spaces.png')}")
-        elif model_name == 'irm' and 'irm_model' in locals():
-            print(f"  📈 IRM latent spaces: {os.path.join(latent_space_dir, 'irm_latent_spaces.png')}")
+    for model_name in trained_models.keys():
+        latent_file = f"{model_name}_latent_spaces.png"
+        print(f"  📈 {model_name.upper()} latent spaces: {os.path.join(latent_space_dir, latent_file)}")
     
     print(f"\nModel files saved:")
     # Model file paths would be printed here if metrics are available
