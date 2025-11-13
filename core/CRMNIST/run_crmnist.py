@@ -428,7 +428,7 @@ if __name__ == "__main__":
             json.dump(model_params, f)
         
         if not args.skip_training:
-            dann_model, dann_metrics = train_dann(args, spec_data, train_loader, test_loader, dataset='crmnist')
+            dann_model, dann_metrics = train_dann(args, spec_data, train_loader, val_loader, dataset='crmnist')
             trained_models['dann'] = dann_model
             
             # Save DANN model
@@ -536,7 +536,7 @@ if __name__ == "__main__":
             json.dump(model_params, f)
         
         if not args.skip_training:
-            irm_model, irm_metrics = train_irm(args, spec_data, train_loader, test_loader, dataset='crmnist')
+            irm_model, irm_metrics = train_irm(args, spec_data, train_loader, val_loader, dataset='crmnist')
             trained_models['irm'] = irm_model
             
             # Save IRM model

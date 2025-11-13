@@ -320,7 +320,7 @@ def train_diva(args, spec_data, train_loader, test_loader, dataset):
 
     return diva, training_metrics
 
-def train_dann(args, spec_data, train_loader, test_loader, dataset):
+def train_dann(args, spec_data, train_loader, val_loader, dataset):
     print("Training DANN...")
 
     # latent dimension is the sum of all split latent dimensions
@@ -330,7 +330,7 @@ def train_dann(args, spec_data, train_loader, test_loader, dataset):
     dann = dann.to(args.device)
     optimizer = optim.Adam(dann.parameters(), lr=args.learning_rate)
     patience = args.patience
-    
+
     # Define model parameters for saving
     model_params = {
         'z_dim': z_dim,
@@ -339,8 +339,8 @@ def train_dann(args, spec_data, train_loader, test_loader, dataset):
     }
     with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
         json.dump(model_params, f)
-    
-    training_metrics = train(args, dann, optimizer, train_loader, test_loader, args.device, patience, trainer_class=DANNTrainer)
+
+    training_metrics = train(args, dann, optimizer, train_loader, val_loader, args.device, patience, trainer_class=DANNTrainer)
 
     if training_metrics['best_model_state'] is not None:
         dann.load_state_dict(training_metrics['best_model_state'])
@@ -348,28 +348,28 @@ def train_dann(args, spec_data, train_loader, test_loader, dataset):
 
     return dann, training_metrics
 
-def train_irm(args, spec_data, train_loader, test_loader, dataset, seed=None):
+def train_irm(args, spec_data, train_loader, val_loader, dataset, seed=None):
     """
     Train IRM model
     """
     print("Training IRM...")
-    
+
     # Set random seed if provided
     if seed is not None:
         torch.manual_seed(seed)
         np.random.seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed(seed)
-    
+
     # latent dimension is the sum of all split latent dimensions
     z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
-    
+
     irm = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], dataset, penalty_weight=1e4, penalty_anneal_iters=500)
     irm = irm.to(args.device)
 
     optimizer = optim.Adam(irm.parameters(), lr=args.learning_rate)
     patience = args.patience
-    
+
     # Define model parameters for saving
     model_params = {
         'z_dim': z_dim,
@@ -378,15 +378,15 @@ def train_irm(args, spec_data, train_loader, test_loader, dataset, seed=None):
     }
     with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
         json.dump(model_params, f)
-    
+
     # Simple training loop for IRM
     print("Training IRM...")
-    
-    training_metrics = train(args, irm, optimizer, train_loader, test_loader, args.device, patience, trainer_class=IRMTrainer)
+
+    training_metrics = train(args, irm, optimizer, train_loader, val_loader, args.device, patience, trainer_class=IRMTrainer)
 
     if training_metrics['best_model_state'] is not None:
         irm.load_state_dict(training_metrics['best_model_state'])
         print("Loaded best model for final evaluation")
 
-    
+
     return irm, training_metrics
