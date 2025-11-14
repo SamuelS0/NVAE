@@ -61,8 +61,10 @@ python -m core.CRMNIST.run_crmnist --epochs 1 --out results/quick_test
 
 ### 5. IRM (Invariant Risk Minimization)
 - **Latent Spaces**: Single shared feature space
-- **Features**: Learns invariant predictors across domains
+- **Features**: Learns invariant predictors across domains using gradient-based penalty
+- **Special Parameters**: `--irm_penalty_weight`, `--irm_anneal_iters`
 - **Use Case**: Causal invariance baseline
+- **Training Recommendation**: IRM requires **50+ epochs** for proper convergence (warm-up period needed)
 
 ---
 
@@ -130,6 +132,13 @@ python -m core.CRMNIST.run_crmnist --epochs 1 --out results/quick_test
 --sparsity_weight FLOAT    # Sparsity penalty on zdy (default: 0.01)
 --beta_adv FLOAT           # Adversarial loss weight (default: 0.1)
 ```
+
+### IRM-Specific Parameters
+```bash
+--irm_penalty_weight FLOAT # Weight for IRM invariance penalty (default: 1e4)
+--irm_anneal_iters INT     # Iterations before applying penalty (default: 500)
+```
+**Note**: The penalty annealing provides a warm-up period where the model first learns basic features before enforcing invariance. With 360,000 training samples and batch size 64, one epoch = ~5,625 batches. The default 500 iteration warm-up represents ~9% of the first epoch.
 
 ### Output & Organization
 ```bash
@@ -596,7 +605,53 @@ Models trained and saved:
 
 ---
 
+## Frequently Asked Questions
+
+### Q: What are the color labels in CRMNIST? Are they used for training?
+**A**: CRMNIST datasets contain 4 types of information per sample:
+- **Images (x)**: 28×28 RGB images of colored, rotated digits
+- **Digit labels (y)**: The digit class (0-9) - this is what models predict
+- **Color labels (c)**: The color applied to the digit (7 colors total)
+- **Domain/Rotation labels (d)**: The rotation angle (0°, 15°, 30°, 45°, 60°, 75°)
+
+**Color labels are NOT used for model training**. They exist for:
+- Dataset generation (controlling which colors are applied)
+- Visualization and analysis (checking if models rely on spurious color correlations)
+- Quality control (verifying dataset composition)
+
+**What models actually use**:
+- All models receive: `(x, y, d)` = (images, digit labels, domain labels)
+- Color information is embedded in the images themselves
+- Models learn to handle color through the pixel values, not as a separate supervision signal
+- The domain label `d` represents rotation angle, which is the primary domain identifier
+
+**Relationship between color and rotation**:
+- Each rotation domain is assigned a primary color (e.g., 0° → Blue, 15° → Green)
+- Some digits get colored "red" across all domains (spurious correlation)
+- This creates a rich multi-domain structure for testing invariance
+
+### Q: Why does IRM need so much more training than other models?
+**A**: IRM uses a two-phase learning strategy:
+1. **Warm-up phase** (first 500 iterations): Learns basic features without penalty
+2. **Invariance phase** (remaining training): Applies gradient-based invariance penalty
+
+The penalty forces the model to find representations that work equally well across all domains. This optimization is more challenging than standard ERM (Empirical Risk Minimization) and requires:
+- More epochs to converge (50+ recommended vs. 20-30 for other models)
+- Careful hyperparameter tuning (`--irm_penalty_weight`, `--irm_anneal_iters`)
+- Sufficient data per domain to compute meaningful penalties
+
+For quick testing, use DANN instead - it achieves similar domain invariance with faster convergence.
+
+---
+
 ## Troubleshooting
+
+### Issue: "IRM model has low accuracy (<20%)"
+**Solution**:
+- IRM requires significantly more training than other models (50+ epochs recommended)
+- Try reducing penalty weight: `--irm_penalty_weight 1e3` or `1e2`
+- Adjust warm-up period: `--irm_anneal_iters 100` for faster penalty application
+- Single-epoch runs are insufficient for IRM convergence
 
 ### Issue: "No model checkpoint found"
 **Solution**:

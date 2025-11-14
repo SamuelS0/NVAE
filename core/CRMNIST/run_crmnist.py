@@ -151,8 +151,8 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
 
         elif model_name == 'irm':
             z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
-            model = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'crmnist', 
-                       penalty_weight=1e4, penalty_anneal_iters=500)
+            model = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'crmnist',
+                       penalty_weight=args.irm_penalty_weight, penalty_anneal_iters=args.irm_anneal_iters)
         
         # Load state dict
         if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
@@ -229,6 +229,12 @@ if __name__ == "__main__":
                        help='Weight for sparsity penalty on zdy in AugmentedDANN (default: 0.01)')
     parser.add_argument('--beta_adv', type=float, default=0.1,
                        help='Weight for adversarial loss in AugmentedDANN (default: 0.1)')
+
+    # IRM-specific parameters
+    parser.add_argument('--irm_penalty_weight', type=float, default=1e4,
+                       help='Weight for IRM invariance penalty (default: 1e4)')
+    parser.add_argument('--irm_anneal_iters', type=int, default=500,
+                       help='Number of iterations before applying IRM penalty (default: 500)')
 
     args = parser.parse_args()
     

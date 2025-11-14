@@ -38,8 +38,6 @@ class IRM(nn.Module):
                 nn.Linear(192 * 7 * 7, self.z_dim)
             )
 
-            self.classifier = nn.Linear(self.z_dim, self.num_y_classes)
-
         elif self.dataset == 'wild':
             self.feature_extractor = nn.Sequential(
                 # Block 1: 96x96x3 -> 48x48x64

@@ -364,7 +364,12 @@ def train_irm(args, spec_data, train_loader, val_loader, dataset, seed=None):
     # latent dimension is the sum of all split latent dimensions
     z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
 
-    irm = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], dataset, penalty_weight=1e4, penalty_anneal_iters=500)
+    # Use command-line arguments if available, otherwise use defaults
+    penalty_weight = getattr(args, 'irm_penalty_weight', 1e4)
+    anneal_iters = getattr(args, 'irm_anneal_iters', 500)
+
+    irm = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], dataset,
+             penalty_weight=penalty_weight, penalty_anneal_iters=anneal_iters)
     irm = irm.to(args.device)
 
     optimizer = optim.Adam(irm.parameters(), lr=args.learning_rate)
@@ -373,8 +378,8 @@ def train_irm(args, spec_data, train_loader, val_loader, dataset, seed=None):
     # Define model parameters for saving
     model_params = {
         'z_dim': z_dim,
-        'penalty_weight': 1e4,
-        'penalty_anneal_iters': 500
+        'penalty_weight': penalty_weight,
+        'penalty_anneal_iters': anneal_iters
     }
     with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
         json.dump(model_params, f)
