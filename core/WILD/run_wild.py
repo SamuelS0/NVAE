@@ -32,6 +32,11 @@ from core.train import train
 from core.test import test
 from core.utils import visualize_latent_spaces
 from core.WILD.disentanglement_analysis import analyze_disentanglement
+from core.WILD.disentanglement_visualization import (
+    visualize_disentanglement,
+    visualize_latent_interpolation,
+    visualize_factor_traversal
+)
 from core.comparison.train import train_nvae, train_diva, train_dann, train_irm, train_staged_nvae, train_dann_augmented
 from core.WILD.trainer import WILDTrainer
 """
@@ -605,6 +610,42 @@ if __name__ == "__main__":
                 nvae_model, train_loader, val_loader, test_loader, args.device, nvae_expressiveness_dir
             )
 
+            # Disentanglement visualizations for NVAE
+            print("🎨 Generating NVAE disentanglement visualizations...")
+            nvae_disentangle_dir = os.path.join(args.out, 'nvae_disentanglement')
+            os.makedirs(nvae_disentangle_dir, exist_ok=True)
+
+            try:
+                # 1. Main disentanglement visualization
+                disentangle_path = os.path.join(nvae_disentangle_dir, 'disentanglement')
+                visualize_disentanglement(
+                    nvae_model, val_loader, args.device,
+                    save_path=disentangle_path,
+                    num_variations=7,
+                    num_examples=3
+                )
+                print(f"   ✅ Disentanglement visualization saved")
+
+                # 2. Latent interpolation
+                interp_path = os.path.join(nvae_disentangle_dir, 'interpolation')
+                visualize_latent_interpolation(
+                    nvae_model, val_loader, args.device,
+                    save_path=interp_path,
+                    num_steps=7
+                )
+                print(f"   ✅ Interpolation visualization saved")
+
+                # 3. Factor traversal
+                traversal_path = os.path.join(nvae_disentangle_dir, 'traversal')
+                visualize_factor_traversal(
+                    nvae_model, args.device,
+                    save_path=traversal_path,
+                    num_steps=7
+                )
+                print(f"   ✅ Factor traversal visualization saved")
+            except Exception as e:
+                print(f"   ⚠️  Warning: Could not generate some disentanglement visualizations: {str(e)}")
+
     # =============================================================================
     # 2. TRAIN AND TEST DIVA MODEL
     # =============================================================================
@@ -645,6 +686,42 @@ if __name__ == "__main__":
             diva_expressiveness = evaluate_latent_expressiveness(
                 diva_model, train_loader, val_loader, test_loader, args.device, diva_expressiveness_dir
             )
+
+            # Disentanglement visualizations for DIVA
+            print("🎨 Generating DIVA disentanglement visualizations...")
+            diva_disentangle_dir = os.path.join(args.out, 'diva_disentanglement')
+            os.makedirs(diva_disentangle_dir, exist_ok=True)
+
+            try:
+                # 1. Main disentanglement visualization
+                disentangle_path = os.path.join(diva_disentangle_dir, 'disentanglement')
+                visualize_disentanglement(
+                    diva_model, val_loader, args.device,
+                    save_path=disentangle_path,
+                    num_variations=7,
+                    num_examples=3
+                )
+                print(f"   ✅ Disentanglement visualization saved")
+
+                # 2. Latent interpolation
+                interp_path = os.path.join(diva_disentangle_dir, 'interpolation')
+                visualize_latent_interpolation(
+                    diva_model, val_loader, args.device,
+                    save_path=interp_path,
+                    num_steps=7
+                )
+                print(f"   ✅ Interpolation visualization saved")
+
+                # 3. Factor traversal
+                traversal_path = os.path.join(diva_disentangle_dir, 'traversal')
+                visualize_factor_traversal(
+                    diva_model, args.device,
+                    save_path=traversal_path,
+                    num_steps=7
+                )
+                print(f"   ✅ Factor traversal visualization saved")
+            except Exception as e:
+                print(f"   ⚠️  Warning: Could not generate some disentanglement visualizations: {str(e)}")
 
     # =============================================================================
     # 3. TRAIN AND TEST DANN MODEL

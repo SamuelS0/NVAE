@@ -75,8 +75,8 @@ class DANNTrainer(WILDTrainer):
         avg_train_loss = total_loss / len(train_loader)
         avg_y_loss = total_y_loss / len(train_loader)
         avg_domain_loss = total_domain_loss / len(train_loader)
-        y_accuracy = (correct_y / total_samples) * 100
-        domain_accuracy = (correct_domain / total_samples) * 100
+        y_accuracy = correct_y / total_samples  # Returns 0-1 fraction
+        domain_accuracy = correct_domain / total_samples  # Returns 0-1 fraction
 
         avg_train_metrics = {
             'y_accuracy': y_accuracy,
@@ -145,8 +145,8 @@ class DANNTrainer(WILDTrainer):
         avg_val_loss = total_loss / len(val_loader)
         avg_y_loss = total_y_loss / len(val_loader)
         avg_domain_loss = total_domain_loss / len(val_loader)
-        y_accuracy = (correct_y / total_samples) * 100
-        domain_accuracy = (correct_domain / total_samples) * 100
+        y_accuracy = correct_y / total_samples  # Returns 0-1 fraction
+        domain_accuracy = correct_domain / total_samples  # Returns 0-1 fraction
 
         avg_val_metrics = {
             'y_accuracy': y_accuracy,
