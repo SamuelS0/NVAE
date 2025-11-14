@@ -840,18 +840,18 @@ def sample_crmnist(model, dataloader, num_samples, device):
     
     return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
 
-def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=None, max_samples=5000):
+def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=None, max_samples=5000, epoch=None, total_epochs=None):
     """
     Unified function to visualize latent spaces using t-SNE with balanced sampling.
-    
-    This function works for all model types (NVAE, DIVA, DANN, WILD, CRMNIST) and 
+
+    This function works for all model types (NVAE, DIVA, DANN, WILD, CRMNIST) and
     automatically handles differences like DIVA not having a zay latent space.
-    
+
     For CRMNIST/NVAE/DIVA:
     - Uses balanced sampling to collect equal samples per (digit × color × rotation) combination
     - Ensures good representation of all data variations
     - Automatically detects if model is in DIVA mode
-    
+
     Args:
         model: Model with latent spaces (zy, zx, [zay], za) - zay optional for DIVA
         dataloader: DataLoader containing (x, y, *domains) tuples
@@ -859,6 +859,8 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
         type: Model type ("nvae", "diva", "dann", "wild", "crmnist")
         save_path: Optional path to save the visualization
         max_samples: Maximum number of samples to use for visualization
+        epoch: Current epoch number (optional, for title)
+        total_epochs: Total number of epochs (optional, for title)
     """
     model.eval()
     
@@ -978,7 +980,15 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
 
     # Add overall figure title explaining the visualization
     model_name = type.upper() if type != "dann_augmented" else "DANN (Augmented)"
-    fig.suptitle(f'{model_name} Latent Space Analysis via t-SNE Dimensionality Reduction\n'
+
+    # Add epoch information to title if provided
+    epoch_info = ""
+    if epoch is not None and total_epochs is not None:
+        epoch_info = f" - Epoch {epoch}/{total_epochs}"
+    elif epoch is not None:
+        epoch_info = f" - Epoch {epoch}"
+
+    fig.suptitle(f'{model_name} Latent Space Analysis via t-SNE Dimensionality Reduction{epoch_info}\n'
                  f'Each subplot shows a 2D projection of learned representations. '
                  f'Good disentanglement = task factors cluster by label, domain factors scatter uniformly.',
                  fontsize=14, fontweight='bold', y=0.995)
@@ -998,10 +1008,29 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
         
         # Additional rows: color by each domain
         for row_idx, (domain_name, domain_values) in enumerate(domain_dict.items(), 1):
-            scatter = axes[row_idx, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
-                                                   c=domain_values, cmap='tab10',
-                                                   vmin=0, vmax=len(unique_hospitals)-1 if type == "wild" else len(labels_dict[domain_name])-1,
-                                                   alpha=0.7)
+            # For CRMNIST color labels, use actual semantic colors
+            if type in ["nvae", "diva", "crmnist"] and domain_name == "color":
+                # Map CRMNIST color indices to actual RGB colors
+                crmnist_color_map = {
+                    0: '#0000FF',  # Blue
+                    1: '#00FF00',  # Green
+                    2: '#FFFF00',  # Yellow
+                    3: '#00FFFF',  # Cyan
+                    4: '#FF00FF',  # Magenta
+                    5: '#FFA500',  # Orange
+                    6: '#FF0000'   # Red
+                }
+                # Create color array for scatter plot
+                point_colors = [crmnist_color_map[int(val)] for val in domain_values]
+                scatter = axes[row_idx, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
+                                                       c=point_colors, alpha=0.7)
+            else:
+                # Use standard colormap for other domains
+                scatter = axes[row_idx, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
+                                                       c=domain_values, cmap='tab10',
+                                                       vmin=0, vmax=len(unique_hospitals)-1 if type == "wild" else len(labels_dict[domain_name])-1,
+                                                       alpha=0.7)
+
             domain_display = domain_name.capitalize()
             domain_interpretation = ("(Domain Variable - should be invariant in domain-specific spaces)"
                                     if 'a' in title.lower() or 'domain' in title.lower()
@@ -1010,7 +1039,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
                                             fontsize=10)
             axes[row_idx, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
             axes[row_idx, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
-            
+
             # Create custom legend for domain values
             if type == "wild":
                 # For WILD, use the original hospital numbers
@@ -1024,7 +1053,25 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
                               label=f"Hospital {h}", markersize=10)
                     for i, h in enumerate(unique_hospitals)
                 ]
+            elif type in ["nvae", "diva", "crmnist"] and domain_name == "color":
+                # For CRMNIST colors, use actual semantic colors in legend
+                crmnist_color_map = {
+                    0: '#0000FF',  # Blue
+                    1: '#00FF00',  # Green
+                    2: '#FFFF00',  # Yellow
+                    3: '#00FFFF',  # Cyan
+                    4: '#FF00FF',  # Magenta
+                    5: '#FFA500',  # Orange
+                    6: '#FF0000'   # Red
+                }
+                legend_elements = [
+                    plt.Line2D([0], [0], marker='o', color='w',
+                              markerfacecolor=crmnist_color_map[i],
+                              label=labels_dict[domain_name][i], markersize=10)
+                    for i in range(len(labels_dict[domain_name]))
+                ]
             else:
+                # Standard legend for other domains
                 legend_elements = [
                     plt.Line2D([0], [0], marker='o', color='w',
                               markerfacecolor=plt.cm.tab10(i/len(labels_dict[domain_name])),

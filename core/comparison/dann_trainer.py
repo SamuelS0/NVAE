@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import sys
 import os
+import matplotlib.pyplot as plt
 from core.utils import process_batch
 
 class DANNTrainer(WILDTrainer):
@@ -12,6 +13,14 @@ class DANNTrainer(WILDTrainer):
         self.dataset = args.dataset
         self.optimizer = optimizer
         self.num_epochs = getattr(args, 'epochs', 100)  # Total epochs for lambda scheduling
+
+        # DANN-specific training history tracking
+        self.train_y_loss_history = []
+        self.val_y_loss_history = []
+        self.train_domain_loss_history = []
+        self.val_domain_loss_history = []
+        self.train_discriminator_acc_history = []
+        self.val_discriminator_acc_history = []
 
     def _train_epoch(self, train_loader, epoch, current_beta):
         self.model.train()
@@ -156,4 +165,143 @@ class DANNTrainer(WILDTrainer):
         }
 
         return avg_val_loss, avg_val_metrics
-                
+
+    def train(self, train_loader, val_loader, num_epochs: int) -> torch.nn.Module:
+        """Train the DANN model with custom metric tracking."""
+        for epoch in range(num_epochs):
+            # Training phase
+            train_loss, train_metrics = self._train_epoch(train_loader, epoch, current_beta=1.0)
+
+            # Validation phase
+            val_loss, val_metrics = self._validate(val_loader, epoch, current_beta=1.0)
+
+            # Store training history (including parent class metrics)
+            self.epoch_history.append(epoch + 1)
+            self.train_loss_history.append(train_loss)
+            self.val_loss_history.append(val_loss)
+            self.train_acc_history.append(train_metrics.get('y_accuracy', 0))
+            self.val_acc_history.append(val_metrics.get('y_accuracy', 0))
+
+            # Store DANN-specific metrics
+            self.train_y_loss_history.append(train_metrics.get('y_loss', 0))
+            self.val_y_loss_history.append(val_metrics.get('y_loss', 0))
+            self.train_domain_loss_history.append(train_metrics.get('domain_loss', 0))
+            self.val_domain_loss_history.append(val_metrics.get('domain_loss', 0))
+            self.train_discriminator_acc_history.append(train_metrics.get('discriminator_accuracy', 0))
+            self.val_discriminator_acc_history.append(val_metrics.get('discriminator_accuracy', 0))
+
+            # Print epoch results
+            print(f'Epoch {epoch+1}/{num_epochs}:')
+            print(f'  Train Loss: {train_loss:.4f}')
+            for k, v in train_metrics.items():
+                print(f'  Train {k}: {v:.4f}')
+            print(f'  Val Loss: {val_loss:.4f}')
+            for k, v in val_metrics.items():
+                print(f'  Val {k}: {v:.4f}')
+
+            # Try to generate latent visualization
+            try:
+                self.visualize_latent_epoch(val_loader, epoch)
+                print(f'  Latent visualization saved to {self.latent_viz_dir}/crmnist_latent_epoch_{epoch+1:03d}.png')
+            except Exception as e:
+                print(f'  Warning: Could not generate latent visualization for epoch {epoch+1}: {e}')
+
+            # Save model if it's the best so far
+            y_accuracy = val_metrics.get('y_accuracy', 0)
+            if y_accuracy > self.best_val_accuracy:
+                self.best_val_accuracy = y_accuracy
+                self.best_val_loss = val_loss
+                self.best_model_state = self.model.state_dict().copy()
+                self.best_epoch = epoch
+                self.best_batch_metrics = val_metrics
+
+                # Save model checkpoint
+                model_path = os.path.join(self.models_dir, f'epoch_{epoch}_final.pt')
+                torch.save({
+                    'epoch': epoch,
+                    'state_dict': self.model.state_dict(),
+                    'optimizer': self.optimizer.state_dict(),
+                    'training_metrics': val_metrics,
+                    'val_accuracy': y_accuracy
+                }, model_path)
+
+                print(f'  New best model saved! (Validation Accuracy: {y_accuracy:.4f}, Loss: {val_loss:.4f})')
+                print(f'  Best model batch metrics: {val_metrics}')
+
+            self.epochs_trained = epoch + 1
+
+        # Save final model
+        final_model_path = os.path.join(self.models_dir, f'epoch_{num_epochs}_final.pt')
+        torch.save({
+            'epoch': num_epochs,
+            'state_dict': self.model.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'training_metrics': self.best_batch_metrics,
+            'val_accuracy': self.best_val_accuracy
+        }, final_model_path)
+        print(f'Final model saved to {final_model_path}')
+
+        # Save training history and generate plots
+        self.save_training_history()
+        self.plot_training_curves()
+
+        return self.model
+
+    def plot_training_curves(self):
+        """Plot and save training/validation curves including DANN-specific metrics."""
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
+        # Loss curves
+        axes[0, 0].plot(self.epoch_history, self.train_loss_history, 'b-', label='Train Loss', linewidth=2)
+        axes[0, 0].plot(self.epoch_history, self.val_loss_history, 'r-', label='Val Loss', linewidth=2)
+        axes[0, 0].set_xlabel('Epoch', fontsize=12)
+        axes[0, 0].set_ylabel('Loss', fontsize=12)
+        axes[0, 0].set_title('Training and Validation Loss (Total DANN Loss)', fontsize=14, fontweight='bold')
+        axes[0, 0].legend(fontsize=10)
+        axes[0, 0].grid(True, alpha=0.3)
+
+        # Accuracy curves
+        axes[0, 1].plot(self.epoch_history, self.train_acc_history, 'b-', label='Train Y Accuracy', linewidth=2)
+        axes[0, 1].plot(self.epoch_history, self.val_acc_history, 'r-', label='Val Y Accuracy', linewidth=2)
+        axes[0, 1].plot(self.epoch_history, self.train_discriminator_acc_history, 'g--', label='Train Domain Acc', linewidth=2)
+        axes[0, 1].plot(self.epoch_history, self.val_discriminator_acc_history, 'orange', linestyle='--', label='Val Domain Acc', linewidth=2)
+        axes[0, 1].set_xlabel('Epoch', fontsize=12)
+        axes[0, 1].set_ylabel('Accuracy', fontsize=12)
+        axes[0, 1].set_title('Label and Domain Classification Accuracy', fontsize=14, fontweight='bold')
+        axes[0, 1].legend(fontsize=10)
+        axes[0, 1].grid(True, alpha=0.3)
+
+        # Y loss curves (classification loss)
+        axes[1, 0].plot(self.epoch_history, self.train_y_loss_history, 'b-', label='Train Y Loss', linewidth=2)
+        axes[1, 0].plot(self.epoch_history, self.val_y_loss_history, 'r-', label='Val Y Loss', linewidth=2)
+        axes[1, 0].set_xlabel('Epoch', fontsize=12)
+        axes[1, 0].set_ylabel('Classification Loss', fontsize=12)
+        axes[1, 0].set_title('Label Classification Loss', fontsize=14, fontweight='bold')
+        axes[1, 0].legend(fontsize=10)
+        axes[1, 0].grid(True, alpha=0.3)
+
+        # Domain loss curves (adversarial loss)
+        axes[1, 1].plot(self.epoch_history, self.train_domain_loss_history, 'b-', label='Train Domain Loss', linewidth=2)
+        axes[1, 1].plot(self.epoch_history, self.val_domain_loss_history, 'r-', label='Val Domain Loss', linewidth=2)
+        axes[1, 1].set_xlabel('Epoch', fontsize=12)
+        axes[1, 1].set_ylabel('Domain Loss', fontsize=12)
+        axes[1, 1].set_title('Adversarial Domain Loss', fontsize=14, fontweight='bold')
+        axes[1, 1].legend(fontsize=10)
+        axes[1, 1].grid(True, alpha=0.3)
+
+        # Add overall title showing number of epochs
+        model_name = getattr(self.model, 'name', self.model.__class__.__name__.upper())
+        final_epoch = self.epochs_trained
+        fig.suptitle(f'{model_name} Training Progress (Epochs 1-{final_epoch})',
+                    fontsize=16, fontweight='bold', y=0.998)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.99])  # Adjust to make room for suptitle
+
+        # Save the plot in model-specific subdirectory
+        model_name = getattr(self.model, 'name', self.model.__class__.__name__.lower())
+        history_dir = os.path.join(self.args.out, f'{model_name}_training')
+        os.makedirs(history_dir, exist_ok=True)
+        plot_path = os.path.join(history_dir, 'training_curves.png')
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"   ✅ Training curves saved to {plot_path}")
