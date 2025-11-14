@@ -691,7 +691,122 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         print("📊 COMPREHENSIVE EXPRESSIVENESS ANALYSIS")
         print("="*60)
-        
+
         # Import and run comprehensive comparison
         from core.CRMNIST.compare_all_expressiveness import main as compare_expressiveness
         compare_expressiveness(args.out)
+
+    # =============================================================================
+    # 7. INFORMATION-THEORETIC EVALUATION
+    # =============================================================================
+    if not args.skip_training and len(trained_models) > 0:
+        print("\n" + "="*60)
+        print("🧮 INFORMATION-THEORETIC EVALUATION")
+        print("Testing adherence to Minimal Information Partition theorem")
+        print("="*60)
+
+        try:
+            from core.information_theoretic_evaluation import (
+                MinimalInformationPartitionEvaluator,
+                evaluate_model
+            )
+            from core.visualization.plot_information_theoretic import visualize_all
+
+            # Create output directory for IT analysis
+            it_output_dir = os.path.join(args.out, 'information_theoretic_analysis')
+            os.makedirs(it_output_dir, exist_ok=True)
+
+            # Evaluate each trained model
+            it_results = {}
+
+            # Only evaluate models with explicit VAE-style latent decomposition
+            # NVAE and DIVA have qz(), index_range attributes, and diva flag required by the IT framework
+            VAE_COMPATIBLE_MODELS = ['nvae', 'diva']
+
+            for model_name, model in trained_models.items():
+                # Filter to only VAE-compatible models
+                if model_name not in VAE_COMPATIBLE_MODELS:
+                    print(f"\n⚠️  Skipping {model_name} - IT evaluation requires VAE latent decomposition")
+                    print(f"    Information-theoretic evaluation only supports models with explicit")
+                    print(f"    partitioned latent spaces (qz method, index ranges, diva flag).")
+                    print(f"    Compatible models: {', '.join(VAE_COMPATIBLE_MODELS)}")
+                    continue
+
+                print(f"\n{'='*60}")
+                print(f"Evaluating {model_name.upper()} on information-theoretic metrics")
+                print(f"{'='*60}")
+
+                try:
+                    # Run IT evaluation with 200 batches (~12.8k samples with batch_size=64)
+                    # and 100 bootstrap iterations for confidence intervals
+                    results = evaluate_model(
+                        model=model,
+                        dataloader=val_loader,
+                        device=args.device,
+                        max_batches=200,
+                        n_bootstrap=100
+                    )
+
+                    it_results[model_name.upper()] = results
+
+                    # Save individual model results
+                    model_it_dir = os.path.join(it_output_dir, model_name)
+                    os.makedirs(model_it_dir, exist_ok=True)
+
+                    evaluator = MinimalInformationPartitionEvaluator()
+                    evaluator.save_results(
+                        results,
+                        os.path.join(model_it_dir, 'it_results.json')
+                    )
+
+                except Exception as e:
+                    print(f"⚠️  Failed to evaluate {model_name}: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            # Compare models if we have results
+            if len(it_results) > 1:
+                print("\n" + "="*60)
+                print("📊 COMPARING MODELS ON INFORMATION-THEORETIC METRICS")
+                print("="*60)
+
+                evaluator = MinimalInformationPartitionEvaluator()
+                comparison = evaluator.compare_models(it_results)
+
+                # Save comparison results
+                evaluator.save_results(
+                    comparison,
+                    os.path.join(it_output_dir, 'model_comparison.json')
+                )
+
+                # Generate all visualizations
+                visualize_all(comparison, it_output_dir)
+
+                # Print final rankings
+                print("\n" + "="*60)
+                print("🏆 FINAL RANKINGS - Minimal Information Partition Adherence")
+                print("="*60)
+
+                sorted_models = sorted(
+                    comparison['model_scores'].items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+
+                for rank, (model, score) in enumerate(sorted_models, 1):
+                    print(f"{rank}. {model:<20} Partition Quality: {score:.4f}")
+
+                print("\n✅ Information-theoretic evaluation complete!")
+                print(f"   Results saved to: {it_output_dir}")
+
+            else:
+                print("\n⚠️  Not enough models for IT comparison")
+
+        except ImportError as e:
+            print(f"\n⚠️  Skipping information-theoretic evaluation:")
+            print(f"   {e}")
+            print(f"   Install npeet: pip install git+https://github.com/gregversteeg/NPEET.git")
+        except Exception as e:
+            print(f"\n⚠️  Information-theoretic evaluation failed: {e}")
+            import traceback
+            traceback.print_exc()

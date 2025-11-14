@@ -1,0 +1,14 @@
+# Additional dependencies for Information-Theoretic Evaluation
+# Install with: pip install -r requirements_it.txt
+
+# Non-parametric Entropy Estimation Toolbox
+# Used for KNN-based mutual information estimation
+# Install from GitHub (not available on PyPI)
+git+https://github.com/gregversteeg/NPEET.git
+
+# Already included in main requirements but listed for completeness:
+# scikit-learn>=0.24.0  # For validation and stratified MI
+# numpy>=1.19.0
+# scipy>=1.5.0
+# matplotlib>=3.3.0
+# seaborn>=0.11.0
