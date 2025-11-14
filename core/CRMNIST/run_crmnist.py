@@ -18,11 +18,16 @@ from core.CRMNIST.data_generation import generate_crmnist_dataset
 from core.CRMNIST.model import VAE
 from core.comparison.train import train_nvae, train_diva, train_dann, train_irm
 from core.CRMNIST.latent_expressiveness import evaluate_latent_expressiveness
+from core.CRMNIST.disentanglement_visualization import (
+    visualize_disentanglement,
+    visualize_latent_interpolation,
+    visualize_factor_traversal
+)
 from core.comparison.dann import DANN
 from core.comparison.irm import IRM
 from core.CRMNIST.dann_model import AugmentedDANN
 from core.CRMNIST.dann_trainer import DANNTrainer
-from core.utils import visualize_latent_spaces
+from core.utils import visualize_latent_spaces, get_parser
 """
 CRMNIST model training script.
 
@@ -173,7 +178,7 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
 
 
 if __name__ == "__main__":
-    parser = core.utils.get_parser('CRMNIST')
+    parser = get_parser('CRMNIST')
     parser.add_argument('--intensity', '-i', type=float, default=1.5)
     parser.add_argument('--intensity_decay', '-d', type=float, default=1.0)
     parser.add_argument('--config', type=str, default = 'conf/crmnist.json')
@@ -350,11 +355,6 @@ if __name__ == "__main__":
         if not args.skip_training:
             nvae_model, nvae_metrics = train_nvae(args, spec_data, train_loader, val_loader, dataset='crmnist')
             trained_models['nvae'] = nvae_model
-            
-            # Save NVAE model
-            nvae_model_path = os.path.join(models_dir, f"nvae_model_epoch_{nvae_metrics['best_model_epoch']}.pt")
-            torch.save(nvae_model.state_dict(), nvae_model_path)
-            print(f"NVAE model saved to: {nvae_model_path}")
         else:
             # Load pre-trained model for visualization
             print("Loading pre-trained NVAE model for visualization...")
@@ -378,7 +378,43 @@ if __name__ == "__main__":
             nvae_expressiveness = evaluate_latent_expressiveness(
                 nvae_model, train_loader, val_loader, test_loader, args.device, nvae_expressiveness_dir
             )
-    
+
+            # Disentanglement visualizations for NVAE
+            print("🎨 Generating NVAE disentanglement visualizations...")
+            nvae_disentangle_dir = os.path.join(args.out, 'nvae_disentanglement')
+            os.makedirs(nvae_disentangle_dir, exist_ok=True)
+
+            try:
+                # 1. Main disentanglement visualization
+                disentangle_path = os.path.join(nvae_disentangle_dir, 'disentanglement')
+                visualize_disentanglement(
+                    nvae_model, val_loader, args.device,
+                    save_path=disentangle_path,
+                    num_variations=7,
+                    num_examples=3
+                )
+                print(f"   ✅ Disentanglement visualization saved")
+
+                # 2. Latent interpolation
+                interp_path = os.path.join(nvae_disentangle_dir, 'interpolation')
+                visualize_latent_interpolation(
+                    nvae_model, val_loader, args.device,
+                    save_path=interp_path,
+                    num_steps=7
+                )
+                print(f"   ✅ Interpolation visualization saved")
+
+                # 3. Factor traversal
+                traversal_path = os.path.join(nvae_disentangle_dir, 'traversal')
+                visualize_factor_traversal(
+                    nvae_model, args.device,
+                    save_path=traversal_path,
+                    num_steps=7
+                )
+                print(f"   ✅ Factor traversal visualization saved")
+            except Exception as e:
+                print(f"   ⚠️  Warning: Could not generate some disentanglement visualizations: {str(e)}")
+
     # =============================================================================
     # 2. TRAIN AND TEST DIVA MODEL
     # =============================================================================
@@ -394,11 +430,6 @@ if __name__ == "__main__":
         if not args.skip_training:
             diva_model, diva_metrics = train_diva(args, spec_data, train_loader, val_loader, dataset='crmnist')
             trained_models['diva'] = diva_model
-            
-            # Save DIVA model
-            diva_model_path = os.path.join(models_dir, f"diva_model_epoch_{diva_metrics['best_model_epoch']}.pt")
-            torch.save(diva_model.state_dict(), diva_model_path)
-            print(f"DIVA model saved to: {diva_model_path}")
         else:
             # Load pre-trained model for visualization
             print("Loading pre-trained DIVA model for visualization...")
@@ -422,7 +453,43 @@ if __name__ == "__main__":
             diva_expressiveness = evaluate_latent_expressiveness(
                 diva_model, train_loader, val_loader, test_loader, args.device, diva_expressiveness_dir
             )
-    
+
+            # Disentanglement visualizations for DIVA
+            print("🎨 Generating DIVA disentanglement visualizations...")
+            diva_disentangle_dir = os.path.join(args.out, 'diva_disentanglement')
+            os.makedirs(diva_disentangle_dir, exist_ok=True)
+
+            try:
+                # 1. Main disentanglement visualization
+                disentangle_path = os.path.join(diva_disentangle_dir, 'disentanglement')
+                visualize_disentanglement(
+                    diva_model, val_loader, args.device,
+                    save_path=disentangle_path,
+                    num_variations=7,
+                    num_examples=3
+                )
+                print(f"   ✅ Disentanglement visualization saved")
+
+                # 2. Latent interpolation
+                interp_path = os.path.join(diva_disentangle_dir, 'interpolation')
+                visualize_latent_interpolation(
+                    diva_model, val_loader, args.device,
+                    save_path=interp_path,
+                    num_steps=7
+                )
+                print(f"   ✅ Interpolation visualization saved")
+
+                # 3. Factor traversal
+                traversal_path = os.path.join(diva_disentangle_dir, 'traversal')
+                visualize_factor_traversal(
+                    diva_model, args.device,
+                    save_path=traversal_path,
+                    num_steps=7
+                )
+                print(f"   ✅ Factor traversal visualization saved")
+            except Exception as e:
+                print(f"   ⚠️  Warning: Could not generate some disentanglement visualizations: {str(e)}")
+
     # =============================================================================
     # 3. TRAIN AND TEST DANN MODEL
     # =============================================================================
@@ -437,11 +504,6 @@ if __name__ == "__main__":
         if not args.skip_training:
             dann_model, dann_metrics = train_dann(args, spec_data, train_loader, val_loader, dataset='crmnist')
             trained_models['dann'] = dann_model
-            
-            # Save DANN model
-            dann_model_path = os.path.join(models_dir, f"dann_model_epoch_{dann_metrics['best_model_epoch']}.pt")
-            torch.save(dann_model.state_dict(), dann_model_path)
-            print(f"DANN model saved to: {dann_model_path}")
         else:
             # Load pre-trained model for visualization
             print("Loading pre-trained DANN model for visualization...")
@@ -521,11 +583,6 @@ if __name__ == "__main__":
             # Load best model
             dann_aug_model.load_state_dict(trainer.best_model_state)
             trained_models['dann_augmented'] = dann_aug_model
-
-            # Save model
-            dann_aug_model_path = os.path.join(models_dir, f"dann_augmented_model_epoch_{dann_aug_metrics['best_model_epoch']}.pt")
-            torch.save(dann_aug_model.state_dict(), dann_aug_model_path)
-            print(f"AugmentedDANN model saved to: {dann_aug_model_path}")
         else:
             # Load pre-trained model
             print("Loading pre-trained AugmentedDANN model for visualization...")
@@ -556,11 +613,6 @@ if __name__ == "__main__":
         if not args.skip_training:
             irm_model, irm_metrics = train_irm(args, spec_data, train_loader, val_loader, dataset='crmnist')
             trained_models['irm'] = irm_model
-            
-            # Save IRM model
-            irm_model_path = os.path.join(models_dir, f"irm_model_epoch_{irm_metrics['best_model_epoch']}.pt")
-            torch.save(irm_model.state_dict(), irm_model_path)
-            print(f"IRM model saved to: {irm_model_path}")
         else:
             # Load pre-trained model for visualization
             print("Loading pre-trained IRM model for visualization...")
@@ -621,7 +673,7 @@ if __name__ == "__main__":
         for model_name, metrics in metrics_summary.items():
             print(f"  {model_name}:")
             print(f"    Best epoch: {metrics.get('best_model_epoch', 'N/A')}")
-            print(f"    Best val accuracy: {float(metrics.get('best_val_accuracy', 'N/A')):.4f}")
+            print(f"    Best val accuracy: {metrics.get('best_val_accuracy', 0.0):.4f}")
             print(f"    Epochs trained: {metrics.get('epochs_trained', 'N/A')}")
     else:
         print("  Training was skipped - no metrics available")
