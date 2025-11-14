@@ -5,7 +5,7 @@ from tqdm import tqdm
 import sys
 import os
 import matplotlib.pyplot as plt
-from core.utils import process_batch
+from core.utils import process_batch, visualize_latent_spaces
 
 class DANNTrainer(WILDTrainer):
     def __init__(self, model, optimizer, device, args, patience=5):
@@ -21,6 +21,33 @@ class DANNTrainer(WILDTrainer):
         self.val_domain_loss_history = []
         self.train_discriminator_acc_history = []
         self.val_discriminator_acc_history = []
+
+    def visualize_latent_epoch(self, val_loader, epoch):
+        """
+        Visualize latent spaces for the current epoch.
+
+        Overrides WILDTrainer.visualize_latent_epoch() to use correct dataset type
+        based on self.dataset (which can be 'crmnist' or 'wild').
+        """
+        try:
+            dataset_name = self.dataset  # Use dataset from args
+            latent_path = os.path.join(
+                self.latent_viz_dir,
+                f'{dataset_name}_latent_epoch_{epoch+1:03d}.png'
+            )
+            visualize_latent_spaces(
+                model=self.model,
+                dataloader=val_loader,
+                device=self.device,
+                type=self.dataset,  # Use self.dataset instead of hardcoded 'wild'
+                save_path=latent_path,
+                max_samples=1000,
+                epoch=epoch+1,
+                total_epochs=self.args.epochs
+            )
+            print(f"  Latent visualization saved to {latent_path}")
+        except Exception as e:
+            print(f"  Warning: Could not generate latent visualization for epoch {epoch+1}: {e}")
 
     def _train_epoch(self, train_loader, epoch, current_beta):
         self.model.train()
