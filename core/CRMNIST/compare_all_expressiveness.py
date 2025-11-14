@@ -136,21 +136,23 @@ def create_comprehensive_comparison(results, save_dir):
         # Domain improvement
         if 'domain_za_alone' in model_results and 'domain_za_zay' in model_results:
             domain_improvement = model_results['domain_za_zay']['val_acc'] - model_results['domain_za_alone']['val_acc']
+            domain_baseline = model_results['domain_za_alone']['val_acc']
             improvements.append({
                 'Model': model_name.upper(),
                 'Task': 'Domain',
                 'Improvement': domain_improvement,
-                'Improvement_Percent': domain_improvement * 100
+                'Improvement_Percent': (domain_improvement / domain_baseline) * 100
             })
-        
+
         # Label improvement
         if 'label_zy_alone' in model_results and 'label_zy_zay' in model_results:
             label_improvement = model_results['label_zy_zay']['val_acc'] - model_results['label_zy_alone']['val_acc']
+            label_baseline = model_results['label_zy_alone']['val_acc']
             improvements.append({
                 'Model': model_name.upper(),
                 'Task': 'Label',
                 'Improvement': label_improvement,
-                'Improvement_Percent': label_improvement * 100
+                'Improvement_Percent': (label_improvement / label_baseline) * 100
             })
     
     if improvements:
@@ -261,18 +263,24 @@ def generate_summary_report(results, save_dir):
         # Calculate zay benefits
         domain_benefit = 0
         label_benefit = 0
-        
+        domain_baseline = 1.0  # Default to avoid division by zero
+        label_baseline = 1.0   # Default to avoid division by zero
+
         if 'domain_za_alone' in model_results and 'domain_za_zay' in model_results:
             domain_benefit = model_results['domain_za_zay']['val_acc'] - model_results['domain_za_alone']['val_acc']
-        
+            domain_baseline = model_results['domain_za_alone']['val_acc']
+
         if 'label_zy_alone' in model_results and 'label_zy_zay' in model_results:
             label_benefit = model_results['label_zy_zay']['val_acc'] - model_results['label_zy_alone']['val_acc']
-        
+            label_baseline = model_results['label_zy_alone']['val_acc']
+
         if domain_benefit > 0 or label_benefit > 0:
             zay_benefits.append({
                 'model': model_name.upper(),
                 'domain_benefit': domain_benefit,
-                'label_benefit': label_benefit
+                'label_benefit': label_benefit,
+                'domain_baseline': domain_baseline,
+                'label_baseline': label_baseline
             })
     
     if best_domain_model:
@@ -287,9 +295,11 @@ def generate_summary_report(results, save_dir):
     for benefit in zay_benefits:
         report_lines.append(f"{benefit['model']}:")
         if benefit['domain_benefit'] > 0:
-            report_lines.append(f"  Domain: +{benefit['domain_benefit']:.3f} ({benefit['domain_benefit']*100:.1f}% improvement)")
+            domain_pct = (benefit['domain_benefit'] / benefit['domain_baseline']) * 100
+            report_lines.append(f"  Domain: +{benefit['domain_benefit']:.3f} ({domain_pct:.1f}% improvement)")
         if benefit['label_benefit'] > 0:
-            report_lines.append(f"  Label:  +{benefit['label_benefit']:.3f} ({benefit['label_benefit']*100:.1f}% improvement)")
+            label_pct = (benefit['label_benefit'] / benefit['label_baseline']) * 100
+            report_lines.append(f"  Label:  +{benefit['label_benefit']:.3f} ({label_pct:.1f}% improvement)")
         report_lines.append("")
     
     # Detailed results for each model

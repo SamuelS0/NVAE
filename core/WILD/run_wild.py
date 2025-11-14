@@ -32,7 +32,7 @@ from core.train import train
 from core.test import test
 from core.utils import visualize_latent_spaces
 from core.WILD.disentanglement_analysis import analyze_disentanglement
-from core.comparison.train import train_nvae, train_diva, train_dann, train_irm, train_staged_nvae
+from core.comparison.train import train_nvae, train_diva, train_dann, train_irm, train_staged_nvae, train_dann_augmented
 from core.WILD.trainer import WILDTrainer
 """
 WILD VAE training script.
@@ -51,6 +51,149 @@ test hospital IDs: [2]
 command: python -B WILD/run_wild.py --out results_low_res_vae/ --batch_size 128 --model vae --resolution low --epochs 50
 # '/midtier/cocolab/scratch/ofn9004/WILD'
 """
+
+import glob
+from core.comparison.dann import DANN
+from core.comparison.irm import IRM
+from core.CRMNIST.dann_model import AugmentedDANN
+
+
+def load_model_checkpoint(models_dir, model_name, spec_data, args):
+    """
+    Load a pre-trained model checkpoint for WILD experiments.
+
+    Args:
+        models_dir: Directory containing model checkpoints
+        model_name: Name of the model ('nvae', 'diva', 'dann', 'dann_augmented', 'irm')
+        spec_data: Dataset specification data
+        args: Command line arguments
+
+    Returns:
+        Loaded model and metrics (if available)
+    """
+    # Look for model files with different naming patterns
+    model_patterns = [
+        f"{model_name}_model_epoch_*.pt",
+        f"{model_name}_model.pt",
+        f"{model_name}.pt"
+    ]
+
+    model_path = None
+    for pattern in model_patterns:
+        matches = glob.glob(os.path.join(models_dir, pattern))
+        if matches:
+            # Get the most recent model file
+            model_path = max(matches, key=os.path.getctime)
+            break
+
+    if model_path is None:
+        print(f"❌ No {model_name.upper()} model checkpoint found in {models_dir}")
+        print(f"   Looking for patterns: {model_patterns}")
+        return None, None
+
+    print(f"📁 Loading {model_name.upper()} model from: {model_path}")
+
+    try:
+        # Load checkpoint
+        checkpoint = torch.load(model_path, map_location=args.device)
+
+        # Initialize model based on type
+        if model_name == 'nvae':
+            model = VAE(
+                class_map=None,
+                zy_dim=args.zy_dim,
+                zx_dim=args.zx_dim,
+                zay_dim=args.zay_dim,
+                za_dim=args.za_dim,
+                y_dim=spec_data['num_y_classes'],
+                a_dim=spec_data['num_r_classes'],
+                beta_1=args.beta_1,
+                beta_2=args.beta_2,
+                beta_3=args.beta_3,
+                beta_4=args.beta_4,
+                alpha_1=args.alpha_1,
+                alpha_2=args.alpha_2,
+                recon_weight=args.recon_weight,
+                device=args.device,
+                resolution=args.resolution,
+                model='vae'
+            )
+
+        elif model_name == 'diva':
+            model = VAE(
+                class_map=None,
+                zy_dim=args.zy_dim,
+                zx_dim=args.zx_dim,
+                zay_dim=args.zay_dim,
+                za_dim=args.za_dim,
+                y_dim=spec_data['num_y_classes'],
+                a_dim=spec_data['num_r_classes'],
+                beta_1=args.beta_1,
+                beta_2=args.beta_2,
+                beta_3=args.beta_3,
+                beta_4=args.beta_4,
+                alpha_1=args.alpha_1,
+                alpha_2=args.alpha_2,
+                recon_weight=args.recon_weight,
+                device=args.device,
+                resolution=args.resolution,
+                model='diva'
+            )
+
+        elif model_name == 'dann':
+            z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
+            model = DANN(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'wild')
+
+        elif model_name == 'dann_augmented':
+            # Redistribute dimensions for AugmentedDANN to match total of other models
+            total_dim = args.zy_dim + args.zx_dim + args.zay_dim + args.za_dim
+            zy_aug = total_dim // 3 + (1 if total_dim % 3 > 0 else 0)
+            zd_aug = total_dim // 3 + (1 if total_dim % 3 > 1 else 0)
+            zdy_aug = total_dim // 3
+
+            model = AugmentedDANN(
+                class_map=None,  # WILD doesn't use class_map
+                zy_dim=zy_aug,
+                zd_dim=zd_aug,
+                zdy_dim=zdy_aug,
+                y_dim=spec_data['num_y_classes'],
+                d_dim=spec_data['num_r_classes'],
+                lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
+                sparsity_weight=getattr(args, 'sparsity_weight', 0.01),
+                alpha_y=args.alpha_1,
+                alpha_d=args.alpha_2,
+                beta_adv=getattr(args, 'beta_adv', 0.1),
+                image_size=96  # WILD uses 96x96 images
+            )
+
+        elif model_name == 'irm':
+            z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
+            model = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'wild',
+                       penalty_weight=1e4, penalty_anneal_iters=500)
+
+        # Load state dict
+        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['state_dict'])
+            metrics = checkpoint.get('training_metrics', {})
+            print(f"✅ Loaded {model_name.upper()} model with metrics: {metrics}")
+        else:
+            # Assume it's just the state dict
+            model.load_state_dict(checkpoint)
+            metrics = {}
+            print(f"✅ Loaded {model_name.upper()} model")
+
+        # Move to device
+        model = model.to(args.device)
+        model.eval()
+
+        return model, metrics
+
+    except Exception as e:
+        print(f"❌ Error loading {model_name.upper()} model: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None, None
+
 
 def run_experiment(dataset, args):
     # Create output directories with progress indication
@@ -232,8 +375,8 @@ def get_args():
     #beta annealingstore true, when --beta_annealing it is true
     parser.add_argument('--beta_annealing', action='store_true', help='Beta annealing')
     # Model selection arguments
-    parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'irm'],
-                   choices=['nvae', 'diva', 'dann', 'irm'],
+    parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],
+                   choices=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],
                    help='Which models to train and test (default: all)')
     parser.add_argument('--skip_training', action='store_true', default=False,
                    help='Skip training and only do visualization (requires pre-trained models)')
@@ -259,6 +402,14 @@ def get_args():
                        help='L1 penalty weight for zay latent (default: 0.0 = disabled)')
     parser.add_argument('--l1_lambda_za', type=float, default=0.0,
                        help='L1 penalty weight for za latent (default: 0.0 = disabled)')
+
+    # AugmentedDANN-specific parameters
+    parser.add_argument('--lambda_reversal', type=float, default=1.0,
+                       help='Lambda parameter for gradient reversal in AugmentedDANN (default: 1.0)')
+    parser.add_argument('--sparsity_weight', type=float, default=0.01,
+                       help='Weight for sparsity penalty on zdy in AugmentedDANN (default: 0.01)')
+    parser.add_argument('--beta_adv', type=float, default=0.1,
+                       help='Weight for adversarial loss in AugmentedDANN (default: 0.1)')
 
     return parser.parse_args()
 
@@ -444,7 +595,16 @@ if __name__ == "__main__":
             print("🎨 Generating NVAE latent space visualization...")
             nvae_latent_path = os.path.join(latent_space_dir, 'nvae_latent_spaces.png')
             nvae_model.visualize_latent_spaces(test_loader, args.device, save_path=nvae_latent_path)
-    
+
+            # Evaluate latent expressiveness
+            print("🧪 Evaluating NVAE latent expressiveness...")
+            nvae_expressiveness_dir = os.path.join(args.out, 'nvae_expressiveness')
+            os.makedirs(nvae_expressiveness_dir, exist_ok=True)
+            from core.WILD.latent_expressiveness import evaluate_latent_expressiveness
+            nvae_expressiveness = evaluate_latent_expressiveness(
+                nvae_model, train_loader, val_loader, test_loader, args.device, nvae_expressiveness_dir
+            )
+
     # =============================================================================
     # 2. TRAIN AND TEST DIVA MODEL
     # =============================================================================
@@ -476,7 +636,16 @@ if __name__ == "__main__":
             print("🎨 Generating DIVA latent space visualization...")
             diva_latent_path = os.path.join(latent_space_dir, 'diva_latent_spaces.png')
             diva_model.visualize_latent_spaces_diva(test_loader, args.device, save_path=diva_latent_path)
-    
+
+            # Evaluate latent expressiveness
+            print("🧪 Evaluating DIVA latent expressiveness...")
+            diva_expressiveness_dir = os.path.join(args.out, 'diva_expressiveness')
+            os.makedirs(diva_expressiveness_dir, exist_ok=True)
+            from core.WILD.latent_expressiveness import evaluate_latent_expressiveness
+            diva_expressiveness = evaluate_latent_expressiveness(
+                diva_model, train_loader, val_loader, test_loader, args.device, diva_expressiveness_dir
+            )
+
     # =============================================================================
     # 3. TRAIN AND TEST DANN MODEL
     # =============================================================================
@@ -507,7 +676,61 @@ if __name__ == "__main__":
             print("🎨 Generating DANN latent space visualization...")
             dann_latent_path = os.path.join(latent_space_dir, 'dann_latent_spaces.png')
             dann_model.visualize_latent_space(test_loader, args.device, save_path=dann_latent_path)
-    
+
+    # =============================================================================
+    # 3.5. TRAIN AND TEST AUGMENTED DANN MODEL
+    # =============================================================================
+    if 'dann_augmented' in args.models:
+        print("\n" + "="*60)
+        print("🔥 TRAINING AUGMENTED DANN MODEL")
+        print("="*60)
+
+        dann_aug_params = {
+            **model_params,
+            'lambda_reversal': getattr(args, 'lambda_reversal', 1.0),
+            'sparsity_weight': getattr(args, 'sparsity_weight', 0.01),
+            'beta_adv': getattr(args, 'beta_adv', 0.1)
+        }
+
+        with open(os.path.join(args.out, 'dann_augmented_model_params.json'), 'w') as f:
+            json.dump(dann_aug_params, f)
+
+        if not args.skip_training:
+            # Train AugmentedDANN using the new training function
+            dann_aug_model, dann_aug_metrics = train_dann_augmented(
+                args, spec_data, train_loader, val_loader, dataset='wild'
+            )
+            trained_models['dann_augmented'] = dann_aug_model
+
+            # Save AugmentedDANN model
+            dann_aug_model_path = os.path.join(models_dir, f"dann_augmented_model_epoch_{dann_aug_metrics['best_model_epoch']}.pt")
+            torch.save(dann_aug_model.state_dict(), dann_aug_model_path)
+            print(f"AugmentedDANN model saved to: {dann_aug_model_path}")
+        else:
+            # Load pre-trained model for visualization
+            print("Loading pre-trained AugmentedDANN model for visualization...")
+            dann_aug_model, dann_aug_metrics = load_model_checkpoint(models_dir, 'dann_augmented', spec_data, args)
+            if dann_aug_model is not None:
+                trained_models['dann_augmented'] = dann_aug_model
+            else:
+                print("⚠️  Skipping AugmentedDANN visualization - no pre-trained model found")
+
+        # Visualize AugmentedDANN latent spaces
+        if 'dann_augmented' in trained_models:
+            dann_aug_model = trained_models['dann_augmented']
+            print("🎨 Generating AugmentedDANN latent space visualization...")
+            dann_aug_latent_path = os.path.join(latent_space_dir, 'dann_augmented_latent_spaces.png')
+            visualize_latent_spaces(dann_aug_model, test_loader, args.device, type='dann_augmented', save_path=dann_aug_latent_path)
+
+            # Evaluate latent expressiveness
+            print("🧪 Evaluating AugmentedDANN latent expressiveness...")
+            dann_aug_expressiveness_dir = os.path.join(args.out, 'dann_augmented_expressiveness')
+            os.makedirs(dann_aug_expressiveness_dir, exist_ok=True)
+            from core.WILD.latent_expressiveness import evaluate_latent_expressiveness
+            dann_aug_expressiveness = evaluate_latent_expressiveness(
+                dann_aug_model, train_loader, val_loader, test_loader, args.device, dann_aug_expressiveness_dir
+            )
+
     # =============================================================================
     # 4. TRAIN AND TEST IRM MODEL
     # =============================================================================
@@ -537,16 +760,14 @@ if __name__ == "__main__":
             irm_model = trained_models['irm']
             print("🎨 Generating IRM latent space visualization...")
             irm_latent_path = os.path.join(latent_space_dir, 'irm_latent_spaces.png')
-            if hasattr(irm_model, 'visualize_latent_space'):
-                irm_model.visualize_latent_space(test_loader, args.device, save_path=irm_latent_path)
-            else:
-                # Use the generic visualization function
-                from core.utils import balanced_sample_for_visualization
-                features_dict, labels_dict, stats = balanced_sample_for_visualization(
-                    model=irm_model, dataloader=test_loader, device=args.device, 
-                    model_type="irm", max_samples=3000, dataset_type="wild"
-                )
-                print(f"IRM features extracted: {features_dict['features'].shape}")
+            # Always use generic visualization for WILD data (handles metadata format correctly)
+            # IRM.visualize_latent_space() expects CRMNIST format (x,y,c,r) not WILD (x,y,metadata)
+            from core.utils import balanced_sample_for_visualization
+            features_dict, labels_dict, stats = balanced_sample_for_visualization(
+                model=irm_model, dataloader=test_loader, device=args.device,
+                model_type="irm", max_samples=3000, dataset_type="wild"
+            )
+            print(f"IRM features extracted: {features_dict['features'].shape}")
     
     # =============================================================================
     # 5. POST-TRAINING ANALYSIS (for NVAE/DIVA models only)
@@ -625,6 +846,8 @@ if __name__ == "__main__":
             metrics_summary['DIVA'] = diva_metrics
         if 'dann' in args.models and 'dann_metrics' in locals():
             metrics_summary['DANN'] = dann_metrics
+        if 'dann_augmented' in args.models and 'dann_aug_metrics' in locals():
+            metrics_summary['DANN_AUGMENTED'] = dann_aug_metrics
         if 'irm' in args.models and 'irm_metrics' in locals():
             metrics_summary['IRM'] = irm_metrics
         
@@ -636,10 +859,21 @@ if __name__ == "__main__":
     else:
         print("  Training was skipped - no metrics available")
     
+    # =============================================================================
+    # COMPREHENSIVE EXPRESSIVENESS ANALYSIS
+    # =============================================================================
+    if not args.skip_training:
+        print("\n" + "="*60)
+        print("📊 COMPREHENSIVE EXPRESSIVENESS ANALYSIS")
+        print("="*60)
+
+        from core.WILD.compare_all_expressiveness import main as compare_expressiveness
+        compare_expressiveness(args.out)
+
     print(f"\n🎉 All experiments completed!")
     print(f"📁 All results saved to: {args.out}")
     print(f"💾 Dataset cached at: {args.data_dir}")
-    
+
     # Store trained models for potential future use
     print(f"\nTrained models available in memory: {list(trained_models.keys())}")
     print("=" * 50)

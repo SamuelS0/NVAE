@@ -527,7 +527,10 @@ def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_di
         axes[domain * 2, 0].set_ylabel(f'{rotation_angles[domain]}\nOriginal')
         axes[domain * 2 + 1, 0].set_ylabel(f'{rotation_angles[domain]}\nRecon')
     
-    plt.suptitle(f'Reconstructions - Epoch {epoch}', y=1.02)
+    plt.suptitle(f'Image Reconstruction Quality Assessment - Epoch {epoch} - Model: {model_name.upper()}\n'
+                 f'Each domain (rotation angle) shows original images (top) vs. reconstructions (bottom). '
+                 f'Good reconstruction preserves digit identity, color, and rotation accurately.',
+                 y=1.005, fontsize=13, fontweight='bold')
     plt.tight_layout()
     plt.savefig(os.path.join(reconstructions_dir, f'{model_name}_epoch_{epoch}.png'))
     plt.close()
@@ -561,10 +564,14 @@ def visualize_conditional_generation(model, device, output_dir):
             plt.xticks([])
             plt.yticks([])
     
+    plt.suptitle('Conditional Generation by Digit Class\n'
+                 'Each row shows 5 samples generated conditioned on a specific digit (0-9). '
+                 'Consistent digit identity across samples indicates good conditional control.',
+                 fontsize=12, fontweight='bold')
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, 'conditional_generations.png'))
     plt.close()
-    
+
     print(f"Conditional generation visualization saved to {os.path.join(output_dir, 'conditional_generations.png')}")
 
 def save_domain_samples_visualization(x, y, c, r, epoch, output_dir):
@@ -634,7 +641,10 @@ def save_domain_samples_visualization(x, y, c, r, epoch, output_dir):
         # Add rotation angle as y-label
         axes[domain + 1, 0].set_ylabel(f'{rotation_angles[domain]}')
     
-    plt.suptitle(f'Domain Samples - Epoch {epoch}', y=1.02)
+    plt.suptitle(f'Domain Sample Distribution - Epoch {epoch}\n'
+                 f'Top row shows rare red images. Following rows show samples organized by rotation domain (0°-75°). '
+                 f'This visualization confirms balanced sampling across domains and color distributions.',
+                 y=1.005, fontsize=12, fontweight='bold')
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, f'domain_samples_epoch_{epoch}.png'))
     plt.close()

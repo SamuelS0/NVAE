@@ -390,3 +390,83 @@ def train_irm(args, spec_data, train_loader, val_loader, dataset, seed=None):
 
 
     return irm, training_metrics
+
+
+def train_dann_augmented(args, spec_data, train_loader, val_loader, dataset, seed=None):
+    """
+    Train Augmented DANN model with 3-way latent decomposition (zy, zd, zdy).
+    Works for both CRMNIST (28x28, 128 dims) and WILD (96x96, 512 dims).
+    """
+    print("Training Augmented DANN...")
+
+    # Set random seed if provided
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+
+    # Import AugmentedDANN and DANNTrainer
+    from core.CRMNIST.dann_model import AugmentedDANN
+    from core.CRMNIST.dann_trainer import DANNTrainer
+
+    # Redistribute dimensions for fair comparison
+    # AugmentedDANN uses 3 subspaces (zy, zd, zdy) while NVAE/DIVA use 4
+    # To maintain fair comparison, redistribute total dimension across 3 subspaces
+    total_dim = args.zy_dim + args.zx_dim + args.zay_dim + args.za_dim
+    zy_aug = total_dim // 3 + (1 if total_dim % 3 > 0 else 0)
+    zd_aug = total_dim // 3 + (1 if total_dim % 3 > 1 else 0)
+    zdy_aug = total_dim // 3
+
+    print(f"📏 AugmentedDANN dimension redistribution for {dataset.upper()}:")
+    print(f"   Total dimensions: {total_dim}")
+    print(f"   zy (class): {zy_aug}, zd (domain): {zd_aug}, zdy (interaction): {zdy_aug}")
+    print(f"   Redistributed total: {zy_aug + zd_aug + zdy_aug}")
+
+    # Determine image size based on dataset
+    image_size = 28 if dataset == 'crmnist' else 96
+
+    # Create AugmentedDANN model
+    dann_aug_model = AugmentedDANN(
+        class_map=spec_data.get('class_map', None),  # WILD uses None
+        zy_dim=zy_aug,
+        zd_dim=zd_aug,
+        zdy_dim=zdy_aug,
+        y_dim=spec_data['num_y_classes'],
+        d_dim=spec_data['num_r_classes'],
+        lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
+        sparsity_weight=getattr(args, 'sparsity_weight', 0.01),
+        alpha_y=args.alpha_1,
+        alpha_d=args.alpha_2,
+        beta_adv=getattr(args, 'beta_adv', 0.1),
+        image_size=image_size  # Adaptive: 28 for CRMNIST, 96 for WILD
+    ).to(args.device)
+
+    # Create optimizer
+    optimizer = optim.Adam(dann_aug_model.parameters(), lr=args.learning_rate)
+
+    # Train using DANNTrainer (already dataset-agnostic)
+    trainer = DANNTrainer(
+        dann_aug_model,
+        optimizer,
+        args.device,
+        args,
+        patience=getattr(args, 'patience', 5)
+    )
+    trainer.train(train_loader, val_loader, args.epochs)
+
+    # Get metrics in standard format
+    training_metrics = {
+        'best_model_state': trainer.best_model_state,
+        'best_val_loss': trainer.best_val_loss,
+        'best_val_accuracy': trainer.best_val_accuracy if hasattr(trainer, 'best_val_accuracy') else 0.0,
+        'epochs_trained': trainer.epochs_trained,
+        'best_model_epoch': trainer.best_epoch
+    }
+
+    # Load best model
+    if training_metrics['best_model_state'] is not None:
+        dann_aug_model.load_state_dict(training_metrics['best_model_state'])
+        print("✅ Loaded best AugmentedDANN model for final evaluation")
+
+    return dann_aug_model, training_metrics

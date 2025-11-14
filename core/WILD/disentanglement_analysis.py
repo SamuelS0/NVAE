@@ -108,12 +108,12 @@ def analyze_disentanglement(model, dataloader, device, save_path=None):
     # Compute correlations between latent variables
     latent_dict = {
         'zy': all_zy,
-        'zx': all_zx, 
+        'zx': all_zx,
         'zay': all_zay,
         'za': all_za
     }
-    
-    #correlations = compute_correlation_matrix(latent_dict)
+
+    correlations = compute_correlation_matrix(latent_dict)
     
     # # Compute mutual information
     # print("🧮 Computing mutual information...")
@@ -165,24 +165,24 @@ def analyze_disentanglement(model, dataloader, device, save_path=None):
     
     # Create analysis results
     results = {
-        #'correlations': correlations,
+        'correlations': correlations,
         #'mutual_information': mi_results,
         'label_prediction': label_prediction_scores,
         'summary': {
-            #'zy_za_correlation': correlations['zy']['za'],
-            #'zy_zay_correlation': correlations['zy']['zay'],
-            #'za_zay_correlation': correlations['za']['zay'],
-            #'zay_independence_score': 1.0 - (correlations['zy']['zay'] + correlations['za']['zay']) / 2,
+            'zy_za_correlation': correlations['zy']['za'],
+            'zy_zay_correlation': correlations['zy']['zay'],
+            'za_zay_correlation': correlations['za']['zay'],
+            'zay_independence_score': 1.0 - (correlations['zy']['zay'] + correlations['za']['zay']) / 2,
             'zy_y_specificity': label_prediction_scores['zy']['y_accuracy'] - label_prediction_scores['zy']['a_accuracy'],
             'za_a_specificity': label_prediction_scores['za']['a_accuracy'] - label_prediction_scores['za']['y_accuracy'],
         }
     }
     
     print("📈 Analysis Results Summary:")
-    #print(f"  zy-za correlation: {results['summary']['zy_za_correlation']:.4f}")
-    #print(f"  zy-zay correlation: {results['summary']['zy_zay_correlation']:.4f}")
-    #print(f"  za-zay correlation: {results['summary']['za_zay_correlation']:.4f}")
-    #print(f"  zay independence score: {results['summary']['zay_independence_score']:.4f}")
+    print(f"  zy-za correlation: {results['summary']['zy_za_correlation']:.4f}")
+    print(f"  zy-zay correlation: {results['summary']['zy_zay_correlation']:.4f}")
+    print(f"  za-zay correlation: {results['summary']['za_zay_correlation']:.4f}")
+    print(f"  zay independence score: {results['summary']['zay_independence_score']:.4f}")
     print(f"  zy y-specificity: {results['summary']['zy_y_specificity']:.4f}")
     print(f"  za a-specificity: {results['summary']['za_a_specificity']:.4f}")
     
@@ -209,9 +209,9 @@ def analyze_disentanglement(model, dataloader, device, save_path=None):
         
         # Create correlation heatmap
         plt.figure(figsize=(10, 8))
-        # corr_matrix = np.array([[correlations[n1][n2] for n2 in ['zy', 'zx', 'zay', 'za']] 
-        #                       for n1 in ['zy', 'zx', 'zay', 'za']])
-        
+        corr_matrix = np.array([[correlations[n1][n2] for n2 in ['zy', 'zx', 'zay', 'za']]
+                              for n1 in ['zy', 'zx', 'zay', 'za']])
+
         sns.heatmap(corr_matrix, 
                    xticklabels=['zy', 'zx', 'zay', 'za'],
                    yticklabels=['zy', 'zx', 'zay', 'za'],

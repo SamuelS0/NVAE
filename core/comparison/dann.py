@@ -215,23 +215,44 @@ class DANN(nn.Module):
         
         # Create three subplots: one for task classes, one for colors, one for rotations
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
-        
+
+        # Add overall title explaining DANN
+        fig.suptitle('DANN (Domain-Adversarial Neural Network) Feature Space Analysis via t-SNE\n'
+                     'DANN uses adversarial training to learn domain-invariant features. '
+                     'Success = strong task clustering with uniform domain/color distribution.',
+                     fontsize=13, fontweight='bold', y=1.02)
+
         # Plot task classes
-        scatter1 = ax1.scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='tab10')
-        ax1.set_title('Task Classes in Latent Space')
-        ax1.legend(*scatter1.legend_elements(), title="Classes")
-        
+        scatter1 = ax1.scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='tab10', alpha=0.7)
+        ax1.set_title('Task Classes (Digits)\n'
+                     'Strong clustering indicates successful\n'
+                     'task-relevant feature learning',
+                     fontsize=11)
+        ax1.set_xlabel('t-SNE Component 1', fontsize=10)
+        ax1.set_ylabel('t-SNE Component 2', fontsize=10)
+        ax1.legend(*scatter1.legend_elements(), title="Digits", fontsize=9)
+
         # Plot colors
-        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='tab10')
-        ax2.set_title('Colors in Latent Space')
-        ax2.legend(*scatter2.legend_elements(), title="Colors")
-        
+        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='tab10', alpha=0.7)
+        ax2.set_title('Image Colors (Spurious Feature)\n'
+                     'Uniform distribution indicates color\n'
+                     'is not captured (domain invariance)',
+                     fontsize=11)
+        ax2.set_xlabel('t-SNE Component 1', fontsize=10)
+        ax2.set_ylabel('t-SNE Component 2', fontsize=10)
+        ax2.legend(*scatter2.legend_elements(), title="Colors", fontsize=9)
+
         # Plot rotations
-        scatter3 = ax3.scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='tab10')
-        ax3.set_title('Rotations in Latent Space')
-        ax3.legend(*scatter3.legend_elements(), title="Rotations")
-        
-        plt.tight_layout()
+        scatter3 = ax3.scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='tab10', alpha=0.7)
+        ax3.set_title('Domains (Rotation Angles)\n'
+                     'Uniform distribution demonstrates\n'
+                     'domain-invariant features via adversarial training',
+                     fontsize=11)
+        ax3.set_xlabel('t-SNE Component 1', fontsize=10)
+        ax3.set_ylabel('t-SNE Component 2', fontsize=10)
+        ax3.legend(*scatter3.legend_elements(), title="Rotations", fontsize=9)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
         if save_path:
             plt.savefig(save_path)
             print(f"Latent space visualization saved to {save_path}")

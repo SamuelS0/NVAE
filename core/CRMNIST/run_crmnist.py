@@ -123,18 +123,25 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
             model = DANN(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'crmnist')
 
         elif model_name == 'dann_augmented':
+            # Redistribute dimensions for AugmentedDANN to match total of other models
+            total_dim = args.zy_dim + args.zx_dim + args.zay_dim + args.za_dim
+            zy_aug = total_dim // 3 + (1 if total_dim % 3 > 0 else 0)
+            zd_aug = total_dim // 3 + (1 if total_dim % 3 > 1 else 0)
+            zdy_aug = total_dim // 3
+
             model = AugmentedDANN(
                 class_map=spec_data['class_map'],
-                zy_dim=args.zy_dim,
-                zd_dim=args.za_dim,  # Use za_dim for domain-specific features
-                zdy_dim=args.zay_dim,  # Use zay_dim for domain-class interaction
+                zy_dim=zy_aug,
+                zd_dim=zd_aug,
+                zdy_dim=zdy_aug,
                 y_dim=spec_data['num_y_classes'],
                 d_dim=spec_data['num_r_classes'],
                 lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
                 sparsity_weight=getattr(args, 'sparsity_weight', 0.01),
                 alpha_y=args.alpha_1,
                 alpha_d=args.alpha_2,
-                beta_adv=getattr(args, 'beta_adv', 0.1)
+                beta_adv=getattr(args, 'beta_adv', 0.1),
+                image_size=28
             )
 
         elif model_name == 'irm':
@@ -470,19 +477,30 @@ if __name__ == "__main__":
             json.dump(dann_aug_params, f)
 
         if not args.skip_training:
+            # Redistribute dimensions for AugmentedDANN to match total of other models
+            # AugmentedDANN uses 3 subspaces (zy, zd, zdy) while others use 4
+            # To maintain fair comparison, redistribute total dimension across 3 subspaces
+            total_dim = args.zy_dim + args.zx_dim + args.zay_dim + args.za_dim  # Total: 128
+            zy_aug = total_dim // 3 + (1 if total_dim % 3 > 0 else 0)  # 43
+            zd_aug = total_dim // 3 + (1 if total_dim % 3 > 1 else 0)   # 43
+            zdy_aug = total_dim // 3  # 42
+
+            print(f"📏 AugmentedDANN dimension redistribution: zy={zy_aug}, zd={zd_aug}, zdy={zdy_aug} (total={zy_aug+zd_aug+zdy_aug})")
+
             # Create AugmentedDANN model
             dann_aug_model = AugmentedDANN(
                 class_map=spec_data['class_map'],
-                zy_dim=args.zy_dim,
-                zd_dim=args.za_dim,
-                zdy_dim=args.zay_dim,
+                zy_dim=zy_aug,
+                zd_dim=zd_aug,
+                zdy_dim=zdy_aug,
                 y_dim=spec_data['num_y_classes'],
                 d_dim=spec_data['num_r_classes'],
                 lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
                 sparsity_weight=getattr(args, 'sparsity_weight', 0.01),
                 alpha_y=args.alpha_1,
                 alpha_d=args.alpha_2,
-                beta_adv=getattr(args, 'beta_adv', 0.1)
+                beta_adv=getattr(args, 'beta_adv', 0.1),
+                image_size=28
             ).to(args.device)
 
             # Create optimizer

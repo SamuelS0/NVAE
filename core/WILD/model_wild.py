@@ -423,20 +423,37 @@ class VAE(NModule):
         # Create visualizations for each latent space
         for i, (space_name, features) in enumerate(zip(spaces, features_list)):
             features_2d = tsne.fit_transform(features)
-            
+
             # Plot colored by labels (tumor/normal) in first row
             scatter1 = axes[0, i].scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='RdYlBu', alpha=0.6)
-            axes[0, i].set_title(f'{space_name} - Colored by Label\n(Blue=Normal, Red=Tumor)')
-            axes[0, i].legend(*scatter1.legend_elements(), title="Labels", loc='upper right')
-            
+            space_interpretation = {
+                'zy': 'Label-Specific Space - should cluster by pathology',
+                'za': 'Domain-Specific Space - should cluster by hospital',
+                'zay': 'Interaction Space - captures label-domain interactions',
+                'zx': 'Residual Space - captures texture and fine details'
+            }
+            axes[0, i].set_title(f'{space_name.upper()}: {space_interpretation.get(space_name, "")}\n'
+                               f'Colored by Tissue Type (Blue=Normal, Red=Tumor)',
+                               fontsize=10)
+            axes[0, i].set_xlabel('t-SNE Component 1', fontsize=9)
+            axes[0, i].set_ylabel('t-SNE Component 2', fontsize=9)
+            axes[0, i].legend(*scatter1.legend_elements(), title="Pathology", loc='upper right', fontsize=8)
+
             # Plot colored by hospital in second row
             scatter2 = axes[1, i].scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='tab10', alpha=0.6)
-            axes[1, i].set_title(f'{space_name} - Colored by Hospital')
-            axes[1, i].legend(*scatter2.legend_elements(), title="Hospitals", loc='upper right')
-        
+            axes[1, i].set_title(f'{space_name.upper()}: Hospital Domain Distribution\n'
+                               f'Clustering indicates hospital-specific imaging characteristics',
+                               fontsize=10)
+            axes[1, i].set_xlabel('t-SNE Component 1', fontsize=9)
+            axes[1, i].set_ylabel('t-SNE Component 2', fontsize=9)
+            axes[1, i].legend(*scatter2.legend_elements(), title="Hospitals", loc='upper right', fontsize=8)
+
         # Add overall title
         model_type = "DIVA" if self.diva else "VAE"
-        plt.suptitle(f'WILD {model_type} Latent Space Visualization (t-SNE)', fontsize=16, y=0.98)
+        plt.suptitle(f'WILD Histopathology Dataset - {model_type} Latent Space Analysis via t-SNE\n'
+                     f'Top row: Colored by tissue pathology (Normal/Tumor). Bottom row: Colored by hospital domain. '
+                     f'Good disentanglement = task factors cluster in zy, domain factors cluster in za.',
+                     fontsize=13, fontweight='bold', y=0.995)
         plt.tight_layout()
         
         if save_path:

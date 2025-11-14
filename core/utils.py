@@ -975,14 +975,26 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     n_cols = len(latent_spaces)
     n_rows = 1 + len(domain_dict)  # One row for digits, one for each domain
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 5*n_rows))
+
+    # Add overall figure title explaining the visualization
+    model_name = type.upper() if type != "dann_augmented" else "DANN (Augmented)"
+    fig.suptitle(f'{model_name} Latent Space Analysis via t-SNE Dimensionality Reduction\n'
+                 f'Each subplot shows a 2D projection of learned representations. '
+                 f'Good disentanglement = task factors cluster by label, domain factors scatter uniformly.',
+                 fontsize=14, fontweight='bold', y=0.995)
     
     # Plot each latent space
     for col_idx, (space_2d, title) in enumerate(tsne_results):
-        # First row: color by digit
-        scatter = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1], 
+        # First row: color by digit/label
+        scatter = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
                                          c=y_labels, cmap='tab10', alpha=0.7)
-        axes[0, col_idx].set_title(f'{title}\nColored by Digit')
-        axes[0, col_idx].legend(*scatter.legend_elements(), title="Digits")
+        label_type = "Class Label" if type == "wild" else "Digit"
+        axes[0, col_idx].set_title(f'{title}\nColored by {label_type} (Task Variable)\n'
+                                   f'Strong clustering indicates task-relevant information is encoded',
+                                   fontsize=10)
+        axes[0, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
+        axes[0, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
+        axes[0, col_idx].legend(*scatter.legend_elements(), title=label_type + "s", fontsize=8)
         
         # Additional rows: color by each domain
         for row_idx, (domain_name, domain_values) in enumerate(domain_dict.items(), 1):
@@ -990,7 +1002,14 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
                                                    c=domain_values, cmap='tab10',
                                                    vmin=0, vmax=len(unique_hospitals)-1 if type == "wild" else len(labels_dict[domain_name])-1,
                                                    alpha=0.7)
-            axes[row_idx, col_idx].set_title(f'{title}\nColored by {domain_name.capitalize()}')
+            domain_display = domain_name.capitalize()
+            domain_interpretation = ("(Domain Variable - should be invariant in domain-specific spaces)"
+                                    if 'a' in title.lower() or 'domain' in title.lower()
+                                    else "(Domain Variable - clustering here indicates domain leakage)")
+            axes[row_idx, col_idx].set_title(f'{title}\nColored by {domain_display} {domain_interpretation}',
+                                            fontsize=10)
+            axes[row_idx, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
+            axes[row_idx, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
             
             # Create custom legend for domain values
             if type == "wild":
@@ -998,7 +1017,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
                 # Get the actual colors used in the scatter plot
                 norm = plt.Normalize(0, len(unique_hospitals)-1)
                 colors = plt.cm.tab10(norm(range(len(unique_hospitals))))
-                
+
                 legend_elements = [
                     plt.Line2D([0], [0], marker='o', color='w',
                               markerfacecolor=colors[i],
@@ -1012,9 +1031,11 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
                               label=labels_dict[domain_name][i], markersize=10)
                     for i in range(len(labels_dict[domain_name]))
                 ]
-            axes[row_idx, col_idx].legend(handles=legend_elements, title=domain_name.capitalize())
+            axes[row_idx, col_idx].legend(handles=legend_elements, title=domain_name.capitalize(),
+                                         fontsize=8)
     
-    plt.tight_layout()
+    # Adjust layout to accommodate suptitle
+    plt.tight_layout(rect=[0, 0, 1, 0.98])
     if save_path:
         print(f"Saving latent space visualization to {save_path}")
         plt.savefig(save_path, bbox_inches='tight', dpi=100)

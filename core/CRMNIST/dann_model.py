@@ -86,20 +86,22 @@ class AugmentedDANN(NModule):
         sparsity_weight=0.01,
         alpha_y=1.0,
         alpha_d=1.0,
-        beta_adv=1.0
+        beta_adv=1.0,
+        image_size=28  # Image dimensions: 28 for CRMNIST, 96 for WILD
     ):
         super().__init__()
         
         self.name = 'dann'
         self.class_map = class_map
-        
+
         # Model dimensions
         self.zy_dim = zy_dim
         self.zd_dim = zd_dim
         self.zdy_dim = zdy_dim
         self.y_dim = y_dim
         self.d_dim = d_dim
-        
+        self.image_size = image_size
+
         # Training parameters
         self.sparsity_weight = sparsity_weight
         self.alpha_y = alpha_y
@@ -109,7 +111,7 @@ class AugmentedDANN(NModule):
         # Single shared encoder that outputs to combined latent space
         # This matches the architecture pattern of NVAE/DIVA/DANN/IRM
         total_latent_dim = zy_dim + zd_dim + zdy_dim
-        self.shared_encoder = self._create_encoder(in_channels, total_latent_dim)
+        self.shared_encoder = self._create_encoder(in_channels, total_latent_dim, image_size)
         
         # System 1: Class-focused DANN components
         # Main class classifier (operates on Z_y ∪ Z_dy)
@@ -226,26 +228,68 @@ class AugmentedDANN(NModule):
                 raise ValueError(f"Adversarial class classifier expects {self.zd_dim} features, "
                                f"got {adv_class_first.in_features}")
     
-    def _create_encoder(self, in_channels, out_dim):
-        """Create a CNN encoder that outputs to combined or individual latent space"""
-        return nn.Sequential(
-            # Block 1
-            nn.Conv2d(in_channels, 96, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(96),
-            nn.ReLU(),
-            # Block 2
-            nn.MaxPool2d(2, 2),
-            # Block 3
-            nn.Conv2d(96, 192, kernel_size=5, stride=1, padding=2),
-            nn.BatchNorm2d(192),
-            nn.ReLU(),
-            # Block 4
-            nn.MaxPool2d(2, 2),
-            nn.Flatten(),
-            # Block 5: Project to specific latent space
-            nn.Linear(192 * 7 * 7, out_dim),
-            nn.ReLU()
-        )
+    def _create_encoder(self, in_channels, out_dim, image_size):
+        """
+        Create a CNN encoder that outputs to combined or individual latent space.
+
+        Architecture adapts to image size:
+        - image_size=28 (CRMNIST): 28x28 -> 14x14 -> 7x7 -> flatten (9408) -> out_dim
+        - image_size=96 (WILD): 96x96 -> 48x48 -> 24x24 -> 12x12 -> 6x6 -> flatten (18432) -> out_dim
+        """
+        if image_size == 28:
+            # CRMNIST encoder: 28x28 -> 7x7
+            return nn.Sequential(
+                # Block 1
+                nn.Conv2d(in_channels, 96, kernel_size=5, stride=1, padding=2),
+                nn.BatchNorm2d(96),
+                nn.ReLU(),
+                # Block 2
+                nn.MaxPool2d(2, 2),
+                # Block 3
+                nn.Conv2d(96, 192, kernel_size=5, stride=1, padding=2),
+                nn.BatchNorm2d(192),
+                nn.ReLU(),
+                # Block 4
+                nn.MaxPool2d(2, 2),
+                nn.Flatten(),
+                # Block 5: Project to specific latent space
+                nn.Linear(192 * 7 * 7, out_dim),
+                nn.ReLU()
+            )
+        elif image_size == 96:
+            # WILD encoder: 96x96 -> 6x6 (following qz_new pattern from model_wild.py)
+            return nn.Sequential(
+                # 96x96x3 -> 48x48x64
+                nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(64),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+
+                # 48x48x64 -> 24x24x128
+                nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(128),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+
+                # 24x24x128 -> 12x12x256
+                nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(256),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+
+                # 12x12x256 -> 6x6x512
+                nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),
+                nn.BatchNorm2d(512),
+                nn.LeakyReLU(0.2),
+                nn.MaxPool2d(2),
+
+                nn.Flatten(),
+                # 512 * 6 * 6 = 18432
+                nn.Linear(512 * 6 * 6, out_dim),
+                nn.ReLU()
+            )
+        else:
+            raise ValueError(f"Unsupported image_size={image_size}. Must be 28 (CRMNIST) or 96 (WILD)")
     
     def _init_weights(self):
         """Initialize weights using Xavier initialization"""
@@ -271,8 +315,8 @@ class AugmentedDANN(NModule):
         if x.size(1) != 3:
             raise ValueError(f"Input must have 3 channels for RGB images, got {x.size(1)}")
 
-        if x.size(2) != 28 or x.size(3) != 28:
-            raise ValueError(f"Input must be 28x28 images, got {x.size(2)}x{x.size(3)}")
+        if x.size(2) != self.image_size or x.size(3) != self.image_size:
+            raise ValueError(f"Input must be {self.image_size}x{self.image_size} images, got {x.size(2)}x{x.size(3)}")
 
         # Single forward pass through shared encoder
         z_combined = self.shared_encoder(x)
@@ -342,13 +386,18 @@ class AugmentedDANN(NModule):
         a_hat = d_pred_main
         
         # Return individual latent components for NVAE compatibility
-        # DANN latent space mapping to NVAE convention:
+        # AugmentedDANN has 3 latent spaces (zy, zd, zdy) but NVAE interface expects 4 (zy, zx, zay, za)
+        # Mapping strategy:
         # zy -> zy (class-specific, unchanged)
-        # zd -> za (domain-specific maps to auxiliary/attribute)  
+        # zd -> za (domain-specific maps to auxiliary/attribute)
         # zdy -> zay (interaction maps to auxiliary-label interaction)
         # zd -> zx (domain-specific also maps to residual for compatibility)
-        zx = zd   # Domain features as residual features
-        za = zd   # Domain features as auxiliary features
+        #
+        # NOTE: zx and za both reference the SAME tensor (zd). This is intentional for interface
+        # compatibility but means expressiveness evaluation will show identical results for both.
+        # This does NOT affect model functionality, only interpretability of latent analysis.
+        zx = zd   # Domain features as residual features (DUPLICATE of za)
+        za = zd   # Domain features as auxiliary features (DUPLICATE of zx)
         zay = zdy # Interaction features as auxiliary-label interaction
         
         return x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za
@@ -705,31 +754,46 @@ class AugmentedDANN(NModule):
         
         # Create figure with 3 rows and 3 columns for DANN
         fig, axes = plt.subplots(3, 3, figsize=(18, 18))
+
+        # Add overall title explaining DANN architecture
+        fig.suptitle('DANN (Domain Adversarial Neural Network) Latent Space Analysis via t-SNE\n'
+                     'DANN learns domain-invariant features through adversarial training. '
+                     'Class-specific space (zy) should cluster by digits, Domain-specific space (zd) captures rotation/domain info.',
+                     fontsize=14, fontweight='bold', y=0.995)
+
         latent_spaces = [
-            (zy_2d, y_labels, 'Class-specific (zy)'),
-            (zd_2d, r_labels, 'Domain-specific (zd)'),
+            (zy_2d, y_labels, 'Class-Specific Space (zy)'),
+            (zd_2d, r_labels, 'Domain-Specific Space (zd)'),
             (zdy_2d, zdy_labels, 'Domain-Class Interaction (zdy)')
         ]
         
         # Plot each latent space
         for col_idx, (space_2d, labels, title) in enumerate(latent_spaces):
             # Top row: color by digit label
-            scatter1 = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1], 
+            scatter1 = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
                                           c=y_labels, cmap='tab10', alpha=0.7)
-            axes[0, col_idx].set_title(f'{title}\nColored by Digit')
-            axes[0, col_idx].legend(*scatter1.legend_elements(), title="Digits")
-            
+            axes[0, col_idx].set_title(f'{title}\nColored by Digit (Task Label)\n'
+                                      f'Strong clustering indicates task-relevant information',
+                                      fontsize=10)
+            axes[0, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
+            axes[0, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
+            axes[0, col_idx].legend(*scatter1.legend_elements(), title="Digits", fontsize=8)
+
             # Middle row: color by rotation
-            scatter2 = axes[1, col_idx].scatter(space_2d[:, 0], space_2d[:, 1], 
-                                          c=r_labels, cmap='tab10', 
+            scatter2 = axes[1, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
+                                          c=r_labels, cmap='tab10',
                                           vmin=0, vmax=5, alpha=0.7)
-            axes[1, col_idx].set_title(f'{title}\nColored by Rotation')
+            axes[1, col_idx].set_title(f'{title}\nColored by Rotation (Domain Variable)\n'
+                                      f'Clustering here indicates domain information is captured',
+                                      fontsize=10)
+            axes[1, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
+            axes[1, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
             # Create custom legend for rotations
-            legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
+            legend_elements = [plt.Line2D([0], [0], marker='o', color='w',
                                         markerfacecolor=plt.cm.tab10(i/5),
                                         label=angle, markersize=10)
                              for i, angle in enumerate(rotation_angles)]
-            axes[1, col_idx].legend(handles=legend_elements, title="Rotations")
+            axes[1, col_idx].legend(handles=legend_elements, title="Rotations", fontsize=8)
             
             # Bottom row: color by RGB color
             if len(c_labels.shape) > 1:
@@ -744,19 +808,24 @@ class AugmentedDANN(NModule):
                 for i, color_idx in enumerate(c_labels):
                     rgb_colors[i] = color_mappings[color_idx]
             
-            scatter3 = axes[2, col_idx].scatter(space_2d[:, 0], space_2d[:, 1], 
+            scatter3 = axes[2, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
                                           c=rgb_colors, alpha=0.7)
-            axes[2, col_idx].set_title(f'{title}\nColored by RGB')
+            axes[2, col_idx].set_title(f'{title}\nColored by Image Color (Spurious Correlation)\n'
+                                      f'Clustering by color indicates the space captures color information',
+                                      fontsize=10)
+            axes[2, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
+            axes[2, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
             # Create custom legend for colors
             color_elements = [
-                plt.Line2D([0], [0], marker='o', color='w', 
+                plt.Line2D([0], [0], marker='o', color='w',
                           markerfacecolor=color, label=name, markersize=10)
-                for color, name in zip(['blue', 'green', 'yellow', 'cyan', 'magenta', 'orange', 'red'], 
+                for color, name in zip(['blue', 'green', 'yellow', 'cyan', 'magenta', 'orange', 'red'],
                                      color_labels)
             ]
-            axes[2, col_idx].legend(handles=color_elements, title="Colors")
-        
-        plt.tight_layout()
+            axes[2, col_idx].legend(handles=color_elements, title="Colors", fontsize=8)
+
+        # Adjust layout to accommodate suptitle
+        plt.tight_layout(rect=[0, 0, 1, 0.98])
         if save_path:
             plt.savefig(save_path, bbox_inches='tight', dpi=100)
             print(f"Latent space visualization saved to {save_path}")

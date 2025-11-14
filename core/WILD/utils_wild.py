@@ -88,7 +88,7 @@ def visualize_reconstructions(model, epoch, batch_data, image_dir, args):
     model.eval()
     with torch.no_grad():
         #if args.model == 'vae':
-        x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model.forward(hospital_id, x, y)
+        x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model.forward(y, x, hospital_id)
         ''' elif args.model == 'diva':
             x_recon, d_hat, y_hat, qz, pz, z_q = model.forward(hospital_id, x, y)'''
     
@@ -159,7 +159,10 @@ def visualize_reconstructions(model, epoch, batch_data, image_dir, args):
         axes[domain * 2, 0].set_ylabel(f'{hospital_names[domain]}\nOriginal')
         axes[domain * 2 + 1, 0].set_ylabel(f'{hospital_names[domain]}\nRecon')
     
-    plt.suptitle(f'Reconstructions - Epoch {epoch}', y=1.02)
+    plt.suptitle(f'Histopathology Image Reconstruction Quality Assessment - Epoch {epoch}\n'
+                 f'Each hospital domain shows original tissue images (top) vs. reconstructions (bottom). '
+                 f'Good reconstruction preserves pathology (tumor/normal) and hospital-specific imaging characteristics.',
+                 y=1.005, fontsize=13, fontweight='bold')
     plt.tight_layout()
     plt.savefig(image_dir)
     plt.close()
@@ -198,7 +201,10 @@ def visualize_conditional_generation(model, device, output_dir):
             # Add both class and hospital labels
             ax.set_title(f"{class_names[label]}\n{hospital_names[hospital]}", pad=10)
     
-    plt.suptitle("Generated Samples by Class and Hospital", y=1.05, fontsize=16)
+    plt.suptitle("Conditional Histopathology Image Generation by Tissue Type and Hospital\n"
+                 "Each cell shows a generated sample conditioned on specific tissue class (Normal/Tumor) and hospital domain. "
+                 "Consistent pathology per class and distinct hospital characteristics indicate good conditional control.",
+                 y=1.05, fontsize=14, fontweight='bold')
     plt.savefig(os.path.join(output_dir, 'conditional_generations.png'), bbox_inches='tight', dpi=300)
     plt.close()
     
@@ -254,7 +260,10 @@ def save_domain_samples_visualization(x, y, metadata, epoch, output_dir):
         # Add hospital ID as y-label
         axes[hospital, 0].set_ylabel(f"Hospital {hospital}")
 
-    plt.suptitle(f"Domain Samples - Epoch {epoch}", y=1.02)
+    plt.suptitle(f"Hospital Domain Sample Distribution - Epoch {epoch}\n"
+                 f"Each row shows tissue samples from one hospital. "
+                 f"This visualization confirms balanced sampling across hospital domains and pathology distribution.",
+                 y=1.005, fontsize=12, fontweight='bold')
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, f"domain_samples_epoch_{epoch}.png"))
     plt.close()
@@ -278,7 +287,7 @@ def generate_images_latent(model, device, data_type, output_dir, batch_data, mod
     # Get latent representations through forward pass
     with torch.no_grad():
         if args.model == 'vae':
-            x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model.forward(hospital_id, x, y)
+            x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model.forward(y, x, hospital_id)
             
             if mode == 'only':
                 # Generate different reconstructions by zeroing out different latent variables
@@ -322,7 +331,7 @@ def generate_images_latent(model, device, data_type, output_dir, batch_data, mod
                 images_list = [x, x_recon, no_zy_only, no_zx_only, no_zay_only, no_za_only, no_y_only, no_a_only]
         
         elif args.model == 'diva':
-            x_recon, z, qz, pzy, pzx, pza, _, y_hat, a_hat, zy, zx, _, za = model.forward(hospital_id, x, y)
+            x_recon, z, qz, pzy, pzx, pza, _, y_hat, a_hat, zy, zx, _, za = model.forward(y, x, hospital_id)
             
             if mode == 'only':
                 # Generate different reconstructions by zeroing out different latent variables
@@ -387,7 +396,10 @@ def generate_images_latent(model, device, data_type, output_dir, batch_data, mod
 
     # Save the figure
     save_dir = os.path.join(output_dir, f'latent_reconstructions_{data_type}_{mode}.png')
-    plt.suptitle(f"Visualizing Different Latent Space Contributions {args.model} ({mode})", y=1.02, fontsize=16)
+    plt.suptitle(f"Histopathology Latent Space Ablation Study - {args.model.upper()} Model ({mode} mode)\n"
+                 f"Each row shows reconstruction using different latent space combinations. "
+                 f"Compares individual latent space contributions to understand which factors they encode.",
+                 y=1.02, fontsize=13, fontweight='bold')
     plt.subplots_adjust(left=0.2)
     plt.savefig(save_dir, bbox_inches='tight', dpi=300)
     plt.close()
