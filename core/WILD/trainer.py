@@ -259,6 +259,11 @@ class WILDTrainer:
         import pandas as pd
         import matplotlib.pyplot as plt
 
+        # Create model-specific subdirectory for training history
+        model_name = getattr(self.model, 'name', self.model.__class__.__name__.lower())
+        history_dir = os.path.join(self.args.out, f'{model_name}_training')
+        os.makedirs(history_dir, exist_ok=True)
+
         # Prepare history dictionary
         history = {
             'epoch': self.epoch_history,
@@ -271,13 +276,13 @@ class WILDTrainer:
         }
 
         # Save as JSON
-        json_path = os.path.join(self.args.out, 'training_history.json')
+        json_path = os.path.join(history_dir, 'training_history.json')
         with open(json_path, 'w') as f:
             json.dump(history, f, indent=2)
         print(f"   ✅ Training history saved to {json_path}")
 
         # Save as CSV
-        csv_path = os.path.join(self.args.out, 'training_history.csv')
+        csv_path = os.path.join(history_dir, 'training_history.csv')
         df = pd.DataFrame(history)
         df.to_csv(csv_path, index=False)
         print(f"   ✅ Training history saved to {csv_path}")
@@ -334,8 +339,11 @@ class WILDTrainer:
 
         plt.tight_layout()
 
-        # Save the plot
-        plot_path = os.path.join(self.args.out, 'training_curves.png')
+        # Save the plot in model-specific subdirectory
+        model_name = getattr(self.model, 'name', self.model.__class__.__name__.lower())
+        history_dir = os.path.join(self.args.out, f'{model_name}_training')
+        os.makedirs(history_dir, exist_ok=True)
+        plot_path = os.path.join(history_dir, 'training_curves.png')
         plt.savefig(plot_path, dpi=150, bbox_inches='tight')
         plt.close()
         print(f"   ✅ Training curves saved to {plot_path}")
