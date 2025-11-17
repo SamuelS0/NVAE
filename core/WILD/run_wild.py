@@ -367,8 +367,8 @@ def get_args():
     parser.add_argument('--beta_2', type=float, default=1.0, help='Beta 2 for VAE loss')
     parser.add_argument('--beta_3', type=float, default=1.0, help='Beta 3 for VAE loss')
     parser.add_argument('--beta_4', type=float, default=1.0, help='Beta 4 for VAE loss')
-    parser.add_argument('--alpha_1', type=float, default=1000.0, help='y label loss multiplier')
-    parser.add_argument('--alpha_2', type=float, default=1000.0, help='domain label loss multiplier')
+    parser.add_argument('--alpha_1', type=float, default=150.0, help='y label loss multiplier')
+    parser.add_argument('--alpha_2', type=float, default=40.0, help='domain label loss multiplier')
     parser.add_argument('--recon_weight', type=float, default=1.0, help='Weight for reconstruction loss (VAE only)')
     parser.add_argument('--num_y_classes', type=int, default=2, help='Class dimension for DIVA_VAE')
     parser.add_argument('--num_r_classes', type=int, default=5, help='Domain dimension for DIVA_VAE')
@@ -399,14 +399,14 @@ def get_args():
     parser.add_argument('--patience', type=int, default=100, help='Patience for early stopping')
 
     # L1 sparsity penalty arguments
-    parser.add_argument('--l1_lambda_zy', type=float, default=0.0,
-                       help='L1 penalty weight for zy latent (default: 0.0)')
-    parser.add_argument('--l1_lambda_zx', type=float, default=0.01,
-                       help='L1 penalty weight for zx latent (default: 0.01)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=0.02,
-                       help='L1 penalty weight for zay latent (default: 0.02)')
-    parser.add_argument('--l1_lambda_za', type=float, default=0.0,
-                       help='L1 penalty weight for za latent (default: 0.0)')
+    parser.add_argument('--l1_lambda_zy', type=float, default=0.75,
+                       help='L1 penalty weight for zy latent (default: 0.75)')
+    parser.add_argument('--l1_lambda_zx', type=float, default=0.75,
+                       help='L1 penalty weight for zx latent (default: 0.75)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=6.0,
+                       help='L1 penalty weight for zay latent (default: 6.0)')
+    parser.add_argument('--l1_lambda_za', type=float, default=0.75,
+                       help='L1 penalty weight for za latent (default: 0.75)')
 
     # AugmentedDANN-specific parameters
     parser.add_argument('--lambda_reversal', type=float, default=1.0,
