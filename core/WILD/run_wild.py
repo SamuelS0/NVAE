@@ -403,8 +403,8 @@ def get_args():
                        help='L1 penalty weight for zy latent (default: 0.0)')
     parser.add_argument('--l1_lambda_zx', type=float, default=0.01,
                        help='L1 penalty weight for zx latent (default: 0.01)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=0.01,
-                       help='L1 penalty weight for zay latent (default: 0.01)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=0.02,
+                       help='L1 penalty weight for zay latent (default: 0.02)')
     parser.add_argument('--l1_lambda_za', type=float, default=0.0,
                        help='L1 penalty weight for za latent (default: 0.0)')
 

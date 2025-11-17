@@ -349,7 +349,7 @@ class VAE(NModule):
         
         return generated_images_full, y
 
-    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=5000):
+    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=1000):
         """
         Visualize the latent spaces using t-SNE with balanced sampling for WILD dataset
         Args:
@@ -425,7 +425,7 @@ class VAE(NModule):
             features_2d = tsne.fit_transform(features)
 
             # Plot colored by labels (tumor/normal) in first row
-            scatter1 = axes[0, i].scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='RdYlBu', alpha=0.6)
+            scatter1 = axes[0, i].scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='RdYlBu', alpha=0.4)
             space_interpretation = {
                 'zy': 'Label-Specific Space - should cluster by pathology',
                 'za': 'Domain-Specific Space - should cluster by hospital',
@@ -440,7 +440,7 @@ class VAE(NModule):
             axes[0, i].legend(*scatter1.legend_elements(), title="Pathology", loc='upper right', fontsize=8)
 
             # Plot colored by hospital in second row
-            scatter2 = axes[1, i].scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='tab10', alpha=0.6)
+            scatter2 = axes[1, i].scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='tab10', alpha=0.4)
             axes[1, i].set_title(f'{space_name.upper()}: Hospital Domain Distribution\n'
                                f'Clustering indicates hospital-specific imaging characteristics',
                                fontsize=10)
@@ -475,7 +475,7 @@ class VAE(NModule):
         """Check if the model is in DIVA mode"""
         return self.diva
 
-    def visualize_latent_spaces_diva(self, dataloader, device, save_path=None, max_samples=5000):
+    def visualize_latent_spaces_diva(self, dataloader, device, save_path=None, max_samples=1000):
         """Convenience method for DIVA-specific visualization"""
         if not self.diva:
             print("Warning: Model is not in DIVA mode. Using regular VAE visualization.")

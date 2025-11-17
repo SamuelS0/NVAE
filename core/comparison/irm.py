@@ -236,7 +236,7 @@ class IRM(nn.Module):
                      fontsize=13, fontweight='bold', y=1.02)
 
         # Plot task classes (digits)
-        scatter1 = ax1.scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='tab10', alpha=0.7)
+        scatter1 = ax1.scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='tab10', alpha=0.4)
         ax1.set_title('Task Classes (Digits)\n'
                      'Strong clustering indicates IRM successfully\n'
                      'learned task-relevant invariant features',
@@ -246,7 +246,7 @@ class IRM(nn.Module):
         ax1.legend(*scatter1.legend_elements(), title="Digits", fontsize=9)
 
         # Plot colors
-        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='Set1', alpha=0.7)
+        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='Set1', alpha=0.4)
         ax2.set_title('Image Colors (Spurious Feature)\n'
                      'Uniform distribution indicates color\n'
                      'is not captured (good for invariance)',
@@ -256,7 +256,7 @@ class IRM(nn.Module):
         ax2.legend(*scatter2.legend_elements(), title="Colors", fontsize=9)
 
         # Plot rotations (domains)
-        scatter3 = ax3.scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='Set2', alpha=0.7)
+        scatter3 = ax3.scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='Set2', alpha=0.4)
         ax3.set_title('Domains (Rotation Angles)\n'
                      'Uniform distribution indicates domain-invariant\n'
                      'features (primary goal of IRM)',

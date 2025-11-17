@@ -291,6 +291,44 @@ class DANNTrainer(WILDTrainer):
 
         return self.model
 
+    def save_training_history(self):
+        """Save training history to JSON and CSV files including DANN-specific metrics."""
+        import json
+        import pandas as pd
+
+        # Create model-specific subdirectory for training history
+        model_name = getattr(self.model, 'name', self.model.__class__.__name__.lower())
+        history_dir = os.path.join(self.args.out, f'{model_name}_training')
+        os.makedirs(history_dir, exist_ok=True)
+
+        # Prepare history dictionary - ONLY include metrics that DANN actually tracks
+        # (exclude VAE reconstruction metrics which DANN doesn't have)
+        history = {
+            'epoch': self.epoch_history,
+            'train_loss': self.train_loss_history,
+            'val_loss': self.val_loss_history,
+            'train_accuracy': self.train_acc_history,
+            'val_accuracy': self.val_acc_history,
+            'train_y_loss': self.train_y_loss_history,
+            'val_y_loss': self.val_y_loss_history,
+            'train_domain_loss': self.train_domain_loss_history,
+            'val_domain_loss': self.val_domain_loss_history,
+            'train_discriminator_acc': self.train_discriminator_acc_history,
+            'val_discriminator_acc': self.val_discriminator_acc_history
+        }
+
+        # Save as JSON
+        json_path = os.path.join(history_dir, 'training_history.json')
+        with open(json_path, 'w') as f:
+            json.dump(history, f, indent=2)
+        print(f"   ✅ Training history saved to {json_path}")
+
+        # Save as CSV
+        csv_path = os.path.join(history_dir, 'training_history.csv')
+        df = pd.DataFrame(history)
+        df.to_csv(csv_path, index=False)
+        print(f"   ✅ Training history saved to {csv_path}")
+
     def plot_training_curves(self):
         """Plot and save training/validation curves including DANN-specific metrics."""
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
