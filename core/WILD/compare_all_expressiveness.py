@@ -44,6 +44,16 @@ def create_comprehensive_comparison(results, save_dir):
                 'Component': 'za'
             })
 
+        if 'hospital_zy_alone' in model_results:
+            comparison_data.append({
+                'Model': model_name.upper(),
+                'Task': 'Hospital Classification',
+                'Method': 'Cross-prediction (zy)',
+                'Validation Accuracy': model_results['hospital_zy_alone']['val_acc'],
+                'Test Accuracy': model_results['hospital_zy_alone'].get('test_acc', model_results['hospital_zy_alone']['val_acc']),
+                'Component': 'zy'
+            })
+
         if 'hospital_za_zay' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
@@ -73,6 +83,16 @@ def create_comprehensive_comparison(results, save_dir):
                 'Validation Accuracy': model_results['tumor_zy_alone']['val_acc'],
                 'Test Accuracy': model_results['tumor_zy_alone'].get('test_acc', model_results['tumor_zy_alone']['val_acc']),
                 'Component': 'zy'
+            })
+
+        if 'tumor_za_alone' in model_results:
+            comparison_data.append({
+                'Model': model_name.upper(),
+                'Task': 'Tumor Classification',
+                'Method': 'Cross-prediction (za)',
+                'Validation Accuracy': model_results['tumor_za_alone']['val_acc'],
+                'Test Accuracy': model_results['tumor_za_alone'].get('test_acc', model_results['tumor_za_alone']['val_acc']),
+                'Component': 'za'
             })
 
         if 'tumor_zy_zay' in model_results:
@@ -312,6 +332,8 @@ def generate_summary_report(results, save_dir):
 
         if 'hospital_za_alone' in model_results:
             report_lines.append(f"    za alone:     {model_results['hospital_za_alone']['val_acc']:.4f}")
+        if 'hospital_zy_alone' in model_results:
+            report_lines.append(f"    zy alone:     {model_results['hospital_zy_alone']['val_acc']:.4f} [cross-prediction]")
         if 'hospital_za_zay' in model_results:
             report_lines.append(f"    za+zay:       {model_results['hospital_za_zay']['val_acc']:.4f}")
         if 'hospital_zay_alone' in model_results:
@@ -320,6 +342,8 @@ def generate_summary_report(results, save_dir):
         report_lines.append("  Tumor Classification:")
         if 'tumor_zy_alone' in model_results:
             report_lines.append(f"    zy alone:     {model_results['tumor_zy_alone']['val_acc']:.4f}")
+        if 'tumor_za_alone' in model_results:
+            report_lines.append(f"    za alone:     {model_results['tumor_za_alone']['val_acc']:.4f} [cross-prediction]")
         if 'tumor_zy_zay' in model_results:
             report_lines.append(f"    zy+zay:       {model_results['tumor_zy_zay']['val_acc']:.4f}")
         if 'tumor_zay_alone' in model_results:

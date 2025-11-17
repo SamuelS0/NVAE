@@ -501,10 +501,19 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
                 y_batch = y[keep_mask]
                 c_batch = c[keep_mask]
                 r_batch = r[keep_mask]
-                
-                # Get latent representations from Augmented DANN
-                zy, zd, zdy = model.extract_features(x_batch)
-                
+
+                # Get latent representations - detect model architecture
+                if hasattr(model, 'extract_features'):
+                    # AugmentedDANN with partitioned latent spaces (zy, zd, zdy)
+                    zy, zd, zdy = model.extract_features(x_batch)
+                else:
+                    # Basic DANN with single unified feature space
+                    # Use get_features() method instead
+                    features = model.get_features(x_batch)
+                    # Return same features for API compatibility
+                    # (trainers should use model's own visualization method)
+                    zy, zd, zdy = features, features, features
+
                 # Store the actual latent spaces
                 zy_list.append(zy.cpu())
                 zd_list.append(zd.cpu())
@@ -997,7 +1006,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     for col_idx, (space_2d, title) in enumerate(tsne_results):
         # First row: color by digit/label
         scatter = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
-                                         c=y_labels, cmap='tab10', alpha=0.7)
+                                         c=y_labels, cmap='tab10', alpha=0.4)
         label_type = "Class Label" if type == "wild" else "Digit"
         axes[0, col_idx].set_title(f'{title}\nColored by {label_type} (Task Variable)\n'
                                    f'Strong clustering indicates task-relevant information is encoded',
@@ -1023,13 +1032,13 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
                 # Create color array for scatter plot
                 point_colors = [crmnist_color_map[int(val)] for val in domain_values]
                 scatter = axes[row_idx, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
-                                                       c=point_colors, alpha=0.7)
+                                                       c=point_colors, alpha=0.4)
             else:
                 # Use standard colormap for other domains
                 scatter = axes[row_idx, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
                                                        c=domain_values, cmap='tab10',
                                                        vmin=0, vmax=len(unique_hospitals)-1 if type == "wild" else len(labels_dict[domain_name])-1,
-                                                       alpha=0.7)
+                                                       alpha=0.4)
 
             domain_display = domain_name.capitalize()
             domain_interpretation = ("(Domain Variable - should be invariant in domain-specific spaces)"

@@ -205,13 +205,13 @@ if __name__ == "__main__":
 
     # L1 sparsity penalty arguments
     parser.add_argument('--l1_lambda_zy', type=float, default=0.0,
-                       help='L1 penalty weight for zy latent (default: 0.0 = disabled)')
-    parser.add_argument('--l1_lambda_zx', type=float, default=0.0,
-                       help='L1 penalty weight for zx latent (default: 0.0 = disabled)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=0.0,
-                       help='L1 penalty weight for zay latent (default: 0.0 = disabled)')
+                       help='L1 penalty weight for zy latent (default: 0.0)')
+    parser.add_argument('--l1_lambda_zx', type=float, default=0.01,
+                       help='L1 penalty weight for zx latent (default: 0.01)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=0.01,
+                       help='L1 penalty weight for zay latent (default: 0.01)')
     parser.add_argument('--l1_lambda_za', type=float, default=0.0,
-                       help='L1 penalty weight for za latent (default: 0.0 = disabled)')
+                       help='L1 penalty weight for za latent (default: 0.0)')
 
     # Model selection arguments
     parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],

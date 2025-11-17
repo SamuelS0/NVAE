@@ -208,19 +208,26 @@ def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader,
     )
     results['domain_za_alone'] = {'train_acc': za_train_acc, 'val_acc': za_val_acc, 'test_acc': za_test_acc}
     
+    # 2. Domain classification using zy alone (cross-prediction test)
+    print("   Training zy → domain classifier...")
+    zy_d_train_acc, zy_d_val_acc, zy_d_test_acc, _ = train_pytorch_classifier(
+        X_train=train_zy, y_train=train_a, X_val=val_zy, y_val=val_a, X_test=test_zy, y_test=test_a
+    )
+    results['domain_zy_alone'] = {'train_acc': zy_d_train_acc, 'val_acc': zy_d_val_acc, 'test_acc': zy_d_test_acc}
+
     if has_zay:
-        # 2. Domain classification using za+zay
+        # 3. Domain classification using za+zay
         print("   Training za+zay → domain classifier...")
         train_za_zay = np.concatenate([train_za, train_zay], axis=1)
         val_za_zay = np.concatenate([val_za, val_zay], axis=1)
         test_za_zay = np.concatenate([test_za, test_zay], axis=1)
-        
+
         za_zay_train_acc, za_zay_val_acc, za_zay_test_acc, _ = train_pytorch_classifier(
             X_train=train_za_zay, y_train=train_a, X_val=val_za_zay, y_val=val_a, X_test=test_za_zay, y_test=test_a
         )
         results['domain_za_zay'] = {'train_acc': za_zay_train_acc, 'val_acc': za_zay_val_acc, 'test_acc': za_zay_test_acc}
-        
-        # 3. Domain classification using zay alone (for comparison)
+
+        # 4. Domain classification using zay alone (for comparison)
         print("   Training zay → domain classifier...")
         zay_train_acc, zay_val_acc, zay_test_acc, _ = train_pytorch_classifier(
             X_train=train_zay, y_train=train_a, X_val=val_zay, y_val=val_a, X_test=test_zay, y_test=test_a
@@ -238,20 +245,27 @@ def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader,
         X_train=train_zy, y_train=train_y, X_val=val_zy, y_val=val_y, X_test=test_zy, y_test=test_y
     )
     results['label_zy_alone'] = {'train_acc': zy_train_acc, 'val_acc': zy_val_acc, 'test_acc': zy_test_acc}
-    
+
+    # 2. Label classification using za alone (cross-prediction test)
+    print("   Training za → label classifier...")
+    za_y_train_acc, za_y_val_acc, za_y_test_acc, _ = train_pytorch_classifier(
+        X_train=train_za, y_train=train_y, X_val=val_za, y_val=val_y, X_test=test_za, y_test=test_y
+    )
+    results['label_za_alone'] = {'train_acc': za_y_train_acc, 'val_acc': za_y_val_acc, 'test_acc': za_y_test_acc}
+
     if has_zay:
-        # 2. Label classification using zy+zay
+        # 3. Label classification using zy+zay
         print("   Training zy+zay → label classifier...")
         train_zy_zay = np.concatenate([train_zy, train_zay], axis=1)
         val_zy_zay = np.concatenate([val_zy, val_zay], axis=1)
         test_zy_zay = np.concatenate([test_zy, test_zay], axis=1)
-        
+
         zy_zay_train_acc, zy_zay_val_acc, zy_zay_test_acc, _ = train_pytorch_classifier(
             X_train=train_zy_zay, y_train=train_y, X_val=val_zy_zay, y_val=val_y, X_test=test_zy_zay, y_test=test_y
         )
         results['label_zy_zay'] = {'train_acc': zy_zay_train_acc, 'val_acc': zy_zay_val_acc, 'test_acc': zy_zay_test_acc}
-        
-        # 3. Label classification using zay alone (for comparison)
+
+        # 4. Label classification using zay alone (for comparison)
         print("   Training zay → label classifier...")
         zay_y_train_acc, zay_y_val_acc, zay_y_test_acc, _ = train_pytorch_classifier(
             X_train=train_zay, y_train=train_y, X_val=val_zay, y_val=val_y, X_test=test_zay, y_test=test_y
@@ -266,10 +280,11 @@ def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader,
     
     print("\n🎯 DOMAIN CLASSIFICATION:")
     print(f"   za alone:      Train={results['domain_za_alone']['train_acc']:.4f}, Val={results['domain_za_alone']['val_acc']:.4f}, Test={results['domain_za_alone']['test_acc']:.4f}")
+    print(f"   zy alone:      Train={results['domain_zy_alone']['train_acc']:.4f}, Val={results['domain_zy_alone']['val_acc']:.4f}, Test={results['domain_zy_alone']['test_acc']:.4f} [cross-prediction]")
     if has_zay:
         print(f"   za+zay:        Train={results['domain_za_zay']['train_acc']:.4f}, Val={results['domain_za_zay']['val_acc']:.4f}, Test={results['domain_za_zay']['test_acc']:.4f}")
         print(f"   zay alone:     Train={results['domain_zay_alone']['train_acc']:.4f}, Val={results['domain_zay_alone']['val_acc']:.4f}, Test={results['domain_zay_alone']['test_acc']:.4f}")
-        
+
         domain_improvement_val = results['domain_za_zay']['val_acc'] - results['domain_za_alone']['val_acc']
         domain_improvement_test = results['domain_za_zay']['test_acc'] - results['domain_za_alone']['test_acc']
         domain_improvement_val_pct = (domain_improvement_val / results['domain_za_alone']['val_acc']) * 100
@@ -279,10 +294,11 @@ def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader,
     
     print("\n🏷️  LABEL CLASSIFICATION:")
     print(f"   zy alone:      Train={results['label_zy_alone']['train_acc']:.4f}, Val={results['label_zy_alone']['val_acc']:.4f}, Test={results['label_zy_alone']['test_acc']:.4f}")
+    print(f"   za alone:      Train={results['label_za_alone']['train_acc']:.4f}, Val={results['label_za_alone']['val_acc']:.4f}, Test={results['label_za_alone']['test_acc']:.4f} [cross-prediction]")
     if has_zay:
         print(f"   zy+zay:        Train={results['label_zy_zay']['train_acc']:.4f}, Val={results['label_zy_zay']['val_acc']:.4f}, Test={results['label_zy_zay']['test_acc']:.4f}")
         print(f"   zay alone:     Train={results['label_zay_alone']['train_acc']:.4f}, Val={results['label_zay_alone']['val_acc']:.4f}, Test={results['label_zay_alone']['test_acc']:.4f}")
-        
+
         label_improvement_val = results['label_zy_zay']['val_acc'] - results['label_zy_alone']['val_acc']
         label_improvement_test = results['label_zy_zay']['test_acc'] - results['label_zy_alone']['test_acc']
         label_improvement_val_pct = (label_improvement_val / results['label_zy_alone']['val_acc']) * 100
@@ -293,25 +309,31 @@ def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader,
     # =============================================================================
     # VISUALIZE RESULTS
     # =============================================================================
-    if has_zay:
-        create_expressiveness_visualization(results, save_dir)
-    
+    # Always create visualization (handles both NVAE and DIVA models)
+    create_expressiveness_visualization(results, save_dir, has_zay)
+
     # Save results to JSON
     import json
     results_path = os.path.join(save_dir, 'latent_expressiveness_results.json')
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
-    
+
     print(f"\n💾 Results saved to: {results_path}")
-    
+
     return results
 
-def create_expressiveness_visualization(results, save_dir):
-    """Create visualization comparing the expressiveness of different latent combinations."""
-    
+def create_expressiveness_visualization(results, save_dir, has_zay):
+    """Create visualization comparing the expressiveness of different latent combinations.
+
+    Args:
+        results: Dictionary containing classification results
+        save_dir: Directory to save visualization
+        has_zay: Boolean indicating if model has zay component (NVAE=True, DIVA=False)
+    """
+
     # Prepare data for visualization - include both validation and test
     comparison_data = []
-    
+
     # Domain classification comparisons
     for split, split_name in [('val_acc', 'Validation'), ('test_acc', 'Test')]:
         comparison_data.append({
@@ -322,42 +344,62 @@ def create_expressiveness_visualization(results, save_dir):
             'Split': split_name
         })
         comparison_data.append({
-            'Task': 'Domain Classification', 
-            'Method': 'za+zay',
-            'Accuracy': results['domain_za_zay'][split],
-            'Type': 'Combined',
-            'Split': split_name
-        })
-        comparison_data.append({
             'Task': 'Domain Classification',
-            'Method': 'zay alone',
-            'Accuracy': results['domain_zay_alone'][split],
-            'Type': 'Individual',
+            'Method': 'zy alone',
+            'Accuracy': results['domain_zy_alone'][split],
+            'Type': 'Cross-prediction',
             'Split': split_name
         })
-        
+
+        # Only add zay-related metrics if model has zay component
+        if has_zay:
+            comparison_data.append({
+                'Task': 'Domain Classification',
+                'Method': 'za+zay',
+                'Accuracy': results['domain_za_zay'][split],
+                'Type': 'Combined',
+                'Split': split_name
+            })
+            comparison_data.append({
+                'Task': 'Domain Classification',
+                'Method': 'zay alone',
+                'Accuracy': results['domain_zay_alone'][split],
+                'Type': 'Individual',
+                'Split': split_name
+            })
+
         # Label classification comparisons
         comparison_data.append({
             'Task': 'Label Classification',
-            'Method': 'zy alone', 
+            'Method': 'zy alone',
             'Accuracy': results['label_zy_alone'][split],
             'Type': 'Individual',
             'Split': split_name
         })
         comparison_data.append({
             'Task': 'Label Classification',
-            'Method': 'zy+zay',
-            'Accuracy': results['label_zy_zay'][split],
-            'Type': 'Combined',
+            'Method': 'za alone',
+            'Accuracy': results['label_za_alone'][split],
+            'Type': 'Cross-prediction',
             'Split': split_name
         })
-        comparison_data.append({
-            'Task': 'Label Classification',
-            'Method': 'zay alone',
-            'Accuracy': results['label_zay_alone'][split],
-            'Type': 'Individual',
-            'Split': split_name
-        })
+
+        # Only add zay-related metrics if model has zay component
+        if has_zay:
+            comparison_data.append({
+                'Task': 'Label Classification',
+                'Method': 'zy+zay',
+                'Accuracy': results['label_zy_zay'][split],
+                'Type': 'Combined',
+                'Split': split_name
+            })
+            comparison_data.append({
+                'Task': 'Label Classification',
+                'Method': 'zay alone',
+                'Accuracy': results['label_zay_alone'][split],
+                'Type': 'Individual',
+                'Split': split_name
+            })
     
     df = pd.DataFrame(comparison_data)
     
@@ -368,94 +410,106 @@ def create_expressiveness_visualization(results, save_dir):
     max_acc = df['Accuracy'].max()
     y_max = min(1.0, max_acc + 0.05)  # Add 5% padding, but cap at 1.0
 
+    # Choose colors based on whether model has zay component
+    # NVAE (has_zay=True): 4 bars - orange, red, green, blue
+    # DIVA (has_zay=False): 2 bars - orange, red
+    bar_colors = ['#ff7f0e', '#d62728', '#2ca02c', '#1f77b4'] if has_zay else ['#ff7f0e', '#d62728']
+
     # Domain classification - Validation
     domain_val_data = df[(df['Task'] == 'Domain Classification') & (df['Split'] == 'Validation')]
-    bars1 = axes[0,0].bar(domain_val_data['Method'], domain_val_data['Accuracy'],
-                         color=['#ff7f0e', '#2ca02c', '#1f77b4'])
+    bars1 = axes[0,0].bar(domain_val_data['Method'], domain_val_data['Accuracy'], color=bar_colors)
     axes[0,0].set_title('Domain Classification - Validation', fontsize=14, fontweight='bold')
     axes[0,0].set_ylabel('Validation Accuracy', fontsize=12)
     axes[0,0].set_ylim(0, y_max)
-    
+    axes[0,0].tick_params(axis='x', rotation=15)
+
     # Add value labels on bars
     for bar in bars1:
         height = bar.get_height()
         axes[0,0].text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                      f'{height:.3f}', ha='center', va='bottom', fontweight='bold')
-    
+                      f'{height:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=9)
+
     # Domain classification - Test
     domain_test_data = df[(df['Task'] == 'Domain Classification') & (df['Split'] == 'Test')]
-    bars2 = axes[0,1].bar(domain_test_data['Method'], domain_test_data['Accuracy'],
-                         color=['#ff7f0e', '#2ca02c', '#1f77b4'])
+    bars2 = axes[0,1].bar(domain_test_data['Method'], domain_test_data['Accuracy'], color=bar_colors)
     axes[0,1].set_title('Domain Classification - Test', fontsize=14, fontweight='bold')
     axes[0,1].set_ylabel('Test Accuracy', fontsize=12)
     axes[0,1].set_ylim(0, y_max)
-    
+    axes[0,1].tick_params(axis='x', rotation=15)
+
     # Add value labels on bars
     for bar in bars2:
         height = bar.get_height()
         axes[0,1].text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                      f'{height:.3f}', ha='center', va='bottom', fontweight='bold')
+                      f'{height:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=9)
     
     # Label classification - Validation
     label_val_data = df[(df['Task'] == 'Label Classification') & (df['Split'] == 'Validation')]
-    bars3 = axes[1,0].bar(label_val_data['Method'], label_val_data['Accuracy'],
-                         color=['#ff7f0e', '#2ca02c', '#1f77b4'])
+    bars3 = axes[1,0].bar(label_val_data['Method'], label_val_data['Accuracy'], color=bar_colors)
     axes[1,0].set_title('Label Classification - Validation', fontsize=14, fontweight='bold')
     axes[1,0].set_ylabel('Validation Accuracy', fontsize=12)
     axes[1,0].set_ylim(0, y_max)
-    
+    axes[1,0].tick_params(axis='x', rotation=15)
+
     # Add value labels on bars
     for bar in bars3:
         height = bar.get_height()
         axes[1,0].text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                      f'{height:.3f}', ha='center', va='bottom', fontweight='bold')
-    
+                      f'{height:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=9)
+
     # Label classification - Test
     label_test_data = df[(df['Task'] == 'Label Classification') & (df['Split'] == 'Test')]
-    bars4 = axes[1,1].bar(label_test_data['Method'], label_test_data['Accuracy'],
-                         color=['#ff7f0e', '#2ca02c', '#1f77b4'])
+    bars4 = axes[1,1].bar(label_test_data['Method'], label_test_data['Accuracy'], color=bar_colors)
     axes[1,1].set_title('Label Classification - Test', fontsize=14, fontweight='bold')
     axes[1,1].set_ylabel('Test Accuracy', fontsize=12)
     axes[1,1].set_ylim(0, y_max)
-    
+    axes[1,1].tick_params(axis='x', rotation=15)
+
     # Add value labels on bars
     for bar in bars4:
         height = bar.get_height()
         axes[1,1].text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                      f'{height:.3f}', ha='center', va='bottom', fontweight='bold')
+                      f'{height:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=9)
     
-    # Calculate and display improvements
-    domain_improvement_val = results['domain_za_zay']['val_acc'] - results['domain_za_alone']['val_acc']
-    domain_improvement_test = results['domain_za_zay']['test_acc'] - results['domain_za_alone']['test_acc']
-    label_improvement_val = results['label_zy_zay']['val_acc'] - results['label_zy_alone']['val_acc']
-    label_improvement_test = results['label_zy_zay']['test_acc'] - results['label_zy_alone']['test_acc']
+    # Only calculate and display improvements for models with zay component
+    # (DIVA models don't have zay, so no improvement to show)
+    if has_zay:
+        # Calculate and display improvements
+        domain_improvement_val = results['domain_za_zay']['val_acc'] - results['domain_za_alone']['val_acc']
+        domain_improvement_test = results['domain_za_zay']['test_acc'] - results['domain_za_alone']['test_acc']
+        label_improvement_val = results['label_zy_zay']['val_acc'] - results['label_zy_alone']['val_acc']
+        label_improvement_test = results['label_zy_zay']['test_acc'] - results['label_zy_alone']['test_acc']
 
-    # Calculate percentage improvements (relative to baseline)
-    domain_improvement_val_pct = (domain_improvement_val / results['domain_za_alone']['val_acc']) * 100
-    domain_improvement_test_pct = (domain_improvement_test / results['domain_za_alone']['test_acc']) * 100
-    label_improvement_val_pct = (label_improvement_val / results['label_zy_alone']['val_acc']) * 100
-    label_improvement_test_pct = (label_improvement_test / results['label_zy_alone']['test_acc']) * 100
+        # Calculate percentage improvements (relative to baseline)
+        domain_improvement_val_pct = (domain_improvement_val / results['domain_za_alone']['val_acc']) * 100
+        domain_improvement_test_pct = (domain_improvement_test / results['domain_za_alone']['test_acc']) * 100
+        label_improvement_val_pct = (label_improvement_val / results['label_zy_alone']['val_acc']) * 100
+        label_improvement_test_pct = (label_improvement_test / results['label_zy_alone']['test_acc']) * 100
 
-    # Add improvement annotations
-    axes[0,0].annotate(f'Val Improvement:\n+{domain_improvement_val:.3f} ({domain_improvement_val_pct:.1f}%)',
-                      xy=(1, results['domain_za_zay']['val_acc']), xytext=(1, 0.9),
-                      arrowprops=dict(arrowstyle='->', color='red', lw=2),
-                      fontsize=9, fontweight='bold', color='red', ha='center')
+        # Add improvement annotations (bar index 2 is the combined za+zay or zy+zay)
+        axes[0,0].annotate(f'Improvement:\n+{domain_improvement_val:.3f} ({domain_improvement_val_pct:.1f}%)',
+                          xy=(2, results['domain_za_zay']['val_acc']), xytext=(2.3, y_max * 0.85),
+                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
+                          fontsize=8, fontweight='bold', color='darkred', ha='center',
+                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
 
-    axes[0,1].annotate(f'Test Improvement:\n+{domain_improvement_test:.3f} ({domain_improvement_test_pct:.1f}%)',
-                      xy=(1, results['domain_za_zay']['test_acc']), xytext=(1, 0.9),
-                      arrowprops=dict(arrowstyle='->', color='red', lw=2),
-                      fontsize=9, fontweight='bold', color='red', ha='center')
+        axes[0,1].annotate(f'Improvement:\n+{domain_improvement_test:.3f} ({domain_improvement_test_pct:.1f}%)',
+                          xy=(2, results['domain_za_zay']['test_acc']), xytext=(2.3, y_max * 0.85),
+                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
+                          fontsize=8, fontweight='bold', color='darkred', ha='center',
+                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
 
-    axes[1,0].annotate(f'Val Improvement:\n+{label_improvement_val:.3f} ({label_improvement_val_pct:.1f}%)',
-                      xy=(1, results['label_zy_zay']['val_acc']), xytext=(1, 0.9),
-                      arrowprops=dict(arrowstyle='->', color='red', lw=2),
-                      fontsize=9, fontweight='bold', color='red', ha='center')
+        axes[1,0].annotate(f'Improvement:\n+{label_improvement_val:.3f} ({label_improvement_val_pct:.1f}%)',
+                          xy=(2, results['label_zy_zay']['val_acc']), xytext=(2.3, y_max * 0.85),
+                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
+                          fontsize=8, fontweight='bold', color='darkred', ha='center',
+                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
 
-    axes[1,1].annotate(f'Test Improvement:\n+{label_improvement_test:.3f} ({label_improvement_test_pct:.1f}%)',
-                      xy=(1, results['label_zy_zay']['test_acc']), xytext=(1, 0.9),
-                      arrowprops=dict(arrowstyle='->', color='red', lw=2),
-                      fontsize=9, fontweight='bold', color='red', ha='center')
+        axes[1,1].annotate(f'Improvement:\n+{label_improvement_test:.3f} ({label_improvement_test_pct:.1f}%)',
+                          xy=(2, results['label_zy_zay']['test_acc']), xytext=(2.3, y_max * 0.85),
+                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
+                          fontsize=8, fontweight='bold', color='darkred', ha='center',
+                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
     
     plt.tight_layout()
     

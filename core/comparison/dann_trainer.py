@@ -27,7 +27,7 @@ class DANNTrainer(WILDTrainer):
         Visualize latent spaces for the current epoch.
 
         Overrides WILDTrainer.visualize_latent_epoch() to use correct dataset type
-        based on self.dataset (which can be 'crmnist' or 'wild').
+        and routing based on model architecture (AugmentedDANN vs basic DANN).
         """
         try:
             dataset_name = self.dataset  # Use dataset from args
@@ -35,19 +35,36 @@ class DANNTrainer(WILDTrainer):
                 self.latent_viz_dir,
                 f'{dataset_name}_latent_epoch_{epoch+1:03d}.png'
             )
-            visualize_latent_spaces(
-                model=self.model,
-                dataloader=val_loader,
-                device=self.device,
-                type=self.dataset,  # Use self.dataset instead of hardcoded 'wild'
-                save_path=latent_path,
-                max_samples=1000,
-                epoch=epoch+1,
-                total_epochs=self.args.epochs
-            )
+
+            # Detect model architecture and route to appropriate visualization
+            if hasattr(self.model, 'extract_features'):
+                # AugmentedDANN with partitioned latent spaces
+                # Use unified visualize_latent_spaces() for multi-space visualization
+                visualize_latent_spaces(
+                    model=self.model,
+                    dataloader=val_loader,
+                    device=self.device,
+                    type='dann_augmented',  # Specify augmented variant
+                    save_path=latent_path,
+                    max_samples=1000,
+                    epoch=epoch+1,
+                    total_epochs=self.args.epochs
+                )
+            else:
+                # Basic DANN with single unified feature space
+                # Use model's own visualization method for honest single-space view
+                self.model.visualize_latent_space(
+                    dataloader=val_loader,
+                    device=self.device,
+                    save_path=latent_path,
+                    max_samples=1000
+                )
+
             print(f"  Latent visualization saved to {latent_path}")
         except Exception as e:
             print(f"  Warning: Could not generate latent visualization for epoch {epoch+1}: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _train_epoch(self, train_loader, epoch, current_beta):
         self.model.train()

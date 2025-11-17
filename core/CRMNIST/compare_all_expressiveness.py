@@ -43,7 +43,17 @@ def create_comprehensive_comparison(results, save_dir):
                 'Test Accuracy': model_results['domain_za_alone'].get('test_acc', model_results['domain_za_alone']['val_acc']),
                 'Component': 'za'
             })
-        
+
+        if 'domain_zy_alone' in model_results:
+            comparison_data.append({
+                'Model': model_name.upper(),
+                'Task': 'Domain Classification',
+                'Method': 'Cross-prediction (zy)',
+                'Validation Accuracy': model_results['domain_zy_alone']['val_acc'],
+                'Test Accuracy': model_results['domain_zy_alone'].get('test_acc', model_results['domain_zy_alone']['val_acc']),
+                'Component': 'zy'
+            })
+
         if 'domain_za_zay' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
@@ -53,7 +63,7 @@ def create_comprehensive_comparison(results, save_dir):
                 'Test Accuracy': model_results['domain_za_zay'].get('test_acc', model_results['domain_za_zay']['val_acc']),
                 'Component': 'za+zay'
             })
-        
+
         if 'domain_zay_alone' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
@@ -74,7 +84,17 @@ def create_comprehensive_comparison(results, save_dir):
                 'Test Accuracy': model_results['label_zy_alone'].get('test_acc', model_results['label_zy_alone']['val_acc']),
                 'Component': 'zy'
             })
-        
+
+        if 'label_za_alone' in model_results:
+            comparison_data.append({
+                'Model': model_name.upper(),
+                'Task': 'Label Classification',
+                'Method': 'Cross-prediction (za)',
+                'Validation Accuracy': model_results['label_za_alone']['val_acc'],
+                'Test Accuracy': model_results['label_za_alone'].get('test_acc', model_results['label_za_alone']['val_acc']),
+                'Component': 'za'
+            })
+
         if 'label_zy_zay' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
@@ -84,7 +104,7 @@ def create_comprehensive_comparison(results, save_dir):
                 'Test Accuracy': model_results['label_zy_zay'].get('test_acc', model_results['label_zy_zay']['val_acc']),
                 'Component': 'zy+zay'
             })
-        
+
         if 'label_zay_alone' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
@@ -309,17 +329,21 @@ def generate_summary_report(results, save_dir):
     for model_name, model_results in results.items():
         report_lines.append(f"\n{model_name.upper()} MODEL:")
         report_lines.append("  Domain Classification:")
-        
+
         if 'domain_za_alone' in model_results:
             report_lines.append(f"    za alone:     {model_results['domain_za_alone']['val_acc']:.4f}")
+        if 'domain_zy_alone' in model_results:
+            report_lines.append(f"    zy alone:     {model_results['domain_zy_alone']['val_acc']:.4f} [cross-prediction]")
         if 'domain_za_zay' in model_results:
             report_lines.append(f"    za+zay:       {model_results['domain_za_zay']['val_acc']:.4f}")
         if 'domain_zay_alone' in model_results:
             report_lines.append(f"    zay alone:    {model_results['domain_zay_alone']['val_acc']:.4f}")
-        
+
         report_lines.append("  Label Classification:")
         if 'label_zy_alone' in model_results:
             report_lines.append(f"    zy alone:     {model_results['label_zy_alone']['val_acc']:.4f}")
+        if 'label_za_alone' in model_results:
+            report_lines.append(f"    za alone:     {model_results['label_za_alone']['val_acc']:.4f} [cross-prediction]")
         if 'label_zy_zay' in model_results:
             report_lines.append(f"    zy+zay:       {model_results['label_zy_zay']['val_acc']:.4f}")
         if 'label_zay_alone' in model_results:
