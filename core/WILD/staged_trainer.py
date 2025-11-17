@@ -96,7 +96,24 @@ class StagedWILDTrainer(WILDTrainer):
     
     def train(self, train_loader, val_loader, num_epochs: int):
         """Main training loop with staged approach."""
-        
+
+        # Validate dataloaders are not empty before training
+        if len(train_loader) == 0:
+            raise ValueError(
+                "❌ Train loader is empty (0 batches). This likely means:\n"
+                "   - OOD filtering removed all samples from training set\n"
+                "   - Batch size is larger than the dataset\n"
+                f"   - Check your data filtering settings and batch_size={self.args.batch_size}"
+            )
+
+        if len(val_loader) == 0:
+            raise ValueError(
+                "❌ Validation loader is empty (0 batches). This likely means:\n"
+                "   - OOD filtering removed all samples from validation set\n"
+                "   - Batch size is larger than the dataset\n"
+                f"   - Check your data filtering settings and batch_size={self.args.batch_size}"
+            )
+
         for epoch in range(num_epochs):
             # Determine current stage
             if epoch < self.stage1_epochs:

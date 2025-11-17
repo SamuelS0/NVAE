@@ -88,11 +88,20 @@ def extract_latent_representations(model, dataloader, device, num_classes=2):
             all_y.append(y.cpu())
             all_a.append(a.cpu())
 
+    # Validate we processed at least one batch
+    if len(all_zy) == 0:
+        raise ValueError(
+            "❌ No batches were processed from dataloader. This likely means:\n"
+            "   - Dataloader is empty (0 samples)\n"
+            "   - All data was filtered out during preprocessing\n"
+            "   - Check your data loading and filtering settings"
+        )
+
     # Concatenate all batches
     latent_data = {
         'zy': torch.cat(all_zy, dim=0),
         'zx': torch.cat(all_zx, dim=0),
-        'zay': torch.cat(all_zay, dim=0) if all_zay[0].shape[1] > 0 else None,
+        'zay': torch.cat(all_zay, dim=0) if len(all_zay) > 0 and all_zay[0].shape[1] > 0 else None,
         'za': torch.cat(all_za, dim=0),
         'y': torch.cat(all_y, dim=0),
         'a': torch.cat(all_a, dim=0)
@@ -501,10 +510,26 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
         tumor_improvement_test = results['tumor_zy_zay']['test_acc'] - results['tumor_zy_alone']['test_acc']
 
         # Calculate percentage improvements (relative to baseline)
-        hospital_improvement_val_pct = (hospital_improvement_val / results['hospital_za_alone']['val_acc']) * 100
-        hospital_improvement_test_pct = (hospital_improvement_test / results['hospital_za_alone']['test_acc']) * 100
-        tumor_improvement_val_pct = (tumor_improvement_val / results['tumor_zy_alone']['val_acc']) * 100
-        tumor_improvement_test_pct = (tumor_improvement_test / results['tumor_zy_alone']['test_acc']) * 100
+        # Handle division by zero for percentage calculations
+        if results['hospital_za_alone']['val_acc'] > 0:
+            hospital_improvement_val_pct = (hospital_improvement_val / results['hospital_za_alone']['val_acc']) * 100
+        else:
+            hospital_improvement_val_pct = 0
+
+        if results['hospital_za_alone']['test_acc'] > 0:
+            hospital_improvement_test_pct = (hospital_improvement_test / results['hospital_za_alone']['test_acc']) * 100
+        else:
+            hospital_improvement_test_pct = 0
+
+        if results['tumor_zy_alone']['val_acc'] > 0:
+            tumor_improvement_val_pct = (tumor_improvement_val / results['tumor_zy_alone']['val_acc']) * 100
+        else:
+            tumor_improvement_val_pct = 0
+
+        if results['tumor_zy_alone']['test_acc'] > 0:
+            tumor_improvement_test_pct = (tumor_improvement_test / results['tumor_zy_alone']['test_acc']) * 100
+        else:
+            tumor_improvement_test_pct = 0
 
         # Add improvement annotations (bar index 2 is the combined za+zay or zy+zay)
         axes[0,0].annotate(f'Improvement:\n+{hospital_improvement_val:.3f} ({hospital_improvement_val_pct:.1f}%)',

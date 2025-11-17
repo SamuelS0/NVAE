@@ -76,12 +76,14 @@ class VAE(NModule):
         self.a_dim = a_dim
 
         if self.diva:
-            assert zay_dim % 3 == 0, "zay_dim must be divisible by 3"
-            extra_dim = zay_dim // 3
-            
-            self.zy_dim = zy_dim + extra_dim
-            self.zx_dim = zx_dim + extra_dim
-            self.za_dim = za_dim + extra_dim
+            # Distribute zay_dim across zy, zx, za (with remainder distribution)
+            base_dim = zay_dim // 3
+            remainder = zay_dim % 3
+
+            # Distribute remainder: zy gets first extra, zx gets second, za gets third
+            self.zy_dim = zy_dim + base_dim + (1 if remainder >= 1 else 0)
+            self.zx_dim = zx_dim + base_dim + (1 if remainder >= 2 else 0)
+            self.za_dim = za_dim + base_dim + (1 if remainder == 3 else 0)
             self.zay_dim = 0
             self.z_y_combined_dim = self.zy_dim
             self.z_a_combined_dim = self.za_dim

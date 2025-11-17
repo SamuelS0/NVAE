@@ -399,14 +399,14 @@ def get_args():
     parser.add_argument('--patience', type=int, default=100, help='Patience for early stopping')
 
     # L1 sparsity penalty arguments
-    parser.add_argument('--l1_lambda_zy', type=float, default=0.75,
-                       help='L1 penalty weight for zy latent (default: 0.75)')
-    parser.add_argument('--l1_lambda_zx', type=float, default=0.75,
-                       help='L1 penalty weight for zx latent (default: 0.75)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=6.0,
-                       help='L1 penalty weight for zay latent (default: 6.0)')
-    parser.add_argument('--l1_lambda_za', type=float, default=0.75,
-                       help='L1 penalty weight for za latent (default: 0.75)')
+    parser.add_argument('--l1_lambda_zy', type=float, default=10.0,
+                       help='L1 penalty weight for zy latent (default: 10.0)')
+    parser.add_argument('--l1_lambda_zx', type=float, default=10.0,
+                       help='L1 penalty weight for zx latent (default: 10.0)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=100.0,
+                       help='L1 penalty weight for zay latent (default: 100.0)')
+    parser.add_argument('--l1_lambda_za', type=float, default=10.0,
+                       help='L1 penalty weight for za latent (default: 10.0)')
 
     # AugmentedDANN-specific parameters
     parser.add_argument('--lambda_reversal', type=float, default=1.0,

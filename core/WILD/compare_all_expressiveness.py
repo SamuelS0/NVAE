@@ -157,22 +157,32 @@ def create_comprehensive_comparison(results, save_dir):
         if 'hospital_za_alone' in model_results and 'hospital_za_zay' in model_results:
             hospital_improvement = model_results['hospital_za_zay']['val_acc'] - model_results['hospital_za_alone']['val_acc']
             hospital_baseline = model_results['hospital_za_alone']['val_acc']
+            # Handle division by zero for percentage calculation
+            if hospital_baseline > 0:
+                improvement_percent = (hospital_improvement / hospital_baseline) * 100
+            else:
+                improvement_percent = 0
             improvements.append({
                 'Model': model_name.upper(),
                 'Task': 'Hospital',
                 'Improvement': hospital_improvement,
-                'Improvement_Percent': (hospital_improvement / hospital_baseline) * 100
+                'Improvement_Percent': improvement_percent
             })
 
         # Tumor improvement
         if 'tumor_zy_alone' in model_results and 'tumor_zy_zay' in model_results:
             tumor_improvement = model_results['tumor_zy_zay']['val_acc'] - model_results['tumor_zy_alone']['val_acc']
             tumor_baseline = model_results['tumor_zy_alone']['val_acc']
+            # Handle division by zero for percentage calculation
+            if tumor_baseline > 0:
+                improvement_percent = (tumor_improvement / tumor_baseline) * 100
+            else:
+                improvement_percent = 0
             improvements.append({
                 'Model': model_name.upper(),
                 'Task': 'Tumor',
                 'Improvement': tumor_improvement,
-                'Improvement_Percent': (tumor_improvement / tumor_baseline) * 100
+                'Improvement_Percent': improvement_percent
             })
 
     if improvements:
@@ -315,11 +325,19 @@ def generate_summary_report(results, save_dir):
     for benefit in zay_benefits:
         report_lines.append(f"{benefit['model']}:")
         if benefit['hospital_benefit'] > 0:
-            hospital_pct = (benefit['hospital_benefit'] / benefit['hospital_baseline']) * 100
-            report_lines.append(f"  Hospital: +{benefit['hospital_benefit']:.3f} ({hospital_pct:.1f}% improvement)")
+            # Handle division by zero for percentage calculation
+            if benefit['hospital_baseline'] > 0:
+                hospital_pct = (benefit['hospital_benefit'] / benefit['hospital_baseline']) * 100
+                report_lines.append(f"  Hospital: +{benefit['hospital_benefit']:.3f} ({hospital_pct:.1f}% improvement)")
+            else:
+                report_lines.append(f"  Hospital: +{benefit['hospital_benefit']:.3f} (baseline is zero)")
         if benefit['tumor_benefit'] > 0:
-            tumor_pct = (benefit['tumor_benefit'] / benefit['tumor_baseline']) * 100
-            report_lines.append(f"  Tumor:    +{benefit['tumor_benefit']:.3f} ({tumor_pct:.1f}% improvement)")
+            # Handle division by zero for percentage calculation
+            if benefit['tumor_baseline'] > 0:
+                tumor_pct = (benefit['tumor_benefit'] / benefit['tumor_baseline']) * 100
+                report_lines.append(f"  Tumor:    +{benefit['tumor_benefit']:.3f} ({tumor_pct:.1f}% improvement)")
+            else:
+                report_lines.append(f"  Tumor:    +{benefit['tumor_benefit']:.3f} (baseline is zero)")
         report_lines.append("")
 
     # Detailed results for each model
