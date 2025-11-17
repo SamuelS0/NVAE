@@ -29,6 +29,14 @@ def extract_latent_representations(model, dataloader, device, num_classes=10):
     if len(dataloader) == 0:
         raise ValueError("Dataloader is empty - cannot extract representations")
 
+    # Detect AugmentedDANN model (uses 3-component latent structure)
+    is_augmented_dann = (hasattr(model, 'extract_features') and
+                         hasattr(model, 'name') and
+                         model.name == 'dann')
+
+    if is_augmented_dann:
+        print("Detected AugmentedDANN model - using extract_features() for 3-space latent extraction")
+
     all_zy = []
     all_zx = []
     all_zay = []
@@ -43,15 +51,35 @@ def extract_latent_representations(model, dataloader, device, num_classes=10):
             y_onehot = F.one_hot(y.long(), num_classes=num_classes).float()
             y_onehot = y_onehot.to(device)
             y = y_onehot
-            # Forward pass through the model to get latent representations
-            x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model(y, x, a)
-            
+
+            if is_augmented_dann:
+                # AugmentedDANN has 3 true latent spaces: zy, zd, zdy
+                # Use extract_features() to get them without duplicates
+                try:
+                    features = model.extract_features(x)
+                    assert len(features) == 3, f"Expected 3 latent spaces from extract_features(), got {len(features)}"
+                    zy, zd, zdy = features
+                except Exception as e:
+                    raise RuntimeError(f"Failed to extract AugmentedDANN features: {e}")
+
+                # Map to expected format:
+                # - zy stays as zy (class-specific)
+                # - zd maps to za (domain-specific, maps to auxiliary)
+                # - zdy maps to zay (interaction)
+                # - zx is empty (no residual space in discriminative models - no decoder)
+                zx = torch.zeros(zy.shape[0], 0, device=zy.device)
+                za = zd  # Domain features
+                zay = zdy  # Interaction features
+            else:
+                # VAE models (NVAE/DIVA) - use standard forward pass
+                x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model(y, x, a)
+
             all_zy.append(zy.cpu())
             all_zx.append(zx.cpu())
-            if zay is not None:
+            if zay is not None and zay.shape[1] > 0:
                 all_zay.append(zay.cpu())
             else:
-                # For DIVA models, zay is None, so create zeros
+                # For DIVA models or empty zay, create zeros
                 all_zay.append(torch.zeros(zy.shape[0], 0))
             all_za.append(za.cpu())
             all_y.append(y.cpu())

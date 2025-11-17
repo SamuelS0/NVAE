@@ -597,10 +597,19 @@ def extract_latents_from_model(
     """
     model.eval()
 
+    # Detect AugmentedDANN model (uses 3-component latent structure)
+    is_augmented_dann = (hasattr(model, 'extract_features') and
+                         hasattr(model, 'name') and
+                         model.name == 'dann')
+
+    if is_augmented_dann:
+        print("Detected AugmentedDANN model - using extract_features() for 3-space latent extraction")
+        has_zdy = True  # AugmentedDANN always has zdy
+    else:
+        has_zdy = not model.diva
+
     all_zy, all_zd, all_zdy, all_zx = [], [], [], []
     all_y, all_d = [], []
-
-    has_zdy = not model.diva
 
     print(f"Extracting latents from model (max {max_batches} batches)...")
     with torch.no_grad():
@@ -622,20 +631,36 @@ def extract_latents_from_model(
                 # Fallback if no domain labels
                 d = torch.zeros_like(y)
 
-            # Get latent representations
-            qz_loc, qz_scale = model.qz(x)
+            if is_augmented_dann:
+                # AugmentedDANN has 3 true latent spaces: zy, zd, zdy
+                # Use extract_features() to get them without duplicates
+                try:
+                    features = model.extract_features(x)
+                    assert len(features) == 3, f"Expected 3 latent spaces from extract_features(), got {len(features)}"
+                    zy, zd, zdy = features
+                except Exception as e:
+                    raise RuntimeError(f"Failed to extract AugmentedDANN features: {e}")
 
-            zy = qz_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
-            zx = qz_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
-            zd = qz_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+                # AugmentedDANN has no residual space (no decoder/reconstruction)
+                # Use zero tensor for zx to represent this correctly in IT metrics
+                # This will correctly show I(z_x;Y,D) ≈ 0 (no residual information)
+                zx = torch.zeros_like(zd)
+            else:
+                # VAE models (NVAE/DIVA) - use qz() for latent distribution
+                qz_loc, qz_scale = model.qz(x)
 
-            if has_zdy:
-                zdy = qz_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
-                all_zdy.append(zdy.cpu())
+                zy = qz_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
+                zx = qz_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
+                zd = qz_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+
+                if has_zdy:
+                    zdy = qz_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
 
             all_zy.append(zy.cpu())
             all_zd.append(zd.cpu())
             all_zx.append(zx.cpu())
+            if has_zdy:
+                all_zdy.append(zdy.cpu())
             all_y.append(y.cpu())
             all_d.append(d.cpu())
 

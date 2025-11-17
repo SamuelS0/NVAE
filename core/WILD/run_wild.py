@@ -970,17 +970,19 @@ if __name__ == "__main__":
             # Evaluate each trained model
             it_results = {}
 
-            # Only evaluate models with explicit VAE-style latent decomposition
-            # NVAE and DIVA have qz(), index_range attributes, and diva flag required by the IT framework
-            VAE_COMPATIBLE_MODELS = ['nvae', 'diva']
+            # Only evaluate models with explicit latent decomposition
+            # NVAE and DIVA use qz() with VAE-style latent spaces
+            # AugmentedDANN uses extract_features() with 3-component latent spaces
+            # Note: baseline DANN (key='dann') is excluded; only AugmentedDANN (key='dann_augmented') is supported
+            LATENT_DECOMPOSITION_MODELS = ['nvae', 'diva', 'dann_augmented']
 
             for model_name, model in trained_models.items():
-                # Filter to only VAE-compatible models
-                if model_name not in VAE_COMPATIBLE_MODELS:
-                    print(f"\n⚠️  Skipping {model_name} - IT evaluation requires VAE latent decomposition")
+                # Filter to only models with latent decomposition
+                if model_name not in LATENT_DECOMPOSITION_MODELS:
+                    print(f"\n⚠️  Skipping {model_name} - IT evaluation requires latent decomposition")
                     print(f"    Information-theoretic evaluation only supports models with explicit")
-                    print(f"    partitioned latent spaces (qz method, index ranges, diva flag).")
-                    print(f"    Compatible models: {', '.join(VAE_COMPATIBLE_MODELS)}")
+                    print(f"    partitioned latent spaces.")
+                    print(f"    Compatible models: {', '.join(LATENT_DECOMPOSITION_MODELS)}")
                     continue
 
                 print(f"\n{'='*60}")
