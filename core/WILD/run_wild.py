@@ -563,8 +563,8 @@ if __name__ == "__main__":
     # Create OOD test loader if in OOD mode
     if ood_hospital is not None:
         from torchvision import transforms
-        from torch.utils.data import Subset
-        from core.WILD.utils_wild import get_eval_loader
+        from torch.utils.data import Subset, DataLoader
+        from core.WILD.utils_wild import get_eval_loader, custom_collate_fn
 
         # Get test data and filter to only OOD hospital
         transform = transforms.Compose([transforms.ToTensor()])
@@ -574,13 +574,13 @@ if __name__ == "__main__":
         ood_test_indices = [i for i in test_data_full.indices
                            if test_data_full.dataset.metadata_array[i, 0] == ood_hospital]
         ood_test_data = Subset(test_data_full.dataset, ood_test_indices)
-        ood_test_loader = get_eval_loader("standard", ood_test_data, batch_size=args.batch_size)
+        ood_test_loader = DataLoader(ood_test_data, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=custom_collate_fn)
 
         # Create ID test set (exclude withheld hospital) - rename test_loader to id_test_loader
         id_test_indices = [i for i in test_data_full.indices
                           if test_data_full.dataset.metadata_array[i, 0] != ood_hospital]
         id_test_data = Subset(test_data_full.dataset, id_test_indices)
-        id_test_loader = get_eval_loader("standard", id_test_data, batch_size=args.batch_size)
+        id_test_loader = DataLoader(id_test_data, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=custom_collate_fn)
 
         # For backward compatibility, keep test_loader pointing to id_test_loader
         test_loader = id_test_loader

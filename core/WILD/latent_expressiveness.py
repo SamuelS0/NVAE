@@ -289,10 +289,19 @@ def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader,
 
         hospital_improvement_val = results['hospital_za_zay']['val_acc'] - results['hospital_za_alone']['val_acc']
         hospital_improvement_test = results['hospital_za_zay']['test_acc'] - results['hospital_za_alone']['test_acc']
-        hospital_improvement_val_pct = (hospital_improvement_val / results['hospital_za_alone']['val_acc']) * 100
-        hospital_improvement_test_pct = (hospital_improvement_test / results['hospital_za_alone']['test_acc']) * 100
-        print(f"   📊 IMPROVEMENT (Val): za+zay is {hospital_improvement_val:.4f} ({hospital_improvement_val_pct:.2f}%) better than za alone")
-        print(f"   📊 IMPROVEMENT (Test): za+zay is {hospital_improvement_test:.4f} ({hospital_improvement_test_pct:.2f}%) better than za alone")
+
+        # Handle division by zero for percentage calculations
+        if results['hospital_za_alone']['val_acc'] > 0:
+            hospital_improvement_val_pct = (hospital_improvement_val / results['hospital_za_alone']['val_acc']) * 100
+            print(f"   📊 IMPROVEMENT (Val): za+zay is {hospital_improvement_val:.4f} ({hospital_improvement_val_pct:.2f}%) better than za alone")
+        else:
+            print(f"   📊 IMPROVEMENT (Val): za+zay is {hospital_improvement_val:.4f} better than za alone")
+
+        if results['hospital_za_alone']['test_acc'] > 0:
+            hospital_improvement_test_pct = (hospital_improvement_test / results['hospital_za_alone']['test_acc']) * 100
+            print(f"   📊 IMPROVEMENT (Test): za+zay is {hospital_improvement_test:.4f} ({hospital_improvement_test_pct:.2f}%) better than za alone")
+        else:
+            print(f"   📊 IMPROVEMENT (Test): za+zay is {hospital_improvement_test:.4f} better than za alone (baseline: 0)")
 
     print("\n🔬 TUMOR CLASSIFICATION:")
     print(f"   zy alone:      Train={results['tumor_zy_alone']['train_acc']:.4f}, Val={results['tumor_zy_alone']['val_acc']:.4f}, Test={results['tumor_zy_alone']['test_acc']:.4f}")
@@ -303,10 +312,19 @@ def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader,
 
         tumor_improvement_val = results['tumor_zy_zay']['val_acc'] - results['tumor_zy_alone']['val_acc']
         tumor_improvement_test = results['tumor_zy_zay']['test_acc'] - results['tumor_zy_alone']['test_acc']
-        tumor_improvement_val_pct = (tumor_improvement_val / results['tumor_zy_alone']['val_acc']) * 100
-        tumor_improvement_test_pct = (tumor_improvement_test / results['tumor_zy_alone']['test_acc']) * 100
-        print(f"   📊 IMPROVEMENT (Val): zy+zay is {tumor_improvement_val:.4f} ({tumor_improvement_val_pct:.2f}%) better than zy alone")
-        print(f"   📊 IMPROVEMENT (Test): zy+zay is {tumor_improvement_test:.4f} ({tumor_improvement_test_pct:.2f}%) better than zy alone")
+
+        # Handle division by zero for percentage calculations
+        if results['tumor_zy_alone']['val_acc'] > 0:
+            tumor_improvement_val_pct = (tumor_improvement_val / results['tumor_zy_alone']['val_acc']) * 100
+            print(f"   📊 IMPROVEMENT (Val): zy+zay is {tumor_improvement_val:.4f} ({tumor_improvement_val_pct:.2f}%) better than zy alone")
+        else:
+            print(f"   📊 IMPROVEMENT (Val): zy+zay is {tumor_improvement_val:.4f} better than zy alone")
+
+        if results['tumor_zy_alone']['test_acc'] > 0:
+            tumor_improvement_test_pct = (tumor_improvement_test / results['tumor_zy_alone']['test_acc']) * 100
+            print(f"   📊 IMPROVEMENT (Test): zy+zay is {tumor_improvement_test:.4f} ({tumor_improvement_test_pct:.2f}%) better than zy alone")
+        else:
+            print(f"   📊 IMPROVEMENT (Test): zy+zay is {tumor_improvement_test:.4f} better than zy alone (baseline: 0)")
 
     # =============================================================================
     # VISUALIZE RESULTS

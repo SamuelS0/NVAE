@@ -7,7 +7,30 @@ import matplotlib.gridspec as gridspec
 import torchvision.transforms as transforms
 from wilds import get_dataset
 from wilds.common.data_loaders import get_train_loader, get_eval_loader
+from PIL import Image
 #from model_diva import DIVA_VAE
+
+def custom_collate_fn(batch):
+    """Custom collate function to handle PIL Images from WILDS dataset."""
+    transform = transforms.ToTensor()
+
+    # batch is a list of tuples (x, y, metadata)
+    xs, ys, metadatas = [], [], []
+    for item in batch:
+        x, y, metadata = item
+        # Convert PIL Image to tensor if needed
+        if isinstance(x, Image.Image):
+            x = transform(x)
+        xs.append(x)
+        ys.append(y)
+        metadatas.append(metadata)
+
+    # Stack into batches
+    xs = torch.stack(xs)
+    ys = torch.tensor(ys) if not isinstance(ys[0], torch.Tensor) else torch.stack(ys)
+    metadatas = torch.stack(metadatas) if isinstance(metadatas[0], torch.Tensor) else torch.tensor(metadatas)
+
+    return xs, ys, metadatas
 
 def select_diverse_sample_batch(loader, data_type='id_val', samples_per_domain=10, seed=None):
     # Create local random number generator for reproducibility
@@ -439,31 +462,47 @@ def prepare_data(dataset, args, exclude_hospitals=None):
         original_train_size = len(train_data.indices)
 
         # Filter train_data to exclude specific hospitals
-        from torch.utils.data import Subset
+        from torch.utils.data import Subset, DataLoader
         train_indices = [i for i in train_data.indices
                        if train_data.dataset.metadata_array[i, 0] not in exclude_hospitals]
-        train_data = Subset(train_data.dataset, train_indices)
+        train_data_filtered = Subset(train_data.dataset, train_indices)
 
         print(f"   Original training size: {original_train_size}")
-        print(f"   Filtered training size: {len(train_data)} (excluded {original_train_size - len(train_data)} samples)")
+        print(f"   Filtered training size: {len(train_data_filtered)} (excluded {original_train_size - len(train_data_filtered)} samples)")
 
         # Also filter validation data
         original_val_size = len(val_data.indices)
         val_indices = [i for i in val_data.indices
                       if val_data.dataset.metadata_array[i, 0] not in exclude_hospitals]
-        val_data = Subset(val_data.dataset, val_indices)
+        val_data_filtered = Subset(val_data.dataset, val_indices)
 
         print(f"   Original validation size: {original_val_size}")
-        print(f"   Filtered validation size: {len(val_data)} (excluded {original_val_size - len(val_data)} samples)")
+        print(f"   Filtered validation size: {len(val_data_filtered)} (excluded {original_val_size - len(val_data_filtered)} samples)")
 
-    train_loader = get_train_loader("standard", train_data, batch_size=args.batch_size)
-    val_loader = get_eval_loader("standard", val_data, batch_size=args.batch_size)
-    test_loader = get_eval_loader("standard", test_data, batch_size=args.batch_size)
+        # Use DataLoader directly for Subsets (they don't have collate attribute)
+        train_loader = DataLoader(train_data_filtered, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=custom_collate_fn)
+        val_loader = DataLoader(val_data_filtered, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=custom_collate_fn)
+        test_loader = get_eval_loader("standard", test_data, batch_size=args.batch_size)
+
+        # Update data references for hospital distribution printing
+        train_data = train_data_filtered
+        val_data = val_data_filtered
+    else:
+        train_loader = get_train_loader("standard", train_data, batch_size=args.batch_size)
+        val_loader = get_eval_loader("standard", val_data, batch_size=args.batch_size)
+        test_loader = get_eval_loader("standard", test_data, batch_size=args.batch_size)
 
     print("\nHospital distribution:")
-    print("Train hospitals:", np.unique(train_data.dataset.metadata_array[train_data.indices, 0]))
-    print("Val hospitals:", np.unique(val_data.dataset.metadata_array[val_data.indices, 0]))
-    print("Test hospitals:", np.unique(test_data.dataset.metadata_array[test_data.indices, 0]))
+    # Handle both WILDSSubset and regular Subset
+    if hasattr(train_data, 'indices'):
+        print("Train hospitals:", np.unique(train_data.dataset.metadata_array[train_data.indices, 0]))
+        print("Val hospitals:", np.unique(val_data.dataset.metadata_array[val_data.indices, 0]))
+        print("Test hospitals:", np.unique(test_data.dataset.metadata_array[test_data.indices, 0]))
+    else:
+        # For regular Subsets
+        print("Train hospitals:", np.unique(train_data.dataset.metadata_array[list(train_data.indices), 0]))
+        print("Val hospitals:", np.unique(val_data.dataset.metadata_array[list(val_data.indices), 0]))
+        print("Test hospitals:", np.unique(test_data.dataset.metadata_array[test_data.indices, 0]))
 
     return train_loader, val_loader, test_loader
 

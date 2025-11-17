@@ -101,7 +101,7 @@ def train_nvae(args, spec_data, train_loader, test_loader, dataset):
         }
         trainer_class = WILDTrainer
     # Move model to device
-    with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
+    with open(os.path.join(args.out, 'nvae_model_params_trainer.json'), 'w') as f:
         json.dump(model_params, f)
     nvae = nvae.to(args.device)
     
@@ -206,7 +206,7 @@ def train_staged_nvae(args, spec_data, train_loader, test_loader, dataset):
         trainer_class = StagedWILDTrainer
         
     # Move model to device
-    with open(os.path.join(args.out, 'model_params_staged.json'), 'w') as f:
+    with open(os.path.join(args.out, 'nvae_model_params_staged_trainer.json'), 'w') as f:
         json.dump(model_params, f)
     nvae = nvae.to(args.device)
     
@@ -301,7 +301,7 @@ def train_diva(args, spec_data, train_loader, test_loader, dataset):
         'diva': True
         }
         trainer_class = WILDTrainer
-    with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
+    with open(os.path.join(args.out, 'diva_model_params_trainer.json'), 'w') as f:
         json.dump(model_params, f)
     # Move model to device
     diva = diva.to(args.device)
@@ -337,7 +337,7 @@ def train_dann(args, spec_data, train_loader, val_loader, dataset):
         'num_y_classes': spec_data['num_y_classes'],
         'num_r_classes': spec_data['num_r_classes']
     }
-    with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
+    with open(os.path.join(args.out, 'dann_model_params_trainer.json'), 'w') as f:
         json.dump(model_params, f)
 
     training_metrics = train(args, dann, optimizer, train_loader, val_loader, args.device, patience, trainer_class=DANNTrainer)
@@ -381,7 +381,7 @@ def train_irm(args, spec_data, train_loader, val_loader, dataset, seed=None):
         'penalty_weight': penalty_weight,
         'penalty_anneal_iters': anneal_iters
     }
-    with open(os.path.join(args.out, 'model_params.json'), 'w') as f:
+    with open(os.path.join(args.out, 'irm_model_params_trainer.json'), 'w') as f:
         json.dump(model_params, f)
 
     # Simple training loop for IRM

@@ -2,3 +2,5 @@ __pycache__/
 *.sh
 data/.claude/
 .claude/
+data/
+test_results/
