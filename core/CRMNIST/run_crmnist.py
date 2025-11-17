@@ -191,7 +191,7 @@ if __name__ == "__main__":
     parser.add_argument('--beta_2', type=float, default=1.0)
     parser.add_argument('--beta_3', type=float, default=1.0)
     parser.add_argument('--beta_4', type=float, default=1.0)
-    parser.add_argument('--alpha_1', type=float, default=100.0)
+    parser.add_argument('--alpha_1', type=float, default=150.0)
     parser.add_argument('--alpha_2', type=float, default=40.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--dataset', type=str, default='crmnist')
@@ -204,14 +204,14 @@ if __name__ == "__main__":
     parser.add_argument('--beta_scale', type=float, default=1.0)
 
     # L1 sparsity penalty arguments
-    parser.add_argument('--l1_lambda_zy', type=float, default=0.01,
-                       help='L1 penalty weight for zy latent (default: 0.01)')
-    parser.add_argument('--l1_lambda_zx', type=float, default=0.01,
-                       help='L1 penalty weight for zx latent (default: 0.01)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=0.1,
-                       help='L1 penalty weight for zay latent (default: 0.1)')
-    parser.add_argument('--l1_lambda_za', type=float, default=0.01,
-                       help='L1 penalty weight for za latent (default: 0.01)')
+    parser.add_argument('--l1_lambda_zy', type=float, default=0.2,
+                       help='L1 penalty weight for zy latent (default: 0.2)')
+    parser.add_argument('--l1_lambda_zx', type=float, default=0.2,
+                       help='L1 penalty weight for zx latent (default: 0.2)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=2.0,
+                       help='L1 penalty weight for zay latent (default: 2.0)')
+    parser.add_argument('--l1_lambda_za', type=float, default=0.2,
+                       help='L1 penalty weight for za latent (default: 0.2)')
 
     # Model selection arguments
     parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],

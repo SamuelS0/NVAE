@@ -39,7 +39,8 @@ def test_nvae(model, test_loader, dataset_type, device):
                     loss=f"{loss_components['total']:.2f}",
                     recon=f"{loss_components['recon']:.1f}",
                     l1_zy=f"{loss_components['l1_zy']:.3f}",
-                    l1_za=f"{loss_components['l1_za']:.3f}"
+                    l1_za=f"{loss_components['l1_za']:.3f}",
+                    l1_zay=f"{loss_components['l1_zay']:.3f}"
                 )
             else:
                 test_pbar.set_postfix(loss=loss.item())
