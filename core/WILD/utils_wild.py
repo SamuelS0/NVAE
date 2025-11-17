@@ -406,10 +406,17 @@ def generate_images_latent(model, device, data_type, output_dir, batch_data, mod
 
     print(f"Latent reconstructions saved to {save_dir}")
 
-def prepare_data(dataset, args):
-    """Prepare datasets and data loaders."""
+def prepare_data(dataset, args, exclude_hospitals=None):
+    """
+    Prepare datasets and data loaders.
+
+    Args:
+        dataset: WILDS dataset
+        args: Command-line arguments
+        exclude_hospitals: List of hospital indices to exclude from training (for OOD testing)
+    """
     '''transform = transforms.Compose(
-        [transforms.Resize((448, 448) if args.resolution == 'high' else (64, 64)), 
+        [transforms.Resize((448, 448) if args.resolution == 'high' else (64, 64)),
          transforms.ToTensor()]
     )'''
 
@@ -420,16 +427,40 @@ def prepare_data(dataset, args):
     transform = transforms.Compose(
         [transforms.ToTensor()]
     )
-    
-    
+
+
     train_data = dataset.get_subset("train", transform=transform)
     val_data = dataset.get_subset(args.val_type, transform=transform)
     test_data = dataset.get_subset("test", transform=transform)
-    
+
+    # Filter training data to exclude specific hospitals for OOD testing
+    if exclude_hospitals:
+        print(f"\n🎯 OOD MODE: Excluding hospitals {exclude_hospitals} from training")
+        original_train_size = len(train_data.indices)
+
+        # Filter train_data to exclude specific hospitals
+        from torch.utils.data import Subset
+        train_indices = [i for i in train_data.indices
+                       if train_data.dataset.metadata_array[i, 0] not in exclude_hospitals]
+        train_data = Subset(train_data.dataset, train_indices)
+
+        print(f"   Original training size: {original_train_size}")
+        print(f"   Filtered training size: {len(train_data)} (excluded {original_train_size - len(train_data)} samples)")
+
+        # Also filter validation data
+        original_val_size = len(val_data.indices)
+        val_indices = [i for i in val_data.indices
+                      if val_data.dataset.metadata_array[i, 0] not in exclude_hospitals]
+        val_data = Subset(val_data.dataset, val_indices)
+
+        print(f"   Original validation size: {original_val_size}")
+        print(f"   Filtered validation size: {len(val_data)} (excluded {original_val_size - len(val_data)} samples)")
+
     train_loader = get_train_loader("standard", train_data, batch_size=args.batch_size)
     val_loader = get_eval_loader("standard", val_data, batch_size=args.batch_size)
     test_loader = get_eval_loader("standard", test_data, batch_size=args.batch_size)
-    
+
+    print("\nHospital distribution:")
     print("Train hospitals:", np.unique(train_data.dataset.metadata_array[train_data.indices, 0]))
     print("Val hospitals:", np.unique(val_data.dataset.metadata_array[val_data.indices, 0]))
     print("Test hospitals:", np.unique(test_data.dataset.metadata_array[test_data.indices, 0]))

@@ -118,7 +118,14 @@ class CRMNISTTrainer:
             #x, y, c, r = x.to(self.device), y.to(self.device), c.to(self.device), r.to(self.device)
             x, y, r = process_batch(batch, self.device, dataset_type=self.dataset)
             # Forward pass and loss calculation
-            loss = self.model.loss_function(y, x, r)
+            loss_result = self.model.loss_function(y, x, r)
+
+            # Handle both old (scalar) and new (tuple) return formats
+            if isinstance(loss_result, tuple):
+                loss, loss_components = loss_result
+            else:
+                loss = loss_result
+                loss_components = None
 
             # Backward pass
             loss.backward()
@@ -131,8 +138,18 @@ class CRMNISTTrainer:
             for k, v in batch_metrics.items():
                 train_metrics_sum[k] += v
 
-            # Update progress bar
-            train_pbar.set_postfix(loss=loss.item())
+            # Update progress bar with detailed loss components
+            if loss_components:
+                train_pbar.set_postfix(
+                    loss=f"{loss_components['total']:.2f}",
+                    recon=f"{loss_components['recon']:.1f}",
+                    y_ce=f"{loss_components['y_ce']:.1f}",
+                    a_ce=f"{loss_components['a_ce']:.1f}",
+                    l1_zy=f"{loss_components['l1_zy']:.3f}",
+                    l1_za=f"{loss_components['l1_za']:.3f}"
+                )
+            else:
+                train_pbar.set_postfix(loss=loss.item())
 
         # Calculate averages
         avg_train_loss = train_loss / len(train_loader)
@@ -152,17 +169,35 @@ class CRMNISTTrainer:
         with torch.no_grad():
             for batch_idx, batch in val_pbar:
                 x, y, r = process_batch(batch, self.device, dataset_type=self.dataset)
-                
-                loss = self.model.loss_function(y, x, r)
+
+                loss_result = self.model.loss_function(y, x, r)
+
+                # Handle both old (scalar) and new (tuple) return formats
+                if isinstance(loss_result, tuple):
+                    loss, loss_components = loss_result
+                else:
+                    loss = loss_result
+                    loss_components = None
+
                 val_loss += loss.item()
-                
+
                 # Calculate metrics
                 batch_metrics = _calculate_metrics(self.model, y, x, r)
                 for k, v in batch_metrics.items():
                     val_metrics_sum[k] += v
-                
-                # Update progress bar
-                val_pbar.set_postfix(loss=loss.item())
+
+                # Update progress bar with detailed loss components
+                if loss_components:
+                    val_pbar.set_postfix(
+                        loss=f"{loss_components['total']:.2f}",
+                        recon=f"{loss_components['recon']:.1f}",
+                        y_ce=f"{loss_components['y_ce']:.1f}",
+                        a_ce=f"{loss_components['a_ce']:.1f}",
+                        l1_zy=f"{loss_components['l1_zy']:.3f}",
+                        l1_za=f"{loss_components['l1_za']:.3f}"
+                    )
+                else:
+                    val_pbar.set_postfix(loss=loss.item())
         
         # Calculate averages
         val_loss /= len(val_loader)
@@ -246,7 +281,7 @@ class CRMNISTTrainer:
                 device=self.device,
                 type='crmnist',  # Uses balanced sampling for color × rotation combinations
                 save_path=latent_path,
-                max_samples=1000
+                max_samples=750
             )
             print(f"  Latent visualization saved to {latent_path}")
         except Exception as e:

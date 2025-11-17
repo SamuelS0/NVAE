@@ -416,6 +416,12 @@ def get_args():
     parser.add_argument('--beta_adv', type=float, default=0.1,
                        help='Weight for adversarial loss in AugmentedDANN (default: 0.1)')
 
+    # OOD Domain Generalization arguments
+    parser.add_argument('--no_ood', action='store_true', default=False,
+                       help='Disable OOD mode and include all hospitals in training (default: OOD enabled, last hospital withheld)')
+    parser.add_argument('--ood_hospital_idx', type=int, default=None,
+                       help='Specific hospital index to withhold for OOD testing (0-4). Default: 4 (last hospital) when OOD enabled')
+
     return parser.parse_args()
 
 def initialize_model(args, num_classes, num_domains):
@@ -529,9 +535,63 @@ if __name__ == "__main__":
     # MULTI-MODEL COMPARISON EXPERIMENTS
     # =============================================================================
     print("\n🎯 Running multi-model comparison experiments...")
-    
+
+    # =============================================================================
+    # OOD DOMAIN GENERALIZATION SETUP
+    # =============================================================================
+    # Determine which hospital to withhold for OOD testing
+    ood_hospital = None
+    if not args.no_ood:
+        # Default: withhold last hospital (hospital 4)
+        ood_hospital = args.ood_hospital_idx if args.ood_hospital_idx is not None else 4
+        print(f"\n{'='*80}")
+        print(f"🎯 OOD MODE ENABLED: Withholding hospital {ood_hospital} for OOD testing")
+        print(f"   Training on hospitals: {[i for i in range(5) if i != ood_hospital]}")
+        print(f"   OOD test hospital: {ood_hospital}")
+        print(f"{'='*80}\n")
+    else:
+        print(f"\n{'='*80}")
+        print(f"📊 STANDARD MODE: Using all 5 hospitals for training")
+        print(f"{'='*80}\n")
+
     # Prepare data and directories
-    train_loader, val_loader, test_loader = prepare_data(dataset, args)
+    train_loader, val_loader, test_loader = prepare_data(
+        dataset, args,
+        exclude_hospitals=[ood_hospital] if ood_hospital is not None else None
+    )
+
+    # Create OOD test loader if in OOD mode
+    if ood_hospital is not None:
+        from torchvision import transforms
+        from torch.utils.data import Subset
+        from core.WILD.utils_wild import get_eval_loader
+
+        # Get test data and filter to only OOD hospital
+        transform = transforms.Compose([transforms.ToTensor()])
+        test_data_full = dataset.get_subset("test", transform=transform)
+
+        # Create OOD test set (only withheld hospital)
+        ood_test_indices = [i for i in test_data_full.indices
+                           if test_data_full.dataset.metadata_array[i, 0] == ood_hospital]
+        ood_test_data = Subset(test_data_full.dataset, ood_test_indices)
+        ood_test_loader = get_eval_loader("standard", ood_test_data, batch_size=args.batch_size)
+
+        # Create ID test set (exclude withheld hospital) - rename test_loader to id_test_loader
+        id_test_indices = [i for i in test_data_full.indices
+                          if test_data_full.dataset.metadata_array[i, 0] != ood_hospital]
+        id_test_data = Subset(test_data_full.dataset, id_test_indices)
+        id_test_loader = get_eval_loader("standard", id_test_data, batch_size=args.batch_size)
+
+        # For backward compatibility, keep test_loader pointing to id_test_loader
+        test_loader = id_test_loader
+
+        print(f"\n📊 Test set distribution:")
+        print(f"   ID Test: {len(id_test_data)} samples (hospitals: {np.unique([test_data_full.dataset.metadata_array[i, 0] for i in id_test_indices])})")
+        print(f"   OOD Test: {len(ood_test_data)} samples (hospital: {ood_hospital})")
+    else:
+        ood_test_loader = None
+        id_test_loader = test_loader
+
     spec_data = {'class_map': None, 'num_y_classes': 2, 'num_r_classes': 5}
     
     os.makedirs(args.out, exist_ok=True)
@@ -1063,6 +1123,127 @@ if __name__ == "__main__":
             print(f"\n⚠️  Information-theoretic evaluation failed: {e}")
             import traceback
             traceback.print_exc()
+
+    # =============================================================================
+    # OOD DOMAIN GENERALIZATION EVALUATION
+    # =============================================================================
+    if ood_test_loader is not None:
+        print("\n" + "="*80)
+        print("🎯 OOD DOMAIN GENERALIZATION EVALUATION")
+        print("="*80)
+        print(f"\nEvaluating domain generalization for withheld hospital {ood_hospital}...")
+
+        from core.test import test_with_ood
+        import json
+
+        # Create OOD evaluation directory
+        ood_eval_dir = os.path.join(args.out, 'ood_evaluation')
+        os.makedirs(ood_eval_dir, exist_ok=True)
+
+        # Create OOD visualization directory
+        ood_viz_dir = os.path.join(args.out, 'latent_space_ood')
+        os.makedirs(ood_viz_dir, exist_ok=True)
+
+        # Dictionary to store all OOD results
+        ood_results_summary = {}
+
+        for model_name, model in trained_models.items():
+            print(f"\n{'='*80}")
+            print(f"📊 {model_name.upper()} - Domain Generalization Results")
+            print(f"{'='*80}")
+
+            # Determine model type for test_with_ood
+            if 'dann' in model_name.lower() and 'augmented' not in model_name.lower():
+                model_type = 'dann'
+            elif 'augmented' in model_name.lower():
+                model_type = 'dann_augmented'
+            elif 'irm' in model_name.lower():
+                model_type = 'irm'
+            else:
+                model_type = model_name.lower()
+
+            # Evaluate on ID and OOD test sets
+            ood_results = test_with_ood(
+                model,
+                id_test_loader,
+                ood_test_loader,
+                dataset_type='wild',
+                device=args.device,
+                model_type=model_type
+            )
+
+            # Store results
+            ood_results_summary[model_name] = ood_results
+
+            # Save individual model results
+            results_file = os.path.join(ood_eval_dir, f'{model_name}_ood_results.json')
+            with open(results_file, 'w') as f:
+                # Convert numpy types to Python types for JSON serialization
+                json_results = {}
+                for key, value in ood_results.items():
+                    if isinstance(value, dict):
+                        json_results[key] = {k: float(v) for k, v in value.items()}
+                    elif value is not None:
+                        json_results[key] = float(value)
+                    else:
+                        json_results[key] = None
+                json.dump(json_results, f, indent=2)
+            print(f"\n💾 Results saved to: {results_file}")
+
+            # Generate OOD latent space visualizations (separate from ID visualizations)
+            if model_type in ['nvae', 'diva'] and not args.skip_training:
+                print(f"\n📊 Generating OOD latent space visualization for {model_name}...")
+                ood_viz_path = os.path.join(ood_viz_dir, f'{model_name}_latent_spaces_ood.png')
+                try:
+                    from core.utils import visualize_latent_spaces
+                    visualize_latent_spaces(
+                        model=model,
+                        dataloader=ood_test_loader,
+                        device=args.device,
+                        type='wild',
+                        save_path=ood_viz_path,
+                        max_samples=750
+                    )
+                    print(f"   ✅ OOD visualization saved to: {ood_viz_path}")
+                except Exception as e:
+                    print(f"   ⚠️  OOD visualization failed: {e}")
+
+        # Print summary comparison
+        print("\n" + "="*80)
+        print("📊 OOD GENERALIZATION SUMMARY - ALL MODELS")
+        print("="*80)
+        print(f"\n{'Model':<20} {'ID Acc':<12} {'OOD Acc':<12} {'Gap':<12} {'ID Loss':<12} {'OOD Loss':<12}")
+        print("-" * 80)
+
+        for model_name, results in ood_results_summary.items():
+            id_acc = results['id_metrics'].get('y_accuracy', 0.0)
+            ood_acc = results['ood_metrics'].get('y_accuracy', 0.0) if results['ood_metrics'] else 0.0
+            gap = results['generalization_gap'].get('y_accuracy', 0.0) if results['generalization_gap'] else 0.0
+            id_loss = results['id_loss']
+            ood_loss = results['ood_loss'] if results['ood_loss'] else 0.0
+
+            print(f"{model_name:<20} {id_acc:<12.4f} {ood_acc:<12.4f} {gap:<12.4f} {id_loss:<12.4f} {ood_loss:<12.4f}")
+
+        # Save summary results
+        summary_file = os.path.join(ood_eval_dir, 'ood_summary.json')
+        with open(summary_file, 'w') as f:
+            summary_data = {}
+            for model_name, results in ood_results_summary.items():
+                summary_data[model_name] = {
+                    'id_accuracy': float(results['id_metrics'].get('y_accuracy', 0.0)),
+                    'ood_accuracy': float(results['ood_metrics'].get('y_accuracy', 0.0)) if results['ood_metrics'] else 0.0,
+                    'accuracy_gap': float(results['generalization_gap'].get('y_accuracy', 0.0)) if results['generalization_gap'] else 0.0,
+                    'id_loss': float(results['id_loss']),
+                    'ood_loss': float(results['ood_loss']) if results['ood_loss'] else 0.0
+                }
+            json.dump(summary_data, f, indent=2)
+        print(f"\n💾 Summary saved to: {summary_file}")
+
+        print("\n" + "="*80)
+        print("✅ OOD DOMAIN GENERALIZATION EVALUATION COMPLETE!")
+        print(f"   Results directory: {ood_eval_dir}")
+        print(f"   OOD visualizations: {ood_viz_dir}")
+        print("="*80)
 
     print(f"\n🎉 All experiments completed!")
     print(f"📁 All results saved to: {args.out}")

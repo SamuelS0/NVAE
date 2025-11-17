@@ -57,18 +57,18 @@ class MinimalInformationPartitionEvaluator:
 
     def __init__(
         self,
-        n_neighbors: int = 5,
+        n_neighbors: int = 7,
         n_bootstrap: int = 100,
         max_dims: int = 30,
-        pca_variance: float = 0.95,
+        pca_variance: float = 0.99,
         random_state: int = 42
     ):
         """
         Args:
-            n_neighbors: Number of neighbors for KNN estimation (default=5)
+            n_neighbors: Number of neighbors for KNN estimation (default=7)
             n_bootstrap: Number of bootstrap samples for confidence intervals (default=100)
             max_dims: Maximum dimensions before applying PCA (default=30)
-            pca_variance: Variance to preserve when applying PCA (default=0.95)
+            pca_variance: Variance to preserve when applying PCA (default=0.99)
             random_state: Random seed for reproducibility
         """
         self.k = n_neighbors
@@ -707,10 +707,10 @@ def evaluate_model(
 
     # Evaluate partition
     evaluator = MinimalInformationPartitionEvaluator(
-        n_neighbors=5,
+        n_neighbors=7,
         n_bootstrap=n_bootstrap,
         max_dims=30,
-        pca_variance=0.95
+        pca_variance=0.99
     )
 
     results = evaluator.evaluate_latent_partition(

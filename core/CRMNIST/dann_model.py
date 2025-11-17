@@ -83,10 +83,10 @@ class AugmentedDANN(NModule):
         stride=1,
         padding=0,
         lambda_reversal=1.0,
-        sparsity_weight=0.001,
+        sparsity_weight=0.05,
         alpha_y=1.0,
         alpha_d=1.0,
-        beta_adv=0.1,
+        beta_adv=0.15,
         image_size=28  # Image dimensions: 28 for CRMNIST, 96 for WILD
     ):
         super().__init__()
@@ -574,7 +574,7 @@ class AugmentedDANN(NModule):
         self.set_gradient_reversal_lambda(lambda_val)
         return lambda_val
     
-    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=1000):
+    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=750):
         """
         Visualize all latent spaces using t-SNE
         Args:
@@ -771,7 +771,7 @@ class AugmentedDANN(NModule):
         for col_idx, (space_2d, labels, title) in enumerate(latent_spaces):
             # Top row: color by digit label
             scatter1 = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
-                                          c=y_labels, cmap='tab10', alpha=0.4)
+                                          c=y_labels, cmap='tab10', vmin=0, vmax=9, alpha=0.4)
             axes[0, col_idx].set_title(f'{title}\nColored by Digit (Task Label)\n'
                                       f'Strong clustering indicates task-relevant information',
                                       fontsize=10)

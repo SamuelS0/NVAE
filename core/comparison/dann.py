@@ -160,7 +160,7 @@ class DANN(nn.Module):
         """Extract features from the feature extractor"""
         return self.feature_extractor(x)
 
-    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=5000):
+    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=750):
         """
         Visualize the latent space using t-SNE with balanced sampling
         Args:
@@ -223,7 +223,7 @@ class DANN(nn.Module):
                      fontsize=13, fontweight='bold', y=1.02)
 
         # Plot task classes
-        scatter1 = ax1.scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='tab10', alpha=0.4)
+        scatter1 = ax1.scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='tab10', vmin=0, vmax=9, alpha=0.4)
         ax1.set_title('Task Classes (Digits)\n'
                      'Strong clustering indicates successful\n'
                      'task-relevant feature learning',
@@ -233,7 +233,7 @@ class DANN(nn.Module):
         ax1.legend(*scatter1.legend_elements(), title="Digits", fontsize=9)
 
         # Plot colors
-        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='tab10', alpha=0.4)
+        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='tab10', vmin=0, vmax=6, alpha=0.4)
         ax2.set_title('Image Colors (Spurious Feature)\n'
                      'Uniform distribution indicates color\n'
                      'is not captured (domain invariance)',
@@ -243,7 +243,7 @@ class DANN(nn.Module):
         ax2.legend(*scatter2.legend_elements(), title="Colors", fontsize=9)
 
         # Plot rotations
-        scatter3 = ax3.scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='tab10', alpha=0.4)
+        scatter3 = ax3.scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='tab10', vmin=0, vmax=5, alpha=0.4)
         ax3.set_title('Domains (Rotation Angles)\n'
                      'Uniform distribution demonstrates\n'
                      'domain-invariant features via adversarial training',

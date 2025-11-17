@@ -572,7 +572,7 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
     # For DANN: zy=zy, za=zd, zay=zdy, zx=zd (domain features)
     return zy_list, zd_list, zdy_list, zd_list, y_list, domain_dict, labels_dict
 
-def sample_wild(model, dataloader, max_samples=5000, device=None):
+def sample_wild(model, dataloader, max_samples=750, device=None):
     """
     Sample from a WILD model and collect latent representations.
     
@@ -849,7 +849,7 @@ def sample_crmnist(model, dataloader, num_samples, device):
     
     return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
 
-def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=None, max_samples=5000, epoch=None, total_epochs=None):
+def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=None, max_samples=750, epoch=None, total_epochs=None):
     """
     Unified function to visualize latent spaces using t-SNE with balanced sampling.
 

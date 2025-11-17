@@ -192,7 +192,7 @@ if __name__ == "__main__":
     parser.add_argument('--beta_3', type=float, default=1.0)
     parser.add_argument('--beta_4', type=float, default=1.0)
     parser.add_argument('--alpha_1', type=float, default=100.0)
-    parser.add_argument('--alpha_2', type=float, default=100.0)
+    parser.add_argument('--alpha_2', type=float, default=40.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--dataset', type=str, default='crmnist')
     parser.add_argument('--use_cache', action='store_true', default=True, 
@@ -204,14 +204,14 @@ if __name__ == "__main__":
     parser.add_argument('--beta_scale', type=float, default=1.0)
 
     # L1 sparsity penalty arguments
-    parser.add_argument('--l1_lambda_zy', type=float, default=0.0,
-                       help='L1 penalty weight for zy latent (default: 0.0)')
+    parser.add_argument('--l1_lambda_zy', type=float, default=0.01,
+                       help='L1 penalty weight for zy latent (default: 0.01)')
     parser.add_argument('--l1_lambda_zx', type=float, default=0.01,
                        help='L1 penalty weight for zx latent (default: 0.01)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=0.02,
-                       help='L1 penalty weight for zay latent (default: 0.02)')
-    parser.add_argument('--l1_lambda_za', type=float, default=0.0,
-                       help='L1 penalty weight for za latent (default: 0.0)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=0.1,
+                       help='L1 penalty weight for zay latent (default: 0.1)')
+    parser.add_argument('--l1_lambda_za', type=float, default=0.01,
+                       help='L1 penalty weight for za latent (default: 0.01)')
 
     # Model selection arguments
     parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],
@@ -225,16 +225,22 @@ if __name__ == "__main__":
     # AugmentedDANN-specific parameters
     parser.add_argument('--lambda_reversal', type=float, default=1.0,
                        help='Lambda parameter for gradient reversal in AugmentedDANN (default: 1.0)')
-    parser.add_argument('--sparsity_weight', type=float, default=0.001,
-                       help='Weight for sparsity penalty on zdy in AugmentedDANN (default: 0.001)')
-    parser.add_argument('--beta_adv', type=float, default=0.1,
-                       help='Weight for adversarial loss in AugmentedDANN (default: 0.1)')
+    parser.add_argument('--sparsity_weight', type=float, default=0.05,
+                       help='Weight for sparsity penalty on zdy in AugmentedDANN (default: 0.05)')
+    parser.add_argument('--beta_adv', type=float, default=0.15,
+                       help='Weight for adversarial loss in AugmentedDANN (default: 0.15)')
 
     # IRM-specific parameters
-    parser.add_argument('--irm_penalty_weight', type=float, default=1e4,
-                       help='Weight for IRM invariance penalty (default: 1e4)')
+    parser.add_argument('--irm_penalty_weight', type=float, default=1e3,
+                       help='Weight for IRM invariance penalty (default: 1e3)')
     parser.add_argument('--irm_anneal_iters', type=int, default=500,
                        help='Number of iterations before applying IRM penalty (default: 500)')
+
+    # OOD Domain Generalization arguments
+    parser.add_argument('--no_ood', action='store_true', default=False,
+                       help='Disable OOD mode and include all domains in training (default: OOD enabled, last domain withheld)')
+    parser.add_argument('--ood_domain_idx', type=int, default=None,
+                       help='Specific domain index to withhold for OOD testing (0-5). Default: 5 (last domain) when OOD enabled')
 
     args = parser.parse_args()
     
@@ -293,31 +299,98 @@ if __name__ == "__main__":
         if i in domain_data:
             domain_data[i]['subset'] = subset
             
+    # =============================================================================
+    # OOD DOMAIN GENERALIZATION SETUP
+    # =============================================================================
+    # Determine which domain to withhold for OOD testing
+    ood_domain = None
+    if not args.no_ood:
+        # Default: withhold last domain (domain 5)
+        ood_domain = args.ood_domain_idx if args.ood_domain_idx is not None else 5
+        print(f"\n{'='*80}")
+        print(f"🎯 OOD MODE ENABLED: Withholding domain {ood_domain} for OOD testing")
+        print(f"   Training on domains: {[i for i in range(6) if i != ood_domain]}")
+        print(f"   OOD test domain: {ood_domain}")
+        print(f"{'='*80}\n")
+    else:
+        print(f"\n{'='*80}")
+        print(f"📊 STANDARD MODE: Using all 6 domains for training")
+        print(f"{'='*80}\n")
+
     # Generate dataset (with caching)
     print("Loading/generating datasets for comparison experiments...")
-    train_dataset = generate_crmnist_dataset(spec_data, train=True,
-                                            transform_intensity=args.intensity,
-                                            transform_decay=args.intensity_decay,
-                                            use_cache=use_cache)
-    test_dataset = generate_crmnist_dataset(spec_data, train=False,
-                                           transform_intensity=args.intensity,
-                                           transform_decay=args.intensity_decay,
-                                           use_cache=use_cache)
-    
+
+    if ood_domain is not None:
+        # OOD mode: Generate ID training data (exclude OOD domain)
+        train_dataset = generate_crmnist_dataset(
+            spec_data, train=True,
+            transform_intensity=args.intensity,
+            transform_decay=args.intensity_decay,
+            use_cache=use_cache,
+            exclude_domains=[ood_domain]
+        )
+
+        # Generate full test dataset
+        full_test_dataset = generate_crmnist_dataset(
+            spec_data, train=False,
+            transform_intensity=args.intensity,
+            transform_decay=args.intensity_decay,
+            use_cache=use_cache
+        )
+
+        # Import data utilities for filtering
+        from core.data_utils import create_ood_split
+
+        # Split test dataset into ID and OOD portions
+        id_test_dataset, ood_test_dataset = create_ood_split(
+            full_test_dataset,
+            ood_domain,
+            dataset_type='crmnist'
+        )
+
+        print(f"\n📊 Dataset sizes:")
+        print(f"   Training (ID only): {len(train_dataset)} samples")
+        print(f"   ID Test: {len(id_test_dataset)} samples")
+        print(f"   OOD Test: {len(ood_test_dataset)} samples")
+    else:
+        # Standard mode: Use all domains
+        train_dataset = generate_crmnist_dataset(
+            spec_data, train=True,
+            transform_intensity=args.intensity,
+            transform_decay=args.intensity_decay,
+            use_cache=use_cache
+        )
+        test_dataset = generate_crmnist_dataset(
+            spec_data, train=False,
+            transform_intensity=args.intensity,
+            transform_decay=args.intensity_decay,
+            use_cache=use_cache
+        )
+        id_test_dataset = test_dataset
+        ood_test_dataset = None
+
+        print(f"\n📊 Dataset sizes:")
+        print(f"   Training: {len(train_dataset)} samples")
+        print(f"   Test: {len(test_dataset)} samples")
+
     # Create validation split from training data to avoid data leakage
     train_size = len(train_dataset)
     val_size = int(0.2 * train_size)  # Use 20% for validation
     train_size = train_size - val_size
-    
+
     train_subset, val_subset = torch.utils.data.random_split(
-        train_dataset, [train_size, val_size], 
+        train_dataset, [train_size, val_size],
         generator=torch.Generator().manual_seed(42)  # For reproducibility
     )
-    
+
     # Create data loaders
     train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_subset, batch_size=args.batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
+    id_test_loader = DataLoader(id_test_dataset, batch_size=args.batch_size, shuffle=False)
+    ood_test_loader = DataLoader(ood_test_dataset, batch_size=args.batch_size, shuffle=False) if ood_test_dataset else None
+
+    # For backward compatibility, keep test_loader pointing to id_test_loader
+    test_loader = id_test_loader
     
     # Get dataset dimensions
     num_y_classes = spec_data['num_y_classes']
@@ -327,9 +400,19 @@ if __name__ == "__main__":
     
     # Dictionary to store all trained models
     trained_models = {}
-    
-    # Model parameters for saving
-    model_params = {
+
+    # Base training configuration (shared across models)
+    base_training_config = {
+        'learning_rate': args.learning_rate,
+        'batch_size': args.batch_size,
+        'epochs': args.epochs,
+        'dataset': args.dataset,
+        'use_cache': use_cache,
+        'seed': None,  # No seed argument defined
+    }
+
+    # VAE-specific base parameters (for NVAE/DIVA)
+    vae_base_params = {
         'zy_dim': args.zy_dim,
         'zx_dim': args.zx_dim,
         'zay_dim': args.zay_dim,
@@ -340,6 +423,10 @@ if __name__ == "__main__":
         'beta_4': args.beta_4,
         'alpha_1': args.alpha_1,
         'alpha_2': args.alpha_2,
+        'l1_lambda_zy': args.l1_lambda_zy,
+        'l1_lambda_zx': args.l1_lambda_zx,
+        'l1_lambda_zay': args.l1_lambda_zay,
+        'l1_lambda_za': args.l1_lambda_za,
     }
     
     print(f"\nSelected models to run: {args.models}")
@@ -353,10 +440,15 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         print("🔥 TRAINING NVAE MODEL")
         print("="*60)
-        
-        model_params['diva'] = False
+
+        nvae_params = {
+            **vae_base_params,
+            **base_training_config,
+            'diva': False,
+            'model_type': 'NVAE'
+        }
         with open(os.path.join(args.out, 'nvae_model_params.json'), 'w') as f:
-            json.dump(model_params, f)
+            json.dump(nvae_params, f, indent=2)
         
         if not args.skip_training:
             nvae_model, nvae_metrics = train_nvae(args, spec_data, train_loader, val_loader, dataset='crmnist')
@@ -428,10 +520,15 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         print("🔥 TRAINING DIVA MODEL")
         print("="*60)
-        
-        model_params['diva'] = True
+
+        diva_params = {
+            **vae_base_params,
+            **base_training_config,
+            'diva': True,
+            'model_type': 'DIVA'
+        }
         with open(os.path.join(args.out, 'diva_model_params.json'), 'w') as f:
-            json.dump(model_params, f)
+            json.dump(diva_params, f, indent=2)
         
         if not args.skip_training:
             diva_model, diva_metrics = train_diva(args, spec_data, train_loader, val_loader, dataset='crmnist')
@@ -503,9 +600,16 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         print("🔥 TRAINING DANN MODEL")
         print("="*60)
-        
+
+        dann_params = {
+            'z_dim': args.zy_dim,  # DANN uses single latent representation
+            'num_y_classes': num_y_classes,
+            'num_r_classes': num_r_classes,
+            **base_training_config,
+            'model_type': 'DANN'
+        }
         with open(os.path.join(args.out, 'dann_model_params.json'), 'w') as f:
-            json.dump(model_params, f)
+            json.dump(dann_params, f, indent=2)
         
         if not args.skip_training:
             dann_model, dann_metrics = train_dann(args, spec_data, train_loader, val_loader, dataset='crmnist')
@@ -534,26 +638,40 @@ if __name__ == "__main__":
         print("🔥 TRAINING AUGMENTED DANN MODEL")
         print("="*60)
 
+        # Calculate AugmentedDANN dimensions first (needed for params)
+        total_dim = args.zy_dim + args.zx_dim + args.zay_dim + args.za_dim  # Total: 128
+        zy_aug = total_dim // 3 + (1 if total_dim % 3 > 0 else 0)  # 43
+        zd_aug = total_dim // 3 + (1 if total_dim % 3 > 1 else 0)   # 43
+        zdy_aug = total_dim // 3  # 42
+        zx_aug = 0  # AugmentedDANN doesn't use zx explicitly
+
+        print(f"📏 AugmentedDANN dimension redistribution: zy={zy_aug}, zd={zd_aug}, zdy={zdy_aug} (total={zy_aug+zd_aug+zdy_aug})")
+
         dann_aug_params = {
-            **model_params,
+            # Architecture - use actual dimensions used by AugmentedDANN
+            'zy_dim': zy_aug,
+            'zd_dim': zd_aug,
+            'zdy_dim': zdy_aug,
+            'zx_dim': zx_aug,
+            'num_y_classes': num_y_classes,
+            'num_r_classes': num_r_classes,
+
+            # AugmentedDANN-specific hyperparameters (CRITICAL!)
+            'alpha_y': 1.0,  # Class prediction weight (from model default)
+            'alpha_d': 1.0,  # Domain prediction weight (from model default)
+            'beta_adv': getattr(args, 'beta_adv', 0.15),
             'lambda_reversal': getattr(args, 'lambda_reversal', 1.0),
-            'sparsity_weight': getattr(args, 'sparsity_weight', 0.01),
-            'beta_adv': getattr(args, 'beta_adv', 0.1)
+            'sparsity_weight': getattr(args, 'sparsity_weight', 0.05),
+
+            # Training config
+            **base_training_config,
+            'model_type': 'AugmentedDANN'
         }
 
         with open(os.path.join(args.out, 'dann_augmented_model_params.json'), 'w') as f:
-            json.dump(dann_aug_params, f)
+            json.dump(dann_aug_params, f, indent=2)
 
         if not args.skip_training:
-            # Redistribute dimensions for AugmentedDANN to match total of other models
-            # AugmentedDANN uses 3 subspaces (zy, zd, zdy) while others use 4
-            # To maintain fair comparison, redistribute total dimension across 3 subspaces
-            total_dim = args.zy_dim + args.zx_dim + args.zay_dim + args.za_dim  # Total: 128
-            zy_aug = total_dim // 3 + (1 if total_dim % 3 > 0 else 0)  # 43
-            zd_aug = total_dim // 3 + (1 if total_dim % 3 > 1 else 0)   # 43
-            zdy_aug = total_dim // 3  # 42
-
-            print(f"📏 AugmentedDANN dimension redistribution: zy={zy_aug}, zd={zd_aug}, zdy={zdy_aug} (total={zy_aug+zd_aug+zdy_aug})")
 
             # Create AugmentedDANN model
             dann_aug_model = AugmentedDANN(
@@ -612,9 +730,22 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         print("🔥 TRAINING IRM MODEL")
         print("="*60)
-        
+
+        irm_params = {
+            'z_dim': args.zy_dim,  # IRM uses single latent representation
+            'num_y_classes': num_y_classes,
+            'num_r_classes': num_r_classes,
+
+            # IRM-specific hyperparameters (CRITICAL!)
+            'penalty_weight': getattr(args, 'irm_penalty_weight', 1e3),
+            'penalty_anneal_iters': getattr(args, 'irm_anneal_iters', 500),
+
+            # Training config
+            **base_training_config,
+            'model_type': 'IRM'
+        }
         with open(os.path.join(args.out, 'irm_model_params.json'), 'w') as f:
-            json.dump(model_params, f)
+            json.dump(irm_params, f, indent=2)
         
         if not args.skip_training:
             irm_model, irm_metrics = train_irm(args, spec_data, train_loader, val_loader, dataset='crmnist')
@@ -819,3 +950,124 @@ if __name__ == "__main__":
             print(f"\n⚠️  Information-theoretic evaluation failed: {e}")
             import traceback
             traceback.print_exc()
+
+    # =============================================================================
+    # OOD DOMAIN GENERALIZATION EVALUATION
+    # =============================================================================
+    if ood_test_loader is not None:
+        print("\n" + "="*80)
+        print("🎯 OOD DOMAIN GENERALIZATION EVALUATION")
+        print("="*80)
+        print(f"\nEvaluating domain generalization for withheld domain {ood_domain}...")
+
+        from core.test import test_with_ood
+        import json
+
+        # Create OOD evaluation directory
+        ood_eval_dir = os.path.join(args.out, 'ood_evaluation')
+        os.makedirs(ood_eval_dir, exist_ok=True)
+
+        # Create OOD visualization directory
+        ood_viz_dir = os.path.join(args.out, 'latent_space_ood')
+        os.makedirs(ood_viz_dir, exist_ok=True)
+
+        # Dictionary to store all OOD results
+        ood_results_summary = {}
+
+        for model_name, model in trained_models.items():
+            print(f"\n{'='*80}")
+            print(f"📊 {model_name.upper()} - Domain Generalization Results")
+            print(f"{'='*80}")
+
+            # Determine model type for test_with_ood
+            if 'dann' in model_name.lower() and 'augmented' not in model_name.lower():
+                model_type = 'dann'
+            elif 'augmented' in model_name.lower():
+                model_type = 'dann_augmented'
+            elif 'irm' in model_name.lower():
+                model_type = 'irm'
+            else:
+                model_type = model_name.lower()
+
+            # Evaluate on ID and OOD test sets
+            ood_results = test_with_ood(
+                model,
+                id_test_loader,
+                ood_test_loader,
+                dataset_type='crmnist',
+                device=args.device,
+                model_type=model_type
+            )
+
+            # Store results
+            ood_results_summary[model_name] = ood_results
+
+            # Save individual model results
+            results_file = os.path.join(ood_eval_dir, f'{model_name}_ood_results.json')
+            with open(results_file, 'w') as f:
+                # Convert numpy types to Python types for JSON serialization
+                json_results = {}
+                for key, value in ood_results.items():
+                    if isinstance(value, dict):
+                        json_results[key] = {k: float(v) for k, v in value.items()}
+                    elif value is not None:
+                        json_results[key] = float(value)
+                    else:
+                        json_results[key] = None
+                json.dump(json_results, f, indent=2)
+            print(f"\n💾 Results saved to: {results_file}")
+
+            # Generate OOD latent space visualizations (separate from ID visualizations)
+            if model_type in ['nvae', 'diva'] and not args.skip_training:
+                print(f"\n📊 Generating OOD latent space visualization for {model_name}...")
+                ood_viz_path = os.path.join(ood_viz_dir, f'{model_name}_latent_spaces_ood.png')
+                try:
+                    from core.utils import visualize_latent_spaces
+                    visualize_latent_spaces(
+                        model=model,
+                        dataloader=ood_test_loader,
+                        device=args.device,
+                        type='crmnist',
+                        save_path=ood_viz_path,
+                        max_samples=750
+                    )
+                    print(f"   ✅ OOD visualization saved to: {ood_viz_path}")
+                except Exception as e:
+                    print(f"   ⚠️  OOD visualization failed: {e}")
+
+        # Print summary comparison
+        print("\n" + "="*80)
+        print("📊 OOD GENERALIZATION SUMMARY - ALL MODELS")
+        print("="*80)
+        print(f"\n{'Model':<20} {'ID Acc':<12} {'OOD Acc':<12} {'Gap':<12} {'ID Loss':<12} {'OOD Loss':<12}")
+        print("-" * 80)
+
+        for model_name, results in ood_results_summary.items():
+            id_acc = results['id_metrics'].get('y_accuracy', 0.0)
+            ood_acc = results['ood_metrics'].get('y_accuracy', 0.0) if results['ood_metrics'] else 0.0
+            gap = results['generalization_gap'].get('y_accuracy', 0.0) if results['generalization_gap'] else 0.0
+            id_loss = results['id_loss']
+            ood_loss = results['ood_loss'] if results['ood_loss'] else 0.0
+
+            print(f"{model_name:<20} {id_acc:<12.4f} {ood_acc:<12.4f} {gap:<12.4f} {id_loss:<12.4f} {ood_loss:<12.4f}")
+
+        # Save summary results
+        summary_file = os.path.join(ood_eval_dir, 'ood_summary.json')
+        with open(summary_file, 'w') as f:
+            summary_data = {}
+            for model_name, results in ood_results_summary.items():
+                summary_data[model_name] = {
+                    'id_accuracy': float(results['id_metrics'].get('y_accuracy', 0.0)),
+                    'ood_accuracy': float(results['ood_metrics'].get('y_accuracy', 0.0)) if results['ood_metrics'] else 0.0,
+                    'accuracy_gap': float(results['generalization_gap'].get('y_accuracy', 0.0)) if results['generalization_gap'] else 0.0,
+                    'id_loss': float(results['id_loss']),
+                    'ood_loss': float(results['ood_loss']) if results['ood_loss'] else 0.0
+                }
+            json.dump(summary_data, f, indent=2)
+        print(f"\n💾 Summary saved to: {summary_file}")
+
+        print("\n" + "="*80)
+        print("✅ OOD DOMAIN GENERALIZATION EVALUATION COMPLETE!")
+        print(f"   Results directory: {ood_eval_dir}")
+        print(f"   OOD visualizations: {ood_viz_dir}")
+        print("="*80)

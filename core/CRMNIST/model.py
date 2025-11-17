@@ -231,16 +231,14 @@ class VAE(NModule):
         y_cross_entropy = F.cross_entropy(y_hat, y_target, reduction='sum')
         a_cross_entropy = F.cross_entropy(a_hat, a_target, reduction='sum')
 
-        # L1 sparsity penalties
-        l1_penalty = 0.0
-        if self.l1_lambda_zy > 0:
-            l1_penalty += self.l1_lambda_zy * torch.mean(torch.abs(zy))
-        if self.l1_lambda_zx > 0:
-            l1_penalty += self.l1_lambda_zx * torch.mean(torch.abs(zx))
-        if not self.diva and self.l1_lambda_zay > 0:
-            l1_penalty += self.l1_lambda_zay * torch.mean(torch.abs(zay))
-        if self.l1_lambda_za > 0:
-            l1_penalty += self.l1_lambda_za * torch.mean(torch.abs(za))
+        # L1 sparsity penalties (compute individually for detailed tracking)
+        l1_zy = self.l1_lambda_zy * torch.mean(torch.abs(zy)) if self.l1_lambda_zy > 0 else 0.0
+        l1_zx = self.l1_lambda_zx * torch.mean(torch.abs(zx)) if self.l1_lambda_zx > 0 else 0.0
+        l1_zay = (self.l1_lambda_zay * torch.mean(torch.abs(zay)) if self.l1_lambda_zay > 0 else 0.0) if not self.diva else 0.0
+        l1_za = self.l1_lambda_za * torch.mean(torch.abs(za)) if self.l1_lambda_za > 0 else 0.0
+
+        # Total L1 penalty
+        l1_penalty = l1_zy + l1_zx + l1_zay + l1_za
 
         # Calculate positive loss (removing negative sign)
         # In VAEs, we want to minimize the reconstruction loss + KL divergence
@@ -248,7 +246,25 @@ class VAE(NModule):
                     + self.beta_3 * kl_zay + self.beta_4 * kl_za \
                     + self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy \
                     + l1_penalty
-        return total_loss
+
+        # Return both total loss and components for detailed tracking
+        loss_components = {
+            'total': total_loss.item(),
+            'recon': x_recon_loss.item(),
+            'kl_zy': (self.beta_1 * kl_zy).item(),
+            'kl_zx': (self.beta_2 * kl_zx).item(),
+            'kl_zay': (self.beta_3 * kl_zay).item(),
+            'kl_za': (self.beta_4 * kl_za).item(),
+            'y_ce': (self.alpha_1 * y_cross_entropy).item(),
+            'a_ce': (self.alpha_2 * a_cross_entropy).item(),
+            'l1': l1_penalty if isinstance(l1_penalty, float) else l1_penalty.item(),
+            'l1_zy': l1_zy if isinstance(l1_zy, float) else l1_zy.item(),
+            'l1_zx': l1_zx if isinstance(l1_zx, float) else l1_zx.item(),
+            'l1_zay': l1_zay if isinstance(l1_zay, float) else l1_zay.item(),
+            'l1_za': l1_za if isinstance(l1_za, float) else l1_za.item()
+        }
+
+        return total_loss, loss_components
     
     def classifier(self, x):
         with torch.no_grad():

@@ -6,7 +6,7 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
 class IRM(nn.Module):
-    def __init__(self, z_dim, num_y_classes, num_r_classes, dataset, penalty_weight=1e4, penalty_anneal_iters=0):
+    def __init__(self, z_dim, num_y_classes, num_r_classes, dataset, penalty_weight=1e3, penalty_anneal_iters=0):
         super(IRM, self).__init__()
         self.num_y_classes = num_y_classes
         self.num_r_classes = num_r_classes
@@ -171,7 +171,7 @@ class IRM(nn.Module):
         
         return irm_loss, total_loss, total_penalty
 
-    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=5000):
+    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=750):
         """
         Visualize the latent space using t-SNE
         Args:
@@ -236,7 +236,7 @@ class IRM(nn.Module):
                      fontsize=13, fontweight='bold', y=1.02)
 
         # Plot task classes (digits)
-        scatter1 = ax1.scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='tab10', alpha=0.4)
+        scatter1 = ax1.scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='tab10', vmin=0, vmax=9, alpha=0.4)
         ax1.set_title('Task Classes (Digits)\n'
                      'Strong clustering indicates IRM successfully\n'
                      'learned task-relevant invariant features',
@@ -246,7 +246,7 @@ class IRM(nn.Module):
         ax1.legend(*scatter1.legend_elements(), title="Digits", fontsize=9)
 
         # Plot colors
-        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='Set1', alpha=0.4)
+        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='Set1', vmin=0, vmax=6, alpha=0.4)
         ax2.set_title('Image Colors (Spurious Feature)\n'
                      'Uniform distribution indicates color\n'
                      'is not captured (good for invariance)',
@@ -256,7 +256,7 @@ class IRM(nn.Module):
         ax2.legend(*scatter2.legend_elements(), title="Colors", fontsize=9)
 
         # Plot rotations (domains)
-        scatter3 = ax3.scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='Set2', alpha=0.4)
+        scatter3 = ax3.scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='Set2', vmin=0, vmax=5, alpha=0.4)
         ax3.set_title('Domains (Rotation Angles)\n'
                      'Uniform distribution indicates domain-invariant\n'
                      'features (primary goal of IRM)',

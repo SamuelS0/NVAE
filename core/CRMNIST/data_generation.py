@@ -84,7 +84,7 @@ class CRMNISTDataset(Dataset):
 
 
 
-def generate_cache_key(spec_data, train, transform_intensity, transform_decay, p):
+def generate_cache_key(spec_data, train, transform_intensity, transform_decay, p, exclude_domains=None):
     """
     Generate a unique cache key based on dataset configuration parameters.
     """
@@ -96,13 +96,14 @@ def generate_cache_key(spec_data, train, transform_intensity, transform_decay, p
         'train': train,
         'transform_intensity': transform_intensity,
         'transform_decay': transform_decay,
-        'p': p
+        'p': p,
+        'exclude_domains': sorted(exclude_domains) if exclude_domains else None
     }
-    
+
     # Create a hash of the configuration
     cache_str = json.dumps(cache_dict, sort_keys=True)
     cache_hash = hashlib.md5(cache_str.encode()).hexdigest()
-    
+
     return f"crmnist_{'train' if train else 'test'}_{cache_hash}.pkl"
 
 def save_dataset_cache(dataset, cache_path):
@@ -149,10 +150,10 @@ def load_dataset_cache(cache_path):
     print(f"Dataset loaded from cache: {cache_path}")
     return dataset
 
-def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transform_decay=1, p=0.5, use_cache=True):
+def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transform_decay=1, p=0.5, use_cache=True, exclude_domains=None):
     """
     Generates CRMNIST dataset with caching support.
-    
+
     Args:
         spec_data (dict): Dataset specification
         train (bool): Whether to generate training or test dataset
@@ -160,14 +161,15 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
         transform_decay (float): decay of transform
         p: probability with which an image which may be colored is colored
         use_cache (bool): Whether to use cached datasets if available
+        exclude_domains (list): List of domain indices to exclude (for OOD testing)
     Returns:
-        crmnist_dataset (dataset): 
+        crmnist_dataset (dataset):
             - if 'train' is 'true', returns training dataset.
             - if 'train' is 'false, returns test dataset.
     """
 
     # Generate unique cache key based on all parameters
-    cache_filename = generate_cache_key(spec_data, train, transform_intensity, transform_decay, p)
+    cache_filename = generate_cache_key(spec_data, train, transform_intensity, transform_decay, p, exclude_domains)
     cache_path = os.path.join(crmnist_path, 'cache', cache_filename)
 
     # Try to load from cache first
@@ -221,18 +223,27 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
     num_domains = len(domain_data)
     y_c = spec_data['y_c']
     unique_color = spec_data['unique_color']
-    
+
     print(f"\nDataset configuration:")
     print(f"Special digit (y_c) chosen for red color: {y_c}")
     print(f"Unique color: {unique_color}")
     print(f"Number of domains: {num_domains}")
-    
+
+    # OOD domain exclusion
+    if exclude_domains:
+        print(f"\n🎯 OOD MODE: Excluding domains {exclude_domains} for OOD testing")
+        print(f"   Training on domains: {[i for i in range(num_domains) if i not in exclude_domains]}")
+
     # Track statistics for red images
     total_red_images = 0
     red_images_per_domain = {i: 0 for i in range(num_domains)}
 
     # transform data for each domain
     for i in range(num_domains):
+        # Skip excluded domains for OOD testing
+        if exclude_domains and i in exclude_domains:
+            print(f"\nDomain {i}: SKIPPED (withheld for OOD testing)")
+            continue
         r_transform = core.CRMNIST.utils_crmnist.make_transform(domain_data, i, 'rotate_only', transform_intensity, transform_decay)
         c_transform = core.CRMNIST.utils_crmnist.make_transform(domain_data, i, 'domain_color', transform_intensity, transform_decay)
         red_transform = core.CRMNIST.utils_crmnist.make_transform(domain_data, i, 'unique_color', transform_intensity, transform_decay)

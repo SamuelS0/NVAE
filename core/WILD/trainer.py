@@ -113,17 +113,35 @@ class WILDTrainer:
             x, y, hospital_id = process_batch(batch, self.device, dataset_type='wild')
             self.optimizer.zero_grad()
 
-            loss = self.model.loss_function(y, x, hospital_id, current_beta)
+            loss_result = self.model.loss_function(y, x, hospital_id, current_beta)
+
+            # Handle both old (scalar) and new (tuple) return formats
+            if isinstance(loss_result, tuple):
+                loss, loss_components = loss_result
+            else:
+                loss = loss_result
+                loss_components = None
+
             loss.backward()
             self.optimizer.step()
             train_loss += loss.item()
-            
+
             # Calculate metrics for every batch to be consistent with validation
             batch_metrics = _calculate_metrics(self.model, y, x, hospital_id, 'train')
             for k, v in batch_metrics.items():
                 train_metrics_sum[k] += v
-            
-            train_pbar.set_postfix(loss=loss.item())
+
+            # Update progress bar with detailed loss components
+            if loss_components:
+                train_pbar.set_postfix(
+                    loss=f"{loss_components['total']:.2f}",
+                    recon=f"{loss_components['recon']:.1f}",
+                    y_ce=f"{loss_components['y_ce']:.1f}",
+                    a_ce=f"{loss_components['a_ce']:.1f}",
+                    l1=f"{loss_components['l1']:.3f}"
+                )
+            else:
+                train_pbar.set_postfix(loss=loss.item())
         
         avg_train_loss = train_loss / len(train_loader)
         avg_train_metrics = {k: v / len(train_loader) for k, v in train_metrics_sum.items()}
@@ -147,14 +165,30 @@ class WILDTrainer:
             for batch_idx, batch in val_pbar:
                 x, y, hospital_id = process_batch(batch, self.device, dataset_type='wild')
 
-                loss = self.model.loss_function(y, x, hospital_id, current_beta)
+                loss_result = self.model.loss_function(y, x, hospital_id, current_beta)
+
+                # Handle both old (scalar) and new (tuple) return formats
+                if isinstance(loss_result, tuple):
+                    loss, loss_components = loss_result
+                else:
+                    loss = loss_result
+                    loss_components = None
+
                 val_loss += loss.item()
-                
+
                 batch_metrics = _calculate_metrics(self.model, y, x, hospital_id, 'val')
                 for k, v in batch_metrics.items():
                     val_metrics_sum[k] += v
-                
-                val_pbar.set_postfix(loss=loss.item())
+
+                # Update progress bar with detailed loss components
+                if loss_components:
+                    val_pbar.set_postfix(
+                        loss=f"{loss_components['total']:.2f}",
+                        recon=f"{loss_components['recon']:.1f}",
+                        l1=f"{loss_components['l1']:.3f}"
+                    )
+                else:
+                    val_pbar.set_postfix(loss=loss.item())
         
         val_loss /= len(val_loader)
         val_metrics = {k: v / len(val_loader) for k, v in val_metrics_sum.items()}

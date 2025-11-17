@@ -269,7 +269,20 @@ class VAE(NModule):
                     self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy + \
                     l1_penalty
 
-        return total_loss
+        # Return both total loss and components for detailed tracking
+        loss_components = {
+            'total': total_loss.item(),
+            'recon': (self.recon_weight * x_recon_loss).item(),
+            'kl_zy': (current_beta * self.beta_1 * kl_zy).item(),
+            'kl_zx': (current_beta * self.beta_2 * kl_zx).item(),
+            'kl_zay': (current_beta * self.beta_3 * kl_zay).item(),
+            'kl_za': (current_beta * self.beta_4 * kl_za).item(),
+            'y_ce': (self.alpha_1 * y_cross_entropy).item(),
+            'a_ce': (self.alpha_2 * a_cross_entropy).item(),
+            'l1': l1_penalty if isinstance(l1_penalty, float) else l1_penalty.item()
+        }
+
+        return total_loss, loss_components
     
     def classifier(self, x):
         with torch.no_grad():
@@ -349,7 +362,7 @@ class VAE(NModule):
         
         return generated_images_full, y
 
-    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=1000):
+    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=750):
         """
         Visualize the latent spaces using t-SNE with balanced sampling for WILD dataset
         Args:
@@ -475,7 +488,7 @@ class VAE(NModule):
         """Check if the model is in DIVA mode"""
         return self.diva
 
-    def visualize_latent_spaces_diva(self, dataloader, device, save_path=None, max_samples=1000):
+    def visualize_latent_spaces_diva(self, dataloader, device, save_path=None, max_samples=750):
         """Convenience method for DIVA-specific visualization"""
         if not self.diva:
             print("Warning: Model is not in DIVA mode. Using regular VAE visualization.")
@@ -1246,7 +1259,20 @@ class pza(NModule):
                     self.alpha_1 * y_cross_entropy + self.alpha_2 * a_cross_entropy + \
                     l1_penalty
 
-        return total_loss
+        # Return both total loss and components for detailed tracking
+        loss_components = {
+            'total': total_loss.item(),
+            'recon': (self.recon_weight * x_recon_loss).item(),
+            'kl_zy': (current_beta * self.beta_1 * kl_zy).item(),
+            'kl_zx': (current_beta * self.beta_2 * kl_zx).item(),
+            'kl_zay': (current_beta * self.beta_3 * kl_zay).item(),
+            'kl_za': (current_beta * self.beta_4 * kl_za).item(),
+            'y_ce': (self.alpha_1 * y_cross_entropy).item(),
+            'a_ce': (self.alpha_2 * a_cross_entropy).item(),
+            'l1': l1_penalty if isinstance(l1_penalty, float) else l1_penalty.item()
+        }
+
+        return total_loss, loss_components
     
     def classifier(self, x):
         with torch.no_grad():
