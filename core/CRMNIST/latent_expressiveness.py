@@ -486,31 +486,6 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
         label_improvement_val_pct = (label_improvement_val / results['label_zy_alone']['val_acc']) * 100
         label_improvement_test_pct = (label_improvement_test / results['label_zy_alone']['test_acc']) * 100
 
-        # Add improvement annotations (bar index 2 is the combined za+zay or zy+zay)
-        axes[0,0].annotate(f'Improvement:\n+{domain_improvement_val:.3f} ({domain_improvement_val_pct:.1f}%)',
-                          xy=(2, results['domain_za_zay']['val_acc']), xytext=(2.3, y_max * 0.85),
-                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
-                          fontsize=8, fontweight='bold', color='darkred', ha='center',
-                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
-
-        axes[0,1].annotate(f'Improvement:\n+{domain_improvement_test:.3f} ({domain_improvement_test_pct:.1f}%)',
-                          xy=(2, results['domain_za_zay']['test_acc']), xytext=(2.3, y_max * 0.85),
-                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
-                          fontsize=8, fontweight='bold', color='darkred', ha='center',
-                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
-
-        axes[1,0].annotate(f'Improvement:\n+{label_improvement_val:.3f} ({label_improvement_val_pct:.1f}%)',
-                          xy=(2, results['label_zy_zay']['val_acc']), xytext=(2.3, y_max * 0.85),
-                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
-                          fontsize=8, fontweight='bold', color='darkred', ha='center',
-                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
-
-        axes[1,1].annotate(f'Improvement:\n+{label_improvement_test:.3f} ({label_improvement_test_pct:.1f}%)',
-                          xy=(2, results['label_zy_zay']['test_acc']), xytext=(2.3, y_max * 0.85),
-                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
-                          fontsize=8, fontweight='bold', color='darkred', ha='center',
-                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
-    
     plt.tight_layout()
     
     # Save the plot

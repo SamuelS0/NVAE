@@ -10,8 +10,8 @@ def load_expressiveness_results(results_dir):
     """Load expressiveness results from all model directories."""
     
     results = {}
-    model_types = ['nvae', 'diva', 'dann', 'irm']
-    
+    model_types = ['nvae', 'diva', 'dann', 'dann_augmented', 'irm']
+
     for model_type in model_types:
         model_dir = os.path.join(results_dir, f'{model_type}_expressiveness')
         results_file = os.path.join(model_dir, 'latent_expressiveness_results.json')

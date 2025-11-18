@@ -710,7 +710,7 @@ def evaluate_model(
         n_neighbors=7,
         n_bootstrap=n_bootstrap,
         max_dims=30,
-        pca_variance=0.99
+        pca_variance=0.95  # Use 95% variance for faster computation
     )
 
     results = evaluator.evaluate_latent_partition(

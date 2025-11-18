@@ -81,10 +81,11 @@ class CRMNISTTrainer:
             print(f'  Val Loss: {val_loss:.4f}')
             for k, v in val_metrics.items():
                 print(f'  Val {k}: {v:.4f}')
-            
+
             # Visualize latent spaces after each epoch
-            self.visualize_latent_epoch(val_loader, epoch)
-            
+            # DISABLED: Only generate final visualization after all epochs complete (saves time)
+            # self.visualize_latent_epoch(val_loader, epoch)
+
             # Generate and visualize reconstructions after each epoch
             # Skip for DANN models which don't do reconstructions
             # if not isinstance(self.model, DANN):

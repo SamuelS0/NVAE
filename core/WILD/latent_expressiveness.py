@@ -531,31 +531,6 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
         else:
             tumor_improvement_test_pct = 0
 
-        # Add improvement annotations (bar index 2 is the combined za+zay or zy+zay)
-        axes[0,0].annotate(f'Improvement:\n+{hospital_improvement_val:.3f} ({hospital_improvement_val_pct:.1f}%)',
-                          xy=(2, results['hospital_za_zay']['val_acc']), xytext=(2.3, y_max * 0.85),
-                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
-                          fontsize=8, fontweight='bold', color='darkred', ha='center',
-                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
-
-        axes[0,1].annotate(f'Improvement:\n+{hospital_improvement_test:.3f} ({hospital_improvement_test_pct:.1f}%)',
-                          xy=(2, results['hospital_za_zay']['test_acc']), xytext=(2.3, y_max * 0.85),
-                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
-                          fontsize=8, fontweight='bold', color='darkred', ha='center',
-                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
-
-        axes[1,0].annotate(f'Improvement:\n+{tumor_improvement_val:.3f} ({tumor_improvement_val_pct:.1f}%)',
-                          xy=(2, results['tumor_zy_zay']['val_acc']), xytext=(2.3, y_max * 0.85),
-                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
-                          fontsize=8, fontweight='bold', color='darkred', ha='center',
-                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
-
-        axes[1,1].annotate(f'Improvement:\n+{tumor_improvement_test:.3f} ({tumor_improvement_test_pct:.1f}%)',
-                          xy=(2, results['tumor_zy_zay']['test_acc']), xytext=(2.3, y_max * 0.85),
-                          arrowprops=dict(arrowstyle='->', color='darkred', lw=2),
-                          fontsize=8, fontweight='bold', color='darkred', ha='center',
-                          bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.3))
-
     plt.tight_layout()
 
     # Save the plot
