@@ -486,8 +486,8 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
         label_improvement_val_pct = (label_improvement_val / results['label_zy_alone']['val_acc']) * 100
         label_improvement_test_pct = (label_improvement_test / results['label_zy_alone']['test_acc']) * 100
 
-    plt.tight_layout()
-    
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+
     # Save the plot
     plot_path = os.path.join(save_dir, 'latent_expressiveness_comparison.png')
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')

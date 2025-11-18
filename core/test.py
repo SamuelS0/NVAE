@@ -69,8 +69,17 @@ def test_dann(model, test_loader, dataset_type, device):
                 y = torch.argmax(y, dim=1)
             if len(r.shape) > 1 and r.shape[1] > 1:
                 r = torch.argmax(r, dim=1)
-            
-            y_predictions, domain_predictions = model(x, y, r)
+
+            # Handle both basic DANN (2 outputs) and AugmentedDANN (13 outputs)
+            output = model(x, y, r)
+            if isinstance(output, tuple) and len(output) == 13:
+                # AugmentedDANN returns NVAE-style interface
+                x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = output
+                y_predictions = y_hat
+                domain_predictions = a_hat
+            else:
+                # Basic DANN returns (y_predictions, domain_predictions)
+                y_predictions, domain_predictions = output
 
             loss, y_loss, domain_loss = model.loss_function(y_predictions, domain_predictions, y, r)
             test_loss += loss.item()
@@ -91,6 +100,41 @@ def test_dann(model, test_loader, dataset_type, device):
     metrics_avg = {k: v / len(test_loader) for k, v in metrics_sum.items()}
     metrics_avg['y_loss'] = test_y_loss
     metrics_avg['domain_loss'] = test_domain_loss
+
+    return test_loss, metrics_avg
+
+
+def test_irm(model, test_loader, dataset_type, device):
+    model.eval()
+    test_loss = 0
+    metrics_sum = {'y_accuracy': 0}
+
+    test_pbar = tqdm(enumerate(test_loader), total=len(test_loader), desc="Final evaluation")
+
+    with torch.no_grad():
+        for batch_idx, batch in test_pbar:
+            x, y, r = process_batch(batch, device, dataset_type=dataset_type)
+
+            # Convert one-hot encoded labels to class indices
+            if len(y.shape) > 1 and y.shape[1] > 1:
+                y = torch.argmax(y, dim=1)
+            if len(r.shape) > 1 and r.shape[1] > 1:
+                r = torch.argmax(r, dim=1)
+
+            # IRM forward returns (logits, features)
+            logits, features = model(x, y, r)
+
+            # Simple cross-entropy loss for testing (no IRM penalty)
+            loss = F.cross_entropy(logits, y)
+            test_loss += loss.item()
+
+            y_pred = torch.argmax(logits, dim=1)
+            metrics_sum['y_accuracy'] += (y_pred == y).sum().item()
+
+            test_pbar.set_postfix(loss=loss.item())
+
+    test_loss /= len(test_loader)
+    metrics_avg = {k: v / len(test_loader) for k, v in metrics_sum.items()}
 
     return test_loss, metrics_avg
 
@@ -116,8 +160,8 @@ def test_with_ood(model, id_test_loader, ood_test_loader, dataset_type, device, 
     if model_type in ['dann', 'dann_augmented']:
         test_fn = test_dann
     elif model_type == 'irm':
-        # IRM uses similar interface to DANN
-        test_fn = test_dann
+        # IRM has different interface, needs its own test function
+        test_fn = test_irm
     else:
         # NVAE and DIVA use the same test function
         test_fn = test_nvae

@@ -142,10 +142,11 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
                 y_dim=spec_data['num_y_classes'],
                 d_dim=spec_data['num_r_classes'],
                 lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
-                sparsity_weight=getattr(args, 'sparsity_weight', 2.0),
+                sparsity_weight=getattr(args, 'sparsity_weight', 10.0),
+                sparsity_weight_other=getattr(args, 'sparsity_weight_other', 0.5),
                 alpha_y=args.alpha_1,
                 alpha_d=args.alpha_2,
-                beta_adv=getattr(args, 'beta_adv', 0.1),
+                beta_adv=getattr(args, 'beta_adv', 0.2),
                 image_size=28
             )
 
@@ -187,31 +188,31 @@ if __name__ == "__main__":
     parser.add_argument('--zx_dim', type=int, default=32)
     parser.add_argument('--zay_dim', type=int, default=32)
     parser.add_argument('--za_dim', type=int, default=32)
-    parser.add_argument('--beta_1', type=float, default=2.0)
-    parser.add_argument('--beta_2', type=float, default=2.0)
-    parser.add_argument('--beta_3', type=float, default=2.0)
+    parser.add_argument('--beta_1', type=float, default=1.0)
+    parser.add_argument('--beta_2', type=float, default=5.0)
+    parser.add_argument('--beta_3', type=float, default=20.0)
     parser.add_argument('--beta_4', type=float, default=2.0)
-    parser.add_argument('--alpha_1', type=float, default=300.0)
-    parser.add_argument('--alpha_2', type=float, default=50.0)
+    parser.add_argument('--alpha_1', type=float, default=100.0)
+    parser.add_argument('--alpha_2', type=float, default=100.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--dataset', type=str, default='crmnist')
     parser.add_argument('--use_cache', action='store_true', default=True, 
                        help='Use cached datasets if available (default: True)')
     parser.add_argument('--no_cache', action='store_true', default=False,
                        help='Disable dataset caching and force regeneration')
-    parser.add_argument('--patience', type=int, default=10)
+    parser.add_argument('--patience', type=int, default=5)
     parser.add_argument('--beta_annealing', action='store_true', help='Enable beta annealing for KL divergence')
     parser.add_argument('--beta_scale', type=float, default=1.0)
 
     # L1 sparsity penalty arguments
-    parser.add_argument('--l1_lambda_zy', type=float, default=5.0,
-                       help='L1 penalty weight for zy latent (default: 5.0)')
-    parser.add_argument('--l1_lambda_zx', type=float, default=5.0,
-                       help='L1 penalty weight for zx latent (default: 5.0)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=150.0,
-                       help='L1 penalty weight for zay latent (default: 150.0)')
-    parser.add_argument('--l1_lambda_za', type=float, default=5.0,
-                       help='L1 penalty weight for za latent (default: 5.0)')
+    parser.add_argument('--l1_lambda_zy', type=float, default=0.0,
+                       help='L1 penalty weight for zy latent (default: 0.0)')
+    parser.add_argument('--l1_lambda_zx', type=float, default=50.0,
+                       help='L1 penalty weight for zx latent (default: 50.0)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=500.0,
+                       help='L1 penalty weight for zay latent (default: 500.0)')
+    parser.add_argument('--l1_lambda_za', type=float, default=0.0,
+                       help='L1 penalty weight for za latent (default: 0.0)')
 
     # Model selection arguments
     parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],
@@ -225,10 +226,12 @@ if __name__ == "__main__":
     # AugmentedDANN-specific parameters
     parser.add_argument('--lambda_reversal', type=float, default=1.0,
                        help='Lambda parameter for gradient reversal in AugmentedDANN (default: 1.0)')
-    parser.add_argument('--sparsity_weight', type=float, default=2.0,
-                       help='Target weight for sparsity penalty on zdy in AugmentedDANN, increases from 0 with DANN schedule (default: 2.0)')
-    parser.add_argument('--beta_adv', type=float, default=0.15,
-                       help='Weight for adversarial loss in AugmentedDANN (default: 0.15)')
+    parser.add_argument('--sparsity_weight', type=float, default=10.0,
+                       help='Target weight for sparsity penalty on zdy in AugmentedDANN, increases from 0 with DANN schedule (default: 10.0)')
+    parser.add_argument('--sparsity_weight_other', type=float, default=0.5,
+                       help='Target weight for sparsity penalty on zy and zd in AugmentedDANN (default: 0.5)')
+    parser.add_argument('--beta_adv', type=float, default=0.2,
+                       help='Weight for adversarial loss in AugmentedDANN (default: 0.2)')
 
     # IRM-specific parameters
     parser.add_argument('--irm_penalty_weight', type=float, default=1e3,
@@ -682,10 +685,11 @@ if __name__ == "__main__":
                 y_dim=spec_data['num_y_classes'],
                 d_dim=spec_data['num_r_classes'],
                 lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
-                sparsity_weight=getattr(args, 'sparsity_weight', 2.0),
+                sparsity_weight=getattr(args, 'sparsity_weight', 10.0),
+                sparsity_weight_other=getattr(args, 'sparsity_weight_other', 0.5),
                 alpha_y=args.alpha_1,
                 alpha_d=args.alpha_2,
-                beta_adv=getattr(args, 'beta_adv', 0.1),
+                beta_adv=getattr(args, 'beta_adv', 0.2),
                 image_size=28
             ).to(args.device)
 

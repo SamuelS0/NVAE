@@ -531,7 +531,7 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
         else:
             tumor_improvement_test_pct = 0
 
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
 
     # Save the plot
     plot_path = os.path.join(save_dir, 'latent_expressiveness_comparison.png')

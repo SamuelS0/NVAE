@@ -84,6 +84,7 @@ class AugmentedDANN(NModule):
         padding=0,
         lambda_reversal=1.0,
         sparsity_weight=0.05,
+        sparsity_weight_other=1.0,
         alpha_y=1.0,
         alpha_d=1.0,
         beta_adv=0.15,
@@ -103,9 +104,9 @@ class AugmentedDANN(NModule):
         self.image_size = image_size
 
         # Training parameters
-        self.sparsity_weight_zdy_target = sparsity_weight  # Target weight for zdy sparsity (default 2.0)
+        self.sparsity_weight_zdy_target = sparsity_weight  # Target weight for zdy sparsity (default 10.0)
         self.sparsity_weight_zdy_current = 0.0  # Current sparsity weight for zdy (increases from 0 to target)
-        self.sparsity_weight_other_target = 1.0  # Target weight for zy and zd sparsity
+        self.sparsity_weight_other_target = sparsity_weight_other  # Target weight for zy and zd sparsity (default 0.5)
         self.sparsity_weight_other_current = 0.0  # Current sparsity weight for zy and zd
         self.alpha_y = alpha_y
         self.alpha_d = alpha_d
@@ -549,8 +550,8 @@ class AugmentedDANN(NModule):
         λ(p) = 2/(1+exp(-10p)) - 1 where p is training progress
 
         Also updates sparsity weights for all latent spaces using the same schedule:
-        - zdy: increases from 0 to sparsity_weight_zdy_target (default 2.0)
-        - zy, zd: increase from 0 to sparsity_weight_other_target (default 1.0)
+        - zdy: increases from 0 to sparsity_weight_zdy_target (default 10.0)
+        - zy, zd: increase from 0 to sparsity_weight_other_target (default 0.5)
         """
         # Ensure numerical stability
         if total_epochs <= 0:
