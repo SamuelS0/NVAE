@@ -595,12 +595,12 @@ def sample_wild(model, dataloader, max_samples=750, device=None):
     
     # Initialize counters for each combination
     counts = {}
-    for digit in range(10):  # 10 digits
-        for hospital in range(6):  # 6 hospitals
-            counts[(digit, hospital)] = 0
-    
+    for label in range(2):  # 2 classes: Normal (0), Tumor (1)
+        for hospital in range(5):  # 5 hospitals (0-4)
+            counts[(label, hospital)] = 0
+
     # Target samples per combination
-    target_samples = min(50, max_samples // 60)  # 60 combinations total (10 digits * 6 hospitals)
+    target_samples = min(50, max_samples // 10)  # 10 combinations total (2 labels × 5 hospitals)
     total_collected = 0
     
     # Collect data in batches
@@ -625,14 +625,14 @@ def sample_wild(model, dataloader, max_samples=750, device=None):
             for j in range(len(y)):
                 if total_collected >= max_samples:
                     break
-                    
-                digit = y[j].item()
-                hospital = domain[j].item()
-                
+
+                label = y[j].item()  # 0=Normal, 1=Tumor
+                hospital = domain[j].item()  # 0-4 for WILD
+
                 # Only keep if we need more samples for this combination
-                if counts[(digit, hospital)] < target_samples:
+                if counts[(label, hospital)] < target_samples:
                     keep_mask[j] = True
-                    counts[(digit, hospital)] += 1
+                    counts[(label, hospital)] += 1
                     total_collected += 1
             
             # Apply mask to get only samples we want to keep
@@ -659,8 +659,8 @@ def sample_wild(model, dataloader, max_samples=750, device=None):
                 zx_list.append(zx.cpu())
                 y_list.append(y_batch.cpu())
                 
-                # Convert hospital IDs to strings for better visualization
-                hospital_labels = [f"Hospital {h.item() + 1}" for h in domain_batch]
+                # Convert hospital IDs to strings for better visualization (WILD uses 0-4)
+                hospital_labels = [f"Hospital {h.item()}" for h in domain_batch]
                 domain_dict["hospital"].append(hospital_labels)
                 labels_dict["digit"].append(y_batch.cpu())
                 labels_dict["hospital"].append(hospital_labels)
@@ -681,8 +681,10 @@ def sample_wild(model, dataloader, max_samples=750, device=None):
     
     # Print sample counts
     print("\nNumber of samples per combination:")
-    for (digit, hospital), count in counts.items():
-        print(f"Digit {digit}, Hospital {hospital + 1}: {count} samples")
+    label_names = ["Normal", "Tumor"]
+    for (label, hospital), count in counts.items():
+        label_name = label_names[label] if label < len(label_names) else f"Label {label}"
+        print(f"{label_name} (class {label}), Hospital {hospital}: {count} samples")
     
     # Calculate total samples
     total_samples = sum(counts.values())
