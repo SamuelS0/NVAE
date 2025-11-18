@@ -104,9 +104,20 @@ class MinimalInformationPartitionEvaluator:
         if Z.shape[1] <= self.max_dims:
             return Z, None
 
+        # Check for collapsed latent space (zero variance)
+        Z_var = np.var(Z)
+        if Z_var < 1e-10 or np.any(np.isnan(Z)) or np.any(np.isinf(Z)):
+            print(f"  ⚠️  Warning: {name} has collapsed (variance={Z_var:.2e}). Skipping PCA.")
+            # Return with small noise added to prevent MI calculation failures
+            Z_safe = Z + np.random.normal(0, 1e-8, Z.shape)
+            return Z_safe, None
+
         print(f"  {name} has {Z.shape[1]} dims > {self.max_dims}, applying PCA...")
         pca = PCA(n_components=self.pca_variance, random_state=self.random_state)
-        Z_reduced = pca.fit_transform(Z)
+
+        # Add small noise to prevent numerical issues in PCA
+        Z_safe = Z + np.random.normal(0, 1e-10, Z.shape)
+        Z_reduced = pca.fit_transform(Z_safe)
         explained_var = np.sum(pca.explained_variance_ratio_)
         print(f"    Reduced to {Z_reduced.shape[1]} dims (explained variance: {explained_var:.2%})")
 

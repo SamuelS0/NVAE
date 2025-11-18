@@ -971,8 +971,8 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     latent_spaces = [(zy, 'Label-specific (zy)')]
     
     # Handle different model architectures
-    if type == "dann":
-        # For DANN: zy=class-specific, za=domain-specific, zay=interaction
+    if type == "dann" or type == "dann_augmented":
+        # For DANN/AugmentedDANN: zy=class-specific, za=domain-specific, zay=interaction
         if zay_list[0] is not None:
             zay = torch.cat(zay_list, dim=0).numpy()
             latent_spaces.append((zay, 'Domain-Class Interaction (zdy)'))
@@ -997,7 +997,19 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     
     tsne_results = []
     for space, title in tqdm(latent_spaces, desc="Computing t-SNE", unit="space"):
-        space_2d = tsne.fit_transform(space)
+        # Add safety check for zero variance (collapsed latent space)
+        space_std = np.std(space, axis=0)
+        space_var = np.var(space)
+
+        if space_var < 1e-10 or np.any(np.isnan(space)) or np.any(np.isinf(space)):
+            print(f"\n⚠️  Warning: '{title}' has collapsed (variance={space_var:.2e}). Skipping t-SNE for this space.")
+            # Create a dummy 2D space with zeros for visualization
+            space_2d = np.zeros((space.shape[0], 2))
+        else:
+            # Add small noise to prevent numerical issues
+            space_safe = space + np.random.normal(0, 1e-8, space.shape)
+            space_2d = tsne.fit_transform(space_safe)
+
         tsne_results.append((space_2d, title))
     
     # Create figure

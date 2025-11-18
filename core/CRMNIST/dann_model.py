@@ -90,7 +90,7 @@ class AugmentedDANN(NModule):
         image_size=28  # Image dimensions: 28 for CRMNIST, 96 for WILD
     ):
         super().__init__()
-        
+
         self.name = 'dann'
         self.class_map = class_map
 
@@ -103,7 +103,10 @@ class AugmentedDANN(NModule):
         self.image_size = image_size
 
         # Training parameters
-        self.sparsity_weight = sparsity_weight
+        self.sparsity_weight_zdy_target = sparsity_weight  # Target weight for zdy sparsity (default 5.0)
+        self.sparsity_weight_zdy_current = 0.0  # Current sparsity weight for zdy (increases from 0 to target)
+        self.sparsity_weight_other_target = 1.0  # Target weight for zy and zd sparsity
+        self.sparsity_weight_other_current = 0.0  # Current sparsity weight for zy and zd
         self.alpha_y = alpha_y
         self.alpha_d = alpha_d
         self.beta_adv = beta_adv
@@ -119,25 +122,21 @@ class AugmentedDANN(NModule):
             nn.Linear(zy_dim + zdy_dim, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Dropout(0.5),
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.5),
             nn.Linear(64, y_dim)
         )
         
-        # System 2: Domain-focused DANN components  
+        # System 2: Domain-focused DANN components
         # Main domain classifier (operates on Z_d ∪ Z_dy)
         self.domain_classifier_main = nn.Sequential(
             nn.Linear(zd_dim + zdy_dim, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Dropout(0.5),
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.5),
             nn.Linear(64, d_dim)
         )
         
@@ -150,11 +149,9 @@ class AugmentedDANN(NModule):
             nn.Linear(zy_dim, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.5),
             nn.Linear(64, 32),
             nn.BatchNorm1d(32),
             nn.ReLU(),
-            nn.Dropout(0.5),
             nn.Linear(32, d_dim)
         )
         
@@ -162,11 +159,9 @@ class AugmentedDANN(NModule):
             nn.Linear(zd_dim, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.5),
             nn.Linear(64, 32),
             nn.BatchNorm1d(32),
             nn.ReLU(),
-            nn.Dropout(0.5),
             nn.Linear(32, y_dim)
         )
         
@@ -463,18 +458,21 @@ class AugmentedDANN(NModule):
         # Adversarial losses (use pure features with GRL)
         loss_d_adversarial = F.cross_entropy(outputs['d_pred_adversarial'], d.long())
         loss_y_adversarial = F.cross_entropy(outputs['y_pred_adversarial'], y.long())
-        
-        # Sparsity penalty on Z_dy (L1 regularization)
-        sparsity_loss = torch.mean(torch.abs(outputs['zdy']))
-        
+
+        # Sparsity penalties (L1 regularization) - all increase with training schedule
+        sparsity_loss_zdy = torch.mean(torch.abs(outputs['zdy']))
+        sparsity_loss_zy = torch.mean(torch.abs(outputs['zy']))
+        sparsity_loss_zd = torch.mean(torch.abs(outputs['zd']))
+
         # Total loss
         total_loss = (
             self.alpha_y * loss_y_main +
             self.alpha_d * loss_d_main +
             self.beta_adv * (loss_d_adversarial + loss_y_adversarial) +
-            self.sparsity_weight * sparsity_loss
+            self.sparsity_weight_zdy_current * sparsity_loss_zdy +
+            self.sparsity_weight_other_current * (sparsity_loss_zy + sparsity_loss_zd)
         )
-        
+
         return total_loss
     
     def detailed_loss(self, y, x, d):
@@ -499,27 +497,34 @@ class AugmentedDANN(NModule):
         # Adversarial losses (use pure features with GRL)
         loss_d_adversarial = F.cross_entropy(outputs['d_pred_adversarial'], d.long())
         loss_y_adversarial = F.cross_entropy(outputs['y_pred_adversarial'], y.long())
-        
-        # Sparsity penalty
-        sparsity_loss = torch.mean(torch.abs(outputs['zdy']))
-        
+
+        # Sparsity penalties (L1 regularization) - all increase with training schedule
+        sparsity_loss_zdy = torch.mean(torch.abs(outputs['zdy']))
+        sparsity_loss_zy = torch.mean(torch.abs(outputs['zy']))
+        sparsity_loss_zd = torch.mean(torch.abs(outputs['zd']))
+
         # Total loss
         total_loss = (
             self.alpha_y * loss_y_main +
             self.alpha_d * loss_d_main +
             self.beta_adv * (loss_d_adversarial + loss_y_adversarial) +
-            self.sparsity_weight * sparsity_loss
+            self.sparsity_weight_zdy_current * sparsity_loss_zdy +
+            self.sparsity_weight_other_current * (sparsity_loss_zy + sparsity_loss_zd)
         )
-        
+
         loss_dict = {
             'total_loss': total_loss.item(),
             'loss_y_main': loss_y_main.item(),
             'loss_d_main': loss_d_main.item(),
             'loss_d_adversarial': loss_d_adversarial.item(),
             'loss_y_adversarial': loss_y_adversarial.item(),
-            'sparsity_loss': sparsity_loss.item()
+            'sparsity_loss_zdy': sparsity_loss_zdy.item(),
+            'sparsity_loss_zy': sparsity_loss_zy.item(),
+            'sparsity_loss_zd': sparsity_loss_zd.item(),
+            'sparsity_weight_zdy': self.sparsity_weight_zdy_current,
+            'sparsity_weight_other': self.sparsity_weight_other_current
         }
-        
+
         return total_loss, loss_dict
     
     def classifier(self, x):
@@ -554,13 +559,17 @@ class AugmentedDANN(NModule):
         """
         Update gradient reversal lambda using standard DANN scheduling
         λ(p) = 2/(1+exp(-10p)) - 1 where p is training progress
+
+        Also updates sparsity weights for all latent spaces using the same schedule:
+        - zdy: increases from 0 to sparsity_weight_zdy_target (default 5.0)
+        - zy, zd: increase from 0 to sparsity_weight_other_target (default 1.0)
         """
         # Ensure numerical stability
         if total_epochs <= 0:
             raise ValueError("total_epochs must be positive")
-        
+
         p = max(0.0, min(1.0, epoch / total_epochs))  # Clamp p to [0, 1]
-        
+
         # Use numpy.clip to prevent overflow in exponential
         exp_arg = np.clip(-10 * p, -50, 50)  # Prevent extreme values
         try:
@@ -570,8 +579,14 @@ class AugmentedDANN(NModule):
         except (OverflowError, RuntimeWarning):
             # Fallback to safe value if computation fails
             lambda_val = -1.0 if p < 0.5 else 1.0
-        
+
         self.set_gradient_reversal_lambda(lambda_val)
+
+        # Update sparsity weights using same schedule: map [0, 1] to [0, target]
+        # lambda_val ranges from 0 to ~1, so we use it directly as progress
+        self.sparsity_weight_zdy_current = lambda_val * self.sparsity_weight_zdy_target
+        self.sparsity_weight_other_current = lambda_val * self.sparsity_weight_other_target
+
         return lambda_val
     
     def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=750, dataset_type="crmnist"):

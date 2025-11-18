@@ -50,8 +50,8 @@ class DANNTrainer:
         self.epochs_trained = 0
         self.best_epoch = 0
         self.best_batch_metrics = {
-            'loss_y_main': 0, 'loss_d_main': 0, 'loss_d_adversarial': 0, 
-            'loss_y_adversarial': 0, 'sparsity_loss': 0,
+            'loss_y_main': 0, 'loss_d_main': 0, 'loss_d_adversarial': 0,
+            'loss_y_adversarial': 0, 'sparsity_loss_zdy': 0, 'sparsity_loss_zy': 0, 'sparsity_loss_zd': 0,
             'y_accuracy': 0, 'a_accuracy': 0
         }
         
@@ -132,7 +132,7 @@ class DANNTrainer:
         train_loss = 0
         train_metrics_sum = {
             'loss_y_main': 0, 'loss_d_main': 0, 'loss_d_adversarial': 0,
-            'loss_y_adversarial': 0, 'sparsity_loss': 0,
+            'loss_y_adversarial': 0, 'sparsity_loss_zdy': 0, 'sparsity_loss_zy': 0, 'sparsity_loss_zd': 0,
             'y_accuracy': 0, 'a_accuracy': 0
         }
         num_batches = 0
@@ -190,7 +190,7 @@ class DANNTrainer:
         val_loss = 0
         val_metrics_sum = {
             'loss_y_main': 0, 'loss_d_main': 0, 'loss_d_adversarial': 0,
-            'loss_y_adversarial': 0, 'sparsity_loss': 0,
+            'loss_y_adversarial': 0, 'sparsity_loss_zdy': 0, 'sparsity_loss_zy': 0, 'sparsity_loss_zd': 0,
             'y_accuracy': 0, 'a_accuracy': 0
         }
         
@@ -288,11 +288,17 @@ class DANNTrainer:
             print(f"{prefix}Class Adv. Acc: {metrics['y_adv_accuracy']:.4f} (should be low)")
         
         # Loss components
-        loss_components = ['loss_y_main', 'loss_d_main', 'loss_d_adversarial', 
-                          'loss_y_adversarial', 'sparsity_loss']
+        loss_components = ['loss_y_main', 'loss_d_main', 'loss_d_adversarial',
+                          'loss_y_adversarial', 'sparsity_loss_zdy', 'sparsity_loss_zy', 'sparsity_loss_zd']
         for component in loss_components:
             if component in metrics:
                 print(f"{prefix}{component}: {metrics[component]:.4f}")
+
+        # Show current sparsity weights if available
+        if 'sparsity_weight_zdy' in metrics:
+            print(f"{prefix}sparsity_weight_zdy: {metrics['sparsity_weight_zdy']:.4f}")
+        if 'sparsity_weight_other' in metrics:
+            print(f"{prefix}sparsity_weight_other: {metrics['sparsity_weight_other']:.4f}")
     
     def _check_early_stopping(self, val_loss: float, epoch: int, num_epochs: int, 
                              batch_metrics: Dict[str, float]) -> bool:

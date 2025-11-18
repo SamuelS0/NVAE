@@ -187,12 +187,12 @@ if __name__ == "__main__":
     parser.add_argument('--zx_dim', type=int, default=32)
     parser.add_argument('--zay_dim', type=int, default=32)
     parser.add_argument('--za_dim', type=int, default=32)
-    parser.add_argument('--beta_1', type=float, default=1.0)
-    parser.add_argument('--beta_2', type=float, default=1.0)
-    parser.add_argument('--beta_3', type=float, default=1.0)
-    parser.add_argument('--beta_4', type=float, default=1.0)
-    parser.add_argument('--alpha_1', type=float, default=150.0)
-    parser.add_argument('--alpha_2', type=float, default=40.0)
+    parser.add_argument('--beta_1', type=float, default=2.0)
+    parser.add_argument('--beta_2', type=float, default=2.0)
+    parser.add_argument('--beta_3', type=float, default=2.0)
+    parser.add_argument('--beta_4', type=float, default=2.0)
+    parser.add_argument('--alpha_1', type=float, default=200.0)
+    parser.add_argument('--alpha_2', type=float, default=50.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--dataset', type=str, default='crmnist')
     parser.add_argument('--use_cache', action='store_true', default=True, 
@@ -208,8 +208,8 @@ if __name__ == "__main__":
                        help='L1 penalty weight for zy latent (default: 5.0)')
     parser.add_argument('--l1_lambda_zx', type=float, default=5.0,
                        help='L1 penalty weight for zx latent (default: 5.0)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=50.0,
-                       help='L1 penalty weight for zay latent (default: 50.0)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=100.0,
+                       help='L1 penalty weight for zay latent (default: 100.0)')
     parser.add_argument('--l1_lambda_za', type=float, default=5.0,
                        help='L1 penalty weight for za latent (default: 5.0)')
 
@@ -225,8 +225,8 @@ if __name__ == "__main__":
     # AugmentedDANN-specific parameters
     parser.add_argument('--lambda_reversal', type=float, default=1.0,
                        help='Lambda parameter for gradient reversal in AugmentedDANN (default: 1.0)')
-    parser.add_argument('--sparsity_weight', type=float, default=10.0,
-                       help='Weight for sparsity penalty on zdy in AugmentedDANN (default: 10.0)')
+    parser.add_argument('--sparsity_weight', type=float, default=5.0,
+                       help='Target weight for sparsity penalty on zdy in AugmentedDANN, increases from 0 with DANN schedule (default: 5.0)')
     parser.add_argument('--beta_adv', type=float, default=0.15,
                        help='Weight for adversarial loss in AugmentedDANN (default: 0.15)')
 
