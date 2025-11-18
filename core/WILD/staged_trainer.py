@@ -149,9 +149,10 @@ class StagedWILDTrainer(WILDTrainer):
             print(f'Epoch {epoch+1}/{self.args.epochs} [Stage {self.current_stage}] - LR: {current_lr:.6f}, Beta: {trn_current_beta:.4f}')
             
             train_loss, train_metrics = self._train_epoch(train_loader, epoch, current_beta=trn_current_beta)
-            
-            # Validation phase
-            val_loss, val_metrics = self._validate(val_loader, epoch, current_beta=2)
+
+            # Validation phase (use fixed beta_scale for comparable metrics across epochs/stages)
+            # This ensures validation loss is consistent for early stopping and performance tracking
+            val_loss, val_metrics = self._validate(val_loader, epoch, current_beta=self.beta_scale)
             
             print(f'  Train Loss: {train_loss:.4f}')
             for k, v in train_metrics.items():
@@ -167,8 +168,8 @@ class StagedWILDTrainer(WILDTrainer):
             # Early stopping check
             if self._check_early_stopping(val_loss, epoch, num_epochs, val_metrics):
                 break
-            self.save_final_model(epoch)    
-            
+            # Best model is automatically saved in _check_early_stopping when validation improves
+
         self.epochs_trained = epoch + 1
 
     def _train_epoch(self, train_loader, epoch, current_beta) -> Tuple[float, Dict[str, float]]:
@@ -182,12 +183,7 @@ class StagedWILDTrainer(WILDTrainer):
         for batch_idx, batch in train_pbar:
             x, y, hospital_id = process_batch(batch, self.device, dataset_type='wild')
             self.optimizer.zero_grad()
-            
-            if self.args.cuda:
-                x = x.to(self.device)
-                y = y.to(self.device)
-                hospital_id = hospital_id.to(self.device)
-            
+
             # Stage-specific loss computation
             loss = self._compute_staged_loss(y, x, hospital_id, current_beta)
             
@@ -254,13 +250,23 @@ class StagedWILDTrainer(WILDTrainer):
         log_prob_z = qz.log_prob(z)
         log_prob_zy = log_prob_z[:, self.model.zy_index_range[0]:self.model.zy_index_range[1]]
         log_prob_zx = log_prob_z[:, self.model.zx_index_range[0]:self.model.zx_index_range[1]]
-        log_prob_zay = log_prob_z[:, self.model.zay_index_range[0]:self.model.zay_index_range[1]]
         log_prob_za = log_prob_z[:, self.model.za_index_range[0]:self.model.za_index_range[1]]
-        
+
+        # Handle DIVA mode (no zay component)
+        if hasattr(self.model, 'diva') and self.model.diva:
+            log_prob_zay = torch.zeros_like(log_prob_zy)
+        else:
+            log_prob_zay = log_prob_z[:, self.model.zay_index_range[0]:self.model.zay_index_range[1]]
+
         kl_zy = torch.sum(log_prob_zy - pzy.log_prob(zy))
         kl_zx = torch.sum(log_prob_zx - pzx.log_prob(zx))
-        kl_zay = torch.sum(log_prob_zay - pzay.log_prob(zay))
         kl_za = torch.sum(log_prob_za - pza.log_prob(za))
+
+        # KL for zay (0 for DIVA models)
+        if hasattr(self.model, 'diva') and self.model.diva:
+            kl_zay = torch.tensor(0.0, device=zy.device)
+        else:
+            kl_zay = torch.sum(log_prob_zay - pzay.log_prob(zay))
         
         # Classification losses
         y_target = y.long() if len(y.shape) == 1 else y.max(dim=1)[1]
@@ -288,7 +294,12 @@ class StagedWILDTrainer(WILDTrainer):
             # Compute zay capacity based on annealing setting
             if self.use_zay_annealing:
                 # Linearly ramp from zay_capacity_start to zay_capacity_end
-                progress = self.stage_epoch / max(1, self.stage2_epochs - 1)
+                if self.stage2_epochs > 1:
+                    progress = self.stage_epoch / (self.stage2_epochs - 1)
+                else:
+                    # Single epoch stage: immediately use end capacity
+                    progress = 1.0
+                progress = min(1.0, max(0.0, progress))  # Clamp to [0, 1]
                 zay_capacity = self.zay_capacity_start + progress * (self.zay_capacity_end - self.zay_capacity_start)
             else:
                 # No annealing: constant full capacity
@@ -325,27 +336,43 @@ class StagedWILDTrainer(WILDTrainer):
         This encourages zay to only capture synergistic information.
 
         Note: Gradients are required for this penalty to influence training.
+        Returns 0 for DIVA models (no zay component).
         """
-        # Get latent representations (with gradients enabled)
+        # Early return for DIVA models (no zay component to penalize)
+        if hasattr(self.model, 'diva') and self.model.diva:
+            return torch.tensor(0.0, device=x.device)
+
+        # Get latent distribution and sample (use actual samples, not just encoder means)
         qz_loc, qz_scale = self.model.qz(x)
-        zy = qz_loc[:, self.model.zy_index_range[0]:self.model.zy_index_range[1]]
-        za = qz_loc[:, self.model.za_index_range[0]:self.model.za_index_range[1]]
-        zay = qz_loc[:, self.model.zay_index_range[0]:self.model.zay_index_range[1]]
-        
+        qz = torch.distributions.Normal(qz_loc, qz_scale)
+        z = qz.rsample()  # Sample with reparameterization for gradients
+
+        # Extract latent components from sampled z
+        zy = z[:, self.model.zy_index_range[0]:self.model.zy_index_range[1]]
+        za = z[:, self.model.za_index_range[0]:self.model.za_index_range[1]]
+        zay = z[:, self.model.zay_index_range[0]:self.model.zay_index_range[1]]
+
+        # Check for NaN in sampled latents (can occur with numerical instability)
+        if torch.isnan(zy).any() or torch.isnan(za).any() or torch.isnan(zay).any():
+            print("⚠️  Warning: NaN detected in latent samples, returning zero independence penalty")
+            return torch.tensor(0.0, device=x.device, requires_grad=True)
+
         # Compute mutual information approximation using correlation
         # Penalty = |corr(zay, zy)| + |corr(zay, za)|
-        
-        # Normalize features
-        zy_norm = (zy - zy.mean(dim=0)) / (zy.std(dim=0) + 1e-8)
-        za_norm = (za - za.mean(dim=0)) / (za.std(dim=0) + 1e-8)
-        zay_norm = (zay - zay.mean(dim=0)) / (zay.std(dim=0) + 1e-8)
-        
-        # Compute correlations
-        corr_zay_zy = torch.mean(torch.abs(torch.sum(zay_norm * zy_norm, dim=0) / zay_norm.shape[0]))
-        corr_zay_za = torch.mean(torch.abs(torch.sum(zay_norm * za_norm, dim=0) / zay_norm.shape[0]))
-        
+
+        # Normalize features with robust division by zero protection
+        min_std = 1e-6  # Larger epsilon for numerical stability
+        zy_norm = (zy - zy.mean(dim=0)) / zy.std(dim=0).clamp(min=min_std)
+        za_norm = (za - za.mean(dim=0)) / za.std(dim=0).clamp(min=min_std)
+        zay_norm = (zay - zay.mean(dim=0)) / zay.std(dim=0).clamp(min=min_std)
+
+        # Compute correlations (with division by zero protection)
+        batch_size = max(1, zay_norm.shape[0])  # Ensure minimum of 1 to prevent division by zero
+        corr_zay_zy = torch.mean(torch.abs(torch.sum(zay_norm * zy_norm, dim=0) / batch_size))
+        corr_zay_za = torch.mean(torch.abs(torch.sum(zay_norm * za_norm, dim=0) / batch_size))
+
         independence_penalty = corr_zay_zy + corr_zay_za
-        
+
         return independence_penalty
 
     def _validate(self, val_loader, epoch, current_beta) -> Tuple[float, Dict[str, float]]:
@@ -359,12 +386,7 @@ class StagedWILDTrainer(WILDTrainer):
         with torch.no_grad():
             for batch_idx, batch in val_pbar:
                 x, y, hospital_id = process_batch(batch, self.device, dataset_type='wild')
-                
-                if self.args.cuda:
-                    x = x.to(self.device)
-                    y = y.to(self.device)
-                    hospital_id = hospital_id.to(self.device)
-                
+
                 # Use staged loss for validation too
                 loss = self._compute_staged_loss(y, x, hospital_id, current_beta)
                 val_loss += loss.item()

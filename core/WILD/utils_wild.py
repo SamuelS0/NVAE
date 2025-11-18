@@ -52,8 +52,12 @@ def select_diverse_sample_batch(loader, data_type='id_val', samples_per_domain=1
 
         for i in range(len(x)):
             hospital_id = int(hospital_ids[i].item())
+
+            # Validate hospital ID is in valid range for Camelyon17 (0-4)
+            assert 0 <= hospital_id < 5, f"Invalid hospital ID {hospital_id} (expected 0-4 for Camelyon17)"
+
             label = str(int(y[i].item()))  # Convert label to string for dict key
-            
+
             if hospital_id not in domain_samples:
                 domain_samples[hospital_id] = {'0': [], '1': []}
             
@@ -87,7 +91,8 @@ def select_diverse_sample_batch(loader, data_type='id_val', samples_per_domain=1
     selected_metadata = torch.stack(selected_metadata)
     
     # Print distribution of labels for debugging
-    label_dist = torch.bincount(selected_y.long())
+    # Use minlength=2 to ensure both class counts are available (prevents IndexError)
+    label_dist = torch.bincount(selected_y.long(), minlength=2)
     print(f"Label distribution in batch - Normal: {label_dist[0]}, Tumor: {label_dist[1]}")
     
     return selected_x, selected_y, selected_metadata
@@ -429,14 +434,13 @@ def generate_images_latent(model, device, data_type, output_dir, batch_data, mod
 
     print(f"Latent reconstructions saved to {save_dir}")
 
-def prepare_data(dataset, args, exclude_hospitals=None):
+def prepare_data(dataset, args):
     """
-    Prepare datasets and data loaders.
+    Prepare datasets and data loaders using standard WILDS splits.
 
     Args:
         dataset: WILDS dataset
         args: Command-line arguments
-        exclude_hospitals: List of hospital indices to exclude from training (for OOD testing)
     """
     '''transform = transforms.Compose(
         [transforms.Resize((448, 448) if args.resolution == 'high' else (64, 64)),
@@ -456,53 +460,15 @@ def prepare_data(dataset, args, exclude_hospitals=None):
     val_data = dataset.get_subset(args.val_type, transform=transform)
     test_data = dataset.get_subset("test", transform=transform)
 
-    # Filter training data to exclude specific hospitals for OOD testing
-    if exclude_hospitals:
-        print(f"\n🎯 OOD MODE: Excluding hospitals {exclude_hospitals} from training")
-        original_train_size = len(train_data.indices)
-
-        # Filter train_data to exclude specific hospitals
-        from torch.utils.data import Subset, DataLoader
-        train_indices = [i for i in train_data.indices
-                       if train_data.dataset.metadata_array[i, 0] not in exclude_hospitals]
-        train_data_filtered = Subset(train_data.dataset, train_indices)
-
-        print(f"   Original training size: {original_train_size}")
-        print(f"   Filtered training size: {len(train_data_filtered)} (excluded {original_train_size - len(train_data_filtered)} samples)")
-
-        # Also filter validation data
-        original_val_size = len(val_data.indices)
-        val_indices = [i for i in val_data.indices
-                      if val_data.dataset.metadata_array[i, 0] not in exclude_hospitals]
-        val_data_filtered = Subset(val_data.dataset, val_indices)
-
-        print(f"   Original validation size: {original_val_size}")
-        print(f"   Filtered validation size: {len(val_data_filtered)} (excluded {original_val_size - len(val_data_filtered)} samples)")
-
-        # Use DataLoader directly for Subsets (they don't have collate attribute)
-        train_loader = DataLoader(train_data_filtered, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=custom_collate_fn)
-        val_loader = DataLoader(val_data_filtered, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=custom_collate_fn)
-        test_loader = get_eval_loader("standard", test_data, batch_size=args.batch_size)
-
-        # Update data references for hospital distribution printing
-        train_data = train_data_filtered
-        val_data = val_data_filtered
-    else:
-        train_loader = get_train_loader("standard", train_data, batch_size=args.batch_size)
-        val_loader = get_eval_loader("standard", val_data, batch_size=args.batch_size)
-        test_loader = get_eval_loader("standard", test_data, batch_size=args.batch_size)
+    # Create data loaders using standard WILDS functions
+    train_loader = get_train_loader("standard", train_data, batch_size=args.batch_size)
+    val_loader = get_eval_loader("standard", val_data, batch_size=args.batch_size)
+    test_loader = get_eval_loader("standard", test_data, batch_size=args.batch_size)
 
     print("\nHospital distribution:")
-    # Handle both WILDSSubset and regular Subset
-    if hasattr(train_data, 'indices'):
-        print("Train hospitals:", np.unique(train_data.dataset.metadata_array[train_data.indices, 0]))
-        print("Val hospitals:", np.unique(val_data.dataset.metadata_array[val_data.indices, 0]))
-        print("Test hospitals:", np.unique(test_data.dataset.metadata_array[test_data.indices, 0]))
-    else:
-        # For regular Subsets
-        print("Train hospitals:", np.unique(train_data.dataset.metadata_array[list(train_data.indices), 0]))
-        print("Val hospitals:", np.unique(val_data.dataset.metadata_array[list(val_data.indices), 0]))
-        print("Test hospitals:", np.unique(test_data.dataset.metadata_array[test_data.indices, 0]))
+    print("Train hospitals:", np.unique(train_data.dataset.metadata_array[train_data.indices, 0]))
+    print("Val hospitals:", np.unique(val_data.dataset.metadata_array[val_data.indices, 0]))
+    print("Test hospitals:", np.unique(test_data.dataset.metadata_array[test_data.indices, 0]))
 
     return train_loader, val_loader, test_loader
 

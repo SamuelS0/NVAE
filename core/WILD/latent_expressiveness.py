@@ -82,8 +82,8 @@ def extract_latent_representations(model, dataloader, device, num_classes=2):
             if zay is not None and zay.shape[1] > 0:
                 all_zay.append(zay.cpu())
             else:
-                # For DIVA models or empty zay, create zeros
-                all_zay.append(torch.zeros(zy.shape[0], 0))
+                # For DIVA models or empty zay, create zeros on CPU (matching other tensors)
+                all_zay.append(torch.zeros(zy.shape[0], 0, device='cpu'))
             all_za.append(za.cpu())
             all_y.append(y.cpu())
             all_a.append(a.cpu())

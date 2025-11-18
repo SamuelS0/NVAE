@@ -78,12 +78,13 @@ class VAE(NModule):
         if self.diva:
             # Distribute zay_dim across zy, zx, za (with remainder distribution)
             base_dim = zay_dim // 3
-            remainder = zay_dim % 3
+            remainder = zay_dim % 3  # Can only be 0, 1, or 2
 
-            # Distribute remainder: zy gets first extra, zx gets second, za gets third
+            # Distribute remainder: zy gets first extra, zx gets second
+            # za never gets remainder (intentional - prioritize zy and zx)
             self.zy_dim = zy_dim + base_dim + (1 if remainder >= 1 else 0)
             self.zx_dim = zx_dim + base_dim + (1 if remainder >= 2 else 0)
-            self.za_dim = za_dim + base_dim + (1 if remainder == 3 else 0)
+            self.za_dim = za_dim + base_dim  # Never gets remainder
             self.zay_dim = 0
             self.z_y_combined_dim = self.zy_dim
             self.z_a_combined_dim = self.za_dim
@@ -96,6 +97,20 @@ class VAE(NModule):
             self.z_y_combined_dim = zy_dim + zay_dim
             self.z_a_combined_dim = za_dim + zay_dim
             self.z_total_dim = zx_dim + zy_dim + zay_dim + za_dim
+
+        # Validate that all latent dimensions are positive
+        if self.diva:
+            assert self.zy_dim > 0, f"zy_dim must be > 0 for DIVA mode, got {self.zy_dim}"
+            assert self.zx_dim > 0, f"zx_dim must be > 0 for DIVA mode, got {self.zx_dim}"
+            assert self.za_dim > 0, f"za_dim must be > 0 for DIVA mode, got {self.za_dim}"
+            assert self.zay_dim == 0, f"zay_dim must be 0 for DIVA mode, got {self.zay_dim}"
+        else:
+            assert self.zy_dim > 0, f"zy_dim must be > 0 for VAE mode, got {self.zy_dim}"
+            assert self.zx_dim > 0, f"zx_dim must be > 0 for VAE mode, got {self.zx_dim}"
+            assert self.zay_dim > 0, f"zay_dim must be > 0 for VAE mode, got {self.zay_dim}"
+            assert self.za_dim > 0, f"za_dim must be > 0 for VAE mode, got {self.za_dim}"
+
+        assert self.z_total_dim > 0, f"Total latent dimension must be > 0, got {self.z_total_dim}"
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -251,16 +266,16 @@ class VAE(NModule):
         y_cross_entropy = F.cross_entropy(y_hat, y_target, reduction='sum')
         a_cross_entropy = F.cross_entropy(a_hat, a_target, reduction='sum')
 
-        # L1 sparsity penalties
+        # L1 sparsity penalties (use sum to match KL divergence reduction)
         l1_penalty = 0.0
         if self.l1_lambda_zy > 0:
-            l1_penalty += self.l1_lambda_zy * torch.mean(torch.abs(zy))
+            l1_penalty += self.l1_lambda_zy * torch.sum(torch.abs(zy))
         if self.l1_lambda_zx > 0:
-            l1_penalty += self.l1_lambda_zx * torch.mean(torch.abs(zx))
+            l1_penalty += self.l1_lambda_zx * torch.sum(torch.abs(zx))
         if not self.diva and self.l1_lambda_zay > 0:
-            l1_penalty += self.l1_lambda_zay * torch.mean(torch.abs(zay))
+            l1_penalty += self.l1_lambda_zay * torch.sum(torch.abs(zay))
         if self.l1_lambda_za > 0:
-            l1_penalty += self.l1_lambda_za * torch.mean(torch.abs(za))
+            l1_penalty += self.l1_lambda_za * torch.sum(torch.abs(za))
 
         # Calculate positive loss (removing negative sign)
         # In VAEs, we want to minimize the reconstruction loss + KL divergence
@@ -1241,16 +1256,16 @@ class pza(NModule):
         y_cross_entropy = F.cross_entropy(y_hat, y_target, reduction='sum')
         a_cross_entropy = F.cross_entropy(a_hat, a_target, reduction='sum')
 
-        # L1 sparsity penalties
+        # L1 sparsity penalties (use sum to match KL divergence reduction)
         l1_penalty = 0.0
         if self.l1_lambda_zy > 0:
-            l1_penalty += self.l1_lambda_zy * torch.mean(torch.abs(zy))
+            l1_penalty += self.l1_lambda_zy * torch.sum(torch.abs(zy))
         if self.l1_lambda_zx > 0:
-            l1_penalty += self.l1_lambda_zx * torch.mean(torch.abs(zx))
+            l1_penalty += self.l1_lambda_zx * torch.sum(torch.abs(zx))
         if not self.diva and self.l1_lambda_zay > 0:
-            l1_penalty += self.l1_lambda_zay * torch.mean(torch.abs(zay))
+            l1_penalty += self.l1_lambda_zay * torch.sum(torch.abs(zay))
         if self.l1_lambda_za > 0:
-            l1_penalty += self.l1_lambda_za * torch.mean(torch.abs(za))
+            l1_penalty += self.l1_lambda_za * torch.sum(torch.abs(za))
 
         # Calculate positive loss (removing negative sign)
         # In VAEs, we want to minimize the reconstruction loss + KL divergence

@@ -80,9 +80,9 @@ class WILDTrainer:
                 
             print(f'Training beta: {trn_current_beta}')
             train_loss, train_metrics = self._train_epoch(train_loader, epoch, current_beta=trn_current_beta)
-            
-            # Validation phase
-            val_loss, val_metrics = self._validate(val_loader, epoch, current_beta=trn_current_beta)
+
+            # Validation phase (use final beta for comparable losses across epochs)
+            val_loss, val_metrics = self._validate(val_loader, epoch, current_beta=self.beta_scale)
 
             # Store training history
             self.epoch_history.append(epoch + 1)
@@ -108,7 +108,7 @@ class WILDTrainer:
             # Early stopping check
             if self._check_early_stopping(val_loss, epoch, num_epochs, val_metrics):
                 break
-            self.save_final_model(epoch)
+            # Best model is automatically saved in _check_early_stopping when validation improves
         self.epochs_trained = epoch + 1
 
         # Save training history and plot curves
@@ -139,6 +139,8 @@ class WILDTrainer:
                 loss_components = None
 
             loss.backward()
+            # Gradient clipping to prevent exploding gradients
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
             train_loss += loss.item()
 
@@ -282,10 +284,9 @@ class WILDTrainer:
     
     def get_current_beta(self, epoch):
         """Calculate the current beta value based on the epoch number.
-        Beta increases linearly from 0 to 2 over max_epochs."""
-        if epoch + 1>= self.max_epochs:
-            return self.beta_scale
-        return self.beta_scale * (epoch / self.max_epochs)
+        Beta increases linearly from 0 to beta_scale over max_epochs."""
+        # Use min to ensure beta never exceeds beta_scale
+        return self.beta_scale * min(1.0, (epoch + 1) / self.max_epochs)
     
     def visualize_latent_epoch(self, val_loader, epoch):
         """Visualize latent spaces for the current epoch."""
