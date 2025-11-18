@@ -138,8 +138,8 @@ def visualize_reconstructions(model, epoch, batch_data, image_dir, args):
     # Create a figure with 5 domains, each with 2 rows (original & reconstruction) and 10 columns (samples)
     fig, axes = plt.subplots(num_domains * 2, samples_per_domain, figsize=(20, 4 * num_domains))
     
-    # Get hospital names for titles
-    hospital_names = ['Hospital 1', 'Hospital 2', 'Hospital 3', 'Hospital 4', 'Hospital 5']
+    # Get hospital names for titles (0-indexed to match Camelyon17 hospital IDs)
+    hospital_names = ['Hospital 0', 'Hospital 1', 'Hospital 2', 'Hospital 3', 'Hospital 4']
     
     # Organize images by domain
     domain_images = {i: [] for i in range(num_domains)}
@@ -203,7 +203,8 @@ def visualize_conditional_generation(model, device, output_dir):
     model.eval()
     
     samples_per_class = 5
-    hospital_names = ['Hospital 1', 'Hospital 2', 'Hospital 3', 'Hospital 4', 'Hospital 5']
+    # Hospital names (0-indexed to match Camelyon17 hospital IDs)
+    hospital_names = ['Hospital 0', 'Hospital 1', 'Hospital 2', 'Hospital 3', 'Hospital 4']
     class_names = ['Normal', 'Tumor']
     
     # Create a figure with rows for each class and columns for hospitals
@@ -244,8 +245,8 @@ def save_domain_samples_visualization(x, y, metadata, epoch, output_dir):
 
     Args:
         x: Images tensor
-        y: Digit labels
-        hospital_id: Hospital IDs
+        y: Class labels (0=Normal, 1=Tumor)
+        metadata: Metadata tensor containing hospital IDs and other info
         epoch: Current epoch number
         output_dir: Directory to save the visualization
     """

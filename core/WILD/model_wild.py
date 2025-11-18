@@ -992,7 +992,7 @@ class pzay(NModule):
         self.y_dim = y_dim
         self.a_dim = a_dim
         self.zay_dim = zay_dim
-        self.in_dim = y_dim + a_dim  # This should be 10 + 5 = 15
+        self.in_dim = y_dim + a_dim  # Generic: y_dim + a_dim (WILD: 2+5=7, CRMNIST: 10+5=15)
 
         # Simplify architecture to avoid BatchNorm issues
         self.decoder = nn.Sequential(

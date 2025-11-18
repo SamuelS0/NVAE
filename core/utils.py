@@ -591,7 +591,7 @@ def sample_wild(model, dataloader, max_samples=750, device=None):
     zy_list, za_list, zay_list, zx_list = [], [], [], []
     y_list = []
     domain_dict = {"hospital": []}
-    labels_dict = {"digit": [], "hospital": []}
+    labels_dict = {"label": [], "hospital": []}  # "label" for class (Normal/Tumor), not "digit"
     
     # Initialize counters for each combination
     counts = {}
@@ -613,10 +613,14 @@ def sample_wild(model, dataloader, max_samples=750, device=None):
             x, y, domain = process_batch(batch, device, dataset_type='wild')
             
             # Convert to indices if one-hot encoded
-            if len(y.shape) > 1:
+            if len(y.shape) > 1 and y.shape[1] > 1:
                 y = torch.argmax(y, dim=1)
-            if len(domain.shape) > 1:
+            elif len(y.shape) > 1:
+                y = y.squeeze()
+            if len(domain.shape) > 1 and domain.shape[1] > 1:
                 domain = torch.argmax(domain, dim=1)
+            elif len(domain.shape) > 1:
+                domain = domain.squeeze()
             
             # Create mask for samples we want to keep
             keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
@@ -662,7 +666,7 @@ def sample_wild(model, dataloader, max_samples=750, device=None):
                 # Convert hospital IDs to strings for better visualization (WILD uses 0-4)
                 hospital_labels = [f"Hospital {h.item()}" for h in domain_batch]
                 domain_dict["hospital"].append(hospital_labels)
-                labels_dict["digit"].append(y_batch.cpu())
+                labels_dict["label"].append(y_batch.cpu())  # Class labels (Normal/Tumor)
                 labels_dict["hospital"].append(hospital_labels)
                 
                 # Clear GPU cache periodically
@@ -915,10 +919,18 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     
     # Print sample counts for all collected samples
     print("\nNumber of samples per category:")
-    print("\nDigits:")
-    digit_counts = torch.bincount(y_labels)
-    for digit, count in enumerate(digit_counts):
-        print(f"Digit {digit}: {count} samples")
+    if type == "wild":
+        print("\nClasses:")
+        class_counts = torch.bincount(y_labels)
+        class_names = ["Normal", "Tumor"]
+        for cls, count in enumerate(class_counts):
+            class_name = class_names[cls] if cls < len(class_names) else f"Class {cls}"
+            print(f"{class_name} (class {cls}): {count} samples")
+    else:
+        print("\nDigits:")
+        digit_counts = torch.bincount(y_labels)
+        for digit, count in enumerate(digit_counts):
+            print(f"Digit {digit}: {count} samples")
     
     for domain_name in domain_dict.keys():
         print(f"\n{domain_name.capitalize()}:")
@@ -1225,9 +1237,20 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
                 r = r.to(device)
 
             # Convert to indices
-            y_idx = torch.argmax(y, dim=1) if len(y.shape) > 1 else y.long()
-            c_idx = torch.argmax(c, dim=1) if len(c.shape) > 1 else c.long()
-            r_idx = torch.argmax(r, dim=1) if len(r.shape) > 1 else r.long()
+            if len(y.shape) > 1 and y.shape[1] > 1:
+                y_idx = torch.argmax(y, dim=1)
+            else:
+                y_idx = y.squeeze().long() if len(y.shape) > 1 else y.long()
+
+            if len(c.shape) > 1 and c.shape[1] > 1:
+                c_idx = torch.argmax(c, dim=1)
+            else:
+                c_idx = c.squeeze().long() if len(c.shape) > 1 else c.long()
+
+            if len(r.shape) > 1 and r.shape[1] > 1:
+                r_idx = torch.argmax(r, dim=1)
+            else:
+                r_idx = r.squeeze().long() if len(r.shape) > 1 else r.long()
 
             # Record all combinations in this batch
             use_color = model_type in ["nvae", "diva"] and dataset_type == "crmnist"
@@ -1303,20 +1326,20 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
                 r = r.to(device)
             
             # Convert to indices if one-hot encoded
-            if len(y.shape) > 1:
+            if len(y.shape) > 1 and y.shape[1] > 1:
                 y_indices = torch.argmax(y, dim=1)
             else:
-                y_indices = y.long()
-                
-            if len(c.shape) > 1:
+                y_indices = y.squeeze().long() if len(y.shape) > 1 else y.long()
+
+            if len(c.shape) > 1 and c.shape[1] > 1:
                 c_indices = torch.argmax(c, dim=1)
             else:
-                c_indices = c.long()
-                
-            if len(r.shape) > 1:
+                c_indices = c.squeeze().long() if len(c.shape) > 1 else c.long()
+
+            if len(r.shape) > 1 and r.shape[1] > 1:
                 r_indices = torch.argmax(r, dim=1)
             else:
-                r_indices = r.long()
+                r_indices = r.squeeze().long() if len(r.shape) > 1 else r.long()
             
             # Create mask for samples we want to keep
             keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
