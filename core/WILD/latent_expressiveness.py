@@ -452,6 +452,10 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
     axes[0,0].set_ylim(0, y_max)
     axes[0,0].tick_params(axis='x', rotation=15)
 
+    # Add random guessing baseline (3 training hospitals: 1/3 = 0.333)
+    axes[0,0].axhline(y=0.333, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Random Guess (33%)')
+    axes[0,0].legend(loc='upper right', fontsize=9)
+
     # Add value labels on bars
     for bar in bars1:
         height = bar.get_height()
@@ -465,6 +469,10 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
     axes[0,1].set_ylabel('Test Accuracy', fontsize=12)
     axes[0,1].set_ylim(0, y_max)
     axes[0,1].tick_params(axis='x', rotation=15)
+
+    # Add random guessing baseline (3 training hospitals: 1/3 = 0.333)
+    axes[0,1].axhline(y=0.333, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Random Guess (33%)')
+    axes[0,1].legend(loc='upper right', fontsize=9)
 
     # Add value labels on bars
     for bar in bars2:
@@ -480,6 +488,10 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
     axes[1,0].set_ylim(0, y_max)
     axes[1,0].tick_params(axis='x', rotation=15)
 
+    # Add random guessing baseline (2 tumor classes: 1/2 = 0.50)
+    axes[1,0].axhline(y=0.50, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Random Guess (50%)')
+    axes[1,0].legend(loc='upper right', fontsize=9)
+
     # Add value labels on bars
     for bar in bars3:
         height = bar.get_height()
@@ -493,6 +505,10 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
     axes[1,1].set_ylabel('Test Accuracy', fontsize=12)
     axes[1,1].set_ylim(0, y_max)
     axes[1,1].tick_params(axis='x', rotation=15)
+
+    # Add random guessing baseline (2 tumor classes: 1/2 = 0.50)
+    axes[1,1].axhline(y=0.50, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Random Guess (50%)')
+    axes[1,1].legend(loc='upper right', fontsize=9)
 
     # Add value labels on bars
     for bar in bars4:

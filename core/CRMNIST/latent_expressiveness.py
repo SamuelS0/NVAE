@@ -423,6 +423,10 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
     axes[0,0].set_ylim(0, y_max)
     axes[0,0].tick_params(axis='x', rotation=15)
 
+    # Add random guessing baseline (5 training domains: 1/5 = 0.20)
+    axes[0,0].axhline(y=0.20, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Random Guess (20%)')
+    axes[0,0].legend(loc='upper right', fontsize=9)
+
     # Add value labels on bars
     for bar in bars1:
         height = bar.get_height()
@@ -436,6 +440,10 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
     axes[0,1].set_ylabel('Test Accuracy', fontsize=12)
     axes[0,1].set_ylim(0, y_max)
     axes[0,1].tick_params(axis='x', rotation=15)
+
+    # Add random guessing baseline (5 training domains: 1/5 = 0.20)
+    axes[0,1].axhline(y=0.20, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Random Guess (20%)')
+    axes[0,1].legend(loc='upper right', fontsize=9)
 
     # Add value labels on bars
     for bar in bars2:
@@ -451,6 +459,10 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
     axes[1,0].set_ylim(0, y_max)
     axes[1,0].tick_params(axis='x', rotation=15)
 
+    # Add random guessing baseline (10 digit classes: 1/10 = 0.10)
+    axes[1,0].axhline(y=0.10, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Random Guess (10%)')
+    axes[1,0].legend(loc='upper right', fontsize=9)
+
     # Add value labels on bars
     for bar in bars3:
         height = bar.get_height()
@@ -464,6 +476,10 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
     axes[1,1].set_ylabel('Test Accuracy', fontsize=12)
     axes[1,1].set_ylim(0, y_max)
     axes[1,1].tick_params(axis='x', rotation=15)
+
+    # Add random guessing baseline (10 digit classes: 1/10 = 0.10)
+    axes[1,1].axhline(y=0.10, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Random Guess (10%)')
+    axes[1,1].legend(loc='upper right', fontsize=9)
 
     # Add value labels on bars
     for bar in bars4:

@@ -190,7 +190,7 @@ if __name__ == "__main__":
     parser.add_argument('--za_dim', type=int, default=32)
     parser.add_argument('--beta_1', type=float, default=1.0)
     parser.add_argument('--beta_2', type=float, default=5.0)
-    parser.add_argument('--beta_3', type=float, default=20.0)
+    parser.add_argument('--beta_3', type=float, default=10.0)
     parser.add_argument('--beta_4', type=float, default=2.0)
     parser.add_argument('--alpha_1', type=float, default=100.0)
     parser.add_argument('--alpha_2', type=float, default=100.0)
@@ -209,8 +209,8 @@ if __name__ == "__main__":
                        help='L1 penalty weight for zy latent (default: 0.0)')
     parser.add_argument('--l1_lambda_zx', type=float, default=50.0,
                        help='L1 penalty weight for zx latent (default: 50.0)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=500.0,
-                       help='L1 penalty weight for zay latent (default: 500.0)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=250.0,
+                       help='L1 penalty weight for zay latent (default: 250.0)')
     parser.add_argument('--l1_lambda_za', type=float, default=0.0,
                        help='L1 penalty weight for za latent (default: 0.0)')
 
