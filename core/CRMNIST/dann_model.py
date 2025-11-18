@@ -574,14 +574,15 @@ class AugmentedDANN(NModule):
         self.set_gradient_reversal_lambda(lambda_val)
         return lambda_val
     
-    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=750):
+    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=750, dataset_type="crmnist"):
         """
         Visualize all latent spaces using t-SNE
         Args:
-            dataloader: DataLoader containing (x, y, c, r) tuples
+            dataloader: DataLoader containing (x, y, c, r) tuples for CRMNIST or (x, y, metadata) for WILD
             device: torch device
             save_path: Optional path to save the visualization
             max_samples: Maximum number of samples to use for visualization
+            dataset_type: Type of dataset ("crmnist" or "wild")
         """
         if TSNE is None:
             print("Error: scikit-learn not available. Cannot perform t-SNE visualization.")
@@ -613,19 +614,28 @@ class AugmentedDANN(NModule):
         max_batches_per_pass = 50  # Limit memory usage
         
         with torch.no_grad():
-            for i, (x, y, c, r) in enumerate(dataloader):
+            for i, batch in enumerate(dataloader):
                 if total_collected >= max_samples:
                     break
-                
+
                 # Limit number of batches to prevent memory issues
                 if processed_batches >= max_batches_per_pass:
                     break
-                    
+
                 try:
-                    x = x.to(device)
-                    y = y.to(device)
-                    c = c.to(device) 
-                    r = r.to(device)
+                    # Handle both CRMNIST and WILD data formats
+                    if dataset_type == "wild":
+                        x, y, metadata = batch
+                        x = x.to(device)
+                        y = y.to(device)
+                        r = metadata[:, 0].to(device)  # Hospital ID from metadata
+                        c = torch.zeros_like(y)  # Dummy color for WILD (not used)
+                    else:
+                        x, y, c, r = batch
+                        x = x.to(device)
+                        y = y.to(device)
+                        c = c.to(device)
+                        r = r.to(device)
                     
                     # Convert to indices if one-hot encoded
                     if len(y.shape) > 1:

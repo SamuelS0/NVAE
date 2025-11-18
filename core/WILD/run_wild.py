@@ -768,7 +768,7 @@ if __name__ == "__main__":
             dann_model = trained_models['dann']
             print("🎨 Generating DANN latent space visualization...")
             dann_latent_path = os.path.join(latent_space_dir, 'dann_latent_spaces.png')
-            dann_model.visualize_latent_space(test_loader, args.device, save_path=dann_latent_path)
+            dann_model.visualize_latent_space(test_loader, args.device, save_path=dann_latent_path, dataset_type="wild")
 
     # =============================================================================
     # 3.5. TRAIN AND TEST AUGMENTED DANN MODEL
@@ -813,7 +813,7 @@ if __name__ == "__main__":
             dann_aug_model = trained_models['dann_augmented']
             print("🎨 Generating AugmentedDANN latent space visualization...")
             dann_aug_latent_path = os.path.join(latent_space_dir, 'dann_augmented_latent_spaces.png')
-            visualize_latent_spaces(dann_aug_model, test_loader, args.device, type='dann_augmented', save_path=dann_aug_latent_path)
+            dann_aug_model.visualize_latent_spaces(test_loader, args.device, save_path=dann_aug_latent_path, dataset_type="wild")
 
             # Evaluate latent expressiveness
             print("🧪 Evaluating AugmentedDANN latent expressiveness...")

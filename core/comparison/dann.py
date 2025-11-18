@@ -160,22 +160,19 @@ class DANN(nn.Module):
         """Extract features from the feature extractor"""
         return self.feature_extractor(x)
 
-    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=750):
+    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=750, dataset_type="crmnist"):
         """
         Visualize the latent space using t-SNE with balanced sampling
         Args:
-            dataloader: DataLoader containing (x, y, c, r) tuples where:
-                x: input images
-                y: digit labels (0-9)
-                c: color labels (one-hot encoded)
-                r: rotation/domain labels (one-hot encoded)
+            dataloader: DataLoader containing (x, y, c, r) tuples for CRMNIST or (x, y, metadata) for WILD
             device: torch device
             save_path: Optional path to save the visualization
             max_samples: Maximum number of samples to use for visualization
+            dataset_type: Type of dataset ("crmnist" or "wild")
         """
         # Import the reusable sampling function
         from core.utils import balanced_sample_for_visualization
-        
+
         # Use the generic balanced sampling function
         features_dict, labels_dict, sampling_stats = balanced_sample_for_visualization(
             model=self,
@@ -183,7 +180,8 @@ class DANN(nn.Module):
             device=device,
             model_type="dann",
             max_samples=max_samples,
-            target_samples_per_combination=50
+            target_samples_per_combination=50,
+            dataset_type=dataset_type
         )
         
         # Extract the features (DANN uses the same features for all spaces)
