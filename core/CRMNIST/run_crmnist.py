@@ -204,14 +204,14 @@ if __name__ == "__main__":
     parser.add_argument('--beta_scale', type=float, default=1.0)
 
     # L1 sparsity penalty arguments
-    parser.add_argument('--l1_lambda_zy', type=float, default=0.75,
-                       help='L1 penalty weight for zy latent (default: 0.75)')
-    parser.add_argument('--l1_lambda_zx', type=float, default=0.75,
-                       help='L1 penalty weight for zx latent (default: 0.75)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=6.0,
-                       help='L1 penalty weight for zay latent (default: 6.0)')
-    parser.add_argument('--l1_lambda_za', type=float, default=0.75,
-                       help='L1 penalty weight for za latent (default: 0.75)')
+    parser.add_argument('--l1_lambda_zy', type=float, default=5.0,
+                       help='L1 penalty weight for zy latent (default: 5.0)')
+    parser.add_argument('--l1_lambda_zx', type=float, default=5.0,
+                       help='L1 penalty weight for zx latent (default: 5.0)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=50.0,
+                       help='L1 penalty weight for zay latent (default: 50.0)')
+    parser.add_argument('--l1_lambda_za', type=float, default=5.0,
+                       help='L1 penalty weight for za latent (default: 5.0)')
 
     # Model selection arguments
     parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],
@@ -225,8 +225,8 @@ if __name__ == "__main__":
     # AugmentedDANN-specific parameters
     parser.add_argument('--lambda_reversal', type=float, default=1.0,
                        help='Lambda parameter for gradient reversal in AugmentedDANN (default: 1.0)')
-    parser.add_argument('--sparsity_weight', type=float, default=0.05,
-                       help='Weight for sparsity penalty on zdy in AugmentedDANN (default: 0.05)')
+    parser.add_argument('--sparsity_weight', type=float, default=10.0,
+                       help='Weight for sparsity penalty on zdy in AugmentedDANN (default: 10.0)')
     parser.add_argument('--beta_adv', type=float, default=0.15,
                        help='Weight for adversarial loss in AugmentedDANN (default: 0.15)')
 
