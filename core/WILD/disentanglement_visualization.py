@@ -67,10 +67,8 @@ def visualize_disentanglement(model, dataloader, device, save_path=None, num_var
 
         label_name = 'Tumor' if label == 1 else 'Normal'
 
-        fig.suptitle(f'Histopathology Image Disentanglement Analysis - Example {example_idx + 1}\n'
-                    f'Label: {label_name}, Hospital: {int(hospital_id)}\n'
-                    f'Each row shows variations in one latent space while others remain fixed. '
-                    f'Good disentanglement = each space independently controls distinct medical/domain factors.',
+        fig.suptitle(f'Disentanglement Analysis - Example {example_idx + 1}\n'
+                    f'Label: {label_name}, Hospital: {int(hospital_id)}',
                     fontsize=11, fontweight='bold')
         
         # Generate variations for each latent space
@@ -266,9 +264,7 @@ def _create_summary_visualization(model, base_examples, device, save_path, num_v
             if example_idx == 0:  # Only label for first example
                 axes[row, 0].set_ylabel(space_name, fontsize=8)
     
-    plt.suptitle('Histopathology Disentanglement Quality Summary - All Examples Compared\n'
-                 'Each example shows how varying one latent space affects tissue image generation. '
-                 'Compare across examples to assess consistency of medical feature disentanglement.',
+    plt.suptitle('Disentanglement Summary - All Examples',
                  fontsize=11, fontweight='bold')
     plt.tight_layout()
     
@@ -372,9 +368,7 @@ def visualize_latent_interpolation(model, dataloader, device, save_path=None, nu
                 if step == 0:
                     axes[row, step].set_ylabel(f'{space_name}\ninterpolation', fontsize=9)
         
-        plt.suptitle('Histopathology Latent Space Interpolation Analysis\n'
-                     'Shows smooth transitions between two tissue images by interpolating each latent space separately.\n'
-                     'Smooth, biologically meaningful transitions indicate well-structured medical representations.',
+        plt.suptitle('Latent Space Interpolation',
                      fontsize=11, fontweight='bold')
         plt.tight_layout()
         
@@ -446,9 +440,7 @@ def visualize_factor_traversal(model, device, save_path=None, num_steps=7):
                     if dim == 0:
                         axes[dim, step].set_title(f'{value:.1f}', fontsize=8)
             
-            plt.suptitle(f'Histopathology Latent Dimension Traversal Analysis - {space_name.upper()} Space\n'
-                         f'Each row shows systematic variation of a single dimension from -3σ to +3σ.\n'
-                         f'Interpretable medical/domain changes indicate meaningful factor encoding.',
+            plt.suptitle(f'Latent Dimension Traversal - {space_name.upper()} Space',
                          fontsize=11, fontweight='bold')
             plt.tight_layout()
             

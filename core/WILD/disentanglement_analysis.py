@@ -278,7 +278,7 @@ def analyze_disentanglement_builtin_predictors(model, dataloader, device, save_p
             
             # Get full forward pass with built-in predictions
             if hasattr(model, 'forward'):
-                x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model.forward(a, x, y)
+                x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model.forward(y, x, a)
                 builtin_y_preds.append(y_hat.cpu())
                 builtin_a_preds.append(a_hat.cpu())
             else:

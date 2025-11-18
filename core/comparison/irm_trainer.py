@@ -43,7 +43,8 @@ class IRMTrainer(WILDTrainer):
                 dataloader=val_loader,
                 device=self.device,
                 save_path=latent_path,
-                max_samples=1000
+                max_samples=1000,
+                dataset_type=self.dataset  # Pass dataset type (crmnist or wild)
             )
 
             print(f"  Latent visualization saved to {latent_path}")

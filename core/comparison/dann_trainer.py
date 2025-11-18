@@ -346,7 +346,7 @@ class DANNTrainer(WILDTrainer):
         axes[0, 0].plot(self.epoch_history, self.val_loss_history, 'r-', label='Val Loss', linewidth=2)
         axes[0, 0].set_xlabel('Epoch', fontsize=12)
         axes[0, 0].set_ylabel('Loss', fontsize=12)
-        axes[0, 0].set_title('Training and Validation Loss (Total DANN Loss)', fontsize=14, fontweight='bold')
+        axes[0, 0].set_title('Total Loss', fontsize=14, fontweight='bold')
         axes[0, 0].legend(fontsize=10)
         axes[0, 0].grid(True, alpha=0.3)
 
@@ -357,7 +357,7 @@ class DANNTrainer(WILDTrainer):
         axes[0, 1].plot(self.epoch_history, self.val_discriminator_acc_history, 'orange', linestyle='--', label='Val Domain Acc', linewidth=2)
         axes[0, 1].set_xlabel('Epoch', fontsize=12)
         axes[0, 1].set_ylabel('Accuracy', fontsize=12)
-        axes[0, 1].set_title('Label and Domain Classification Accuracy', fontsize=14, fontweight='bold')
+        axes[0, 1].set_title('Accuracy', fontsize=14, fontweight='bold')
         axes[0, 1].legend(fontsize=10)
         axes[0, 1].grid(True, alpha=0.3)
 
@@ -366,7 +366,7 @@ class DANNTrainer(WILDTrainer):
         axes[1, 0].plot(self.epoch_history, self.val_y_loss_history, 'r-', label='Val Y Loss', linewidth=2)
         axes[1, 0].set_xlabel('Epoch', fontsize=12)
         axes[1, 0].set_ylabel('Classification Loss', fontsize=12)
-        axes[1, 0].set_title('Label Classification Loss', fontsize=14, fontweight='bold')
+        axes[1, 0].set_title('Label Loss', fontsize=14, fontweight='bold')
         axes[1, 0].legend(fontsize=10)
         axes[1, 0].grid(True, alpha=0.3)
 
@@ -375,7 +375,7 @@ class DANNTrainer(WILDTrainer):
         axes[1, 1].plot(self.epoch_history, self.val_domain_loss_history, 'r-', label='Val Domain Loss', linewidth=2)
         axes[1, 1].set_xlabel('Epoch', fontsize=12)
         axes[1, 1].set_ylabel('Domain Loss', fontsize=12)
-        axes[1, 1].set_title('Adversarial Domain Loss', fontsize=14, fontweight='bold')
+        axes[1, 1].set_title('Domain Loss', fontsize=14, fontweight='bold')
         axes[1, 1].legend(fontsize=10)
         axes[1, 1].grid(True, alpha=0.3)
 

@@ -71,9 +71,7 @@ def visualize_disentanglement(model, dataloader, device, save_path=None, num_var
         rotation_angle = rotation_label * 15 if rotation_label >= 0 else 0
         
         fig.suptitle(f'Disentanglement Analysis - Example {example_idx + 1}\n'
-                    f'Digit: {digit_label}, Color: {color_name}, Rotation: {rotation_angle}°\n'
-                    f'Each row shows variations in one latent space while others remain fixed. '
-                    f'Good disentanglement = each space independently controls distinct visual factors.',
+                    f'Digit: {digit_label}, Color: {color_name}, Rotation: {rotation_angle}°',
                     fontsize=11, fontweight='bold')
         
         # Generate variations for each latent space
@@ -269,9 +267,7 @@ def _create_summary_visualization(model, base_examples, device, save_path, num_v
             if example_idx == 0:  # Only label for first example
                 axes[row, 0].set_ylabel(space_name, fontsize=8)
     
-    plt.suptitle('Disentanglement Quality Summary - All Examples Compared\n'
-                 'Each example shows how varying one latent space affects generation. '
-                 'Compare across examples to assess consistency of disentanglement.',
+    plt.suptitle('Disentanglement Summary - All Examples',
                  fontsize=11, fontweight='bold')
     plt.tight_layout()
     
@@ -375,9 +371,7 @@ def visualize_latent_interpolation(model, dataloader, device, save_path=None, nu
                 if step == 0:
                     axes[row, step].set_ylabel(f'{space_name}\ninterpolation', fontsize=9)
         
-        plt.suptitle('Latent Space Interpolation Analysis\n'
-                     'Shows smooth transitions between two images by interpolating each latent space separately.\n'
-                     'Smooth, semantically meaningful transitions indicate well-structured latent representations.',
+        plt.suptitle('Latent Space Interpolation',
                      fontsize=11, fontweight='bold')
         plt.tight_layout()
         
@@ -449,9 +443,7 @@ def visualize_factor_traversal(model, device, save_path=None, num_steps=7):
                     if dim == 0:
                         axes[dim, step].set_title(f'{value:.1f}', fontsize=8)
             
-            plt.suptitle(f'Latent Dimension Traversal Analysis - {space_name.upper()} Space\n'
-                         f'Each row shows systematic variation of a single dimension from -3σ to +3σ.\n'
-                         f'Interpretable changes indicate that individual dimensions encode meaningful factors.',
+            plt.suptitle(f'Latent Dimension Traversal - {space_name.upper()} Space',
                          fontsize=11, fontweight='bold')
             plt.tight_layout()
             

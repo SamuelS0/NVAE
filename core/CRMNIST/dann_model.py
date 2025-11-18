@@ -765,10 +765,8 @@ class AugmentedDANN(NModule):
         # Create figure with 3 rows and 3 columns for DANN
         fig, axes = plt.subplots(3, 3, figsize=(18, 18))
 
-        # Add overall title explaining DANN architecture
-        fig.suptitle('DANN (Domain Adversarial Neural Network) Latent Space Analysis via t-SNE\n'
-                     'DANN learns domain-invariant features through adversarial training. '
-                     'Class-specific space (zy) should cluster by digits, Domain-specific space (zd) captures rotation/domain info.',
+        # Add overall title
+        fig.suptitle('DANN Latent Space t-SNE',
                      fontsize=14, fontweight='bold', y=0.995)
 
         latent_spaces = [
@@ -782,8 +780,7 @@ class AugmentedDANN(NModule):
             # Top row: color by digit label
             scatter1 = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
                                           c=y_labels, cmap='tab10', vmin=0, vmax=9, alpha=0.4)
-            axes[0, col_idx].set_title(f'{title}\nColored by Digit (Task Label)\n'
-                                      f'Strong clustering indicates task-relevant information',
+            axes[0, col_idx].set_title(f'{title}\nColored by Digit (Target Variable)',
                                       fontsize=10)
             axes[0, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
             axes[0, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
@@ -793,8 +790,7 @@ class AugmentedDANN(NModule):
             scatter2 = axes[1, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
                                           c=r_labels, cmap='tab10',
                                           vmin=0, vmax=5, alpha=0.4)
-            axes[1, col_idx].set_title(f'{title}\nColored by Rotation (Domain Variable)\n'
-                                      f'Clustering here indicates domain information is captured',
+            axes[1, col_idx].set_title(f'{title}\nColored by Rotation (Domain Variable)',
                                       fontsize=10)
             axes[1, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
             axes[1, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
@@ -820,8 +816,7 @@ class AugmentedDANN(NModule):
             
             scatter3 = axes[2, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
                                           c=rgb_colors, alpha=0.4)
-            axes[2, col_idx].set_title(f'{title}\nColored by Image Color (Spurious Correlation)\n'
-                                      f'Clustering by color indicates the space captures color information',
+            axes[2, col_idx].set_title(f'{title}\nColored by Color (Spurious Variable)',
                                       fontsize=10)
             axes[2, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
             axes[2, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)

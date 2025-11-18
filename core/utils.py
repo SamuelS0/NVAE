@@ -1015,9 +1015,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     elif epoch is not None:
         epoch_info = f" - Epoch {epoch}"
 
-    fig.suptitle(f'{model_name} Latent Space Analysis via t-SNE Dimensionality Reduction{epoch_info}\n'
-                 f'Each subplot shows a 2D projection of learned representations. '
-                 f'Good disentanglement = task factors cluster by label, domain factors scatter uniformly.',
+    fig.suptitle(f'{model_name} Latent Space t-SNE{epoch_info}',
                  fontsize=14, fontweight='bold', y=0.995)
     
     # Plot each latent space
@@ -1026,8 +1024,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
         scatter = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
                                          c=y_labels, cmap='tab10', alpha=0.5)
         label_type = "Class Label" if type == "wild" else "Digit"
-        axes[0, col_idx].set_title(f'{title}\nColored by {label_type} (Task Variable)\n'
-                                   f'Strong clustering indicates task-relevant information is encoded',
+        axes[0, col_idx].set_title(f'{title}\nColored by {label_type} (Target Variable)',
                                    fontsize=10)
         axes[0, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
         axes[0, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
@@ -1059,10 +1056,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
                                                        alpha=0.5)
 
             domain_display = domain_name.capitalize()
-            domain_interpretation = ("(Domain Variable - should be invariant in domain-specific spaces)"
-                                    if 'a' in title.lower() or 'domain' in title.lower()
-                                    else "(Domain Variable - clustering here indicates domain leakage)")
-            axes[row_idx, col_idx].set_title(f'{title}\nColored by {domain_display} {domain_interpretation}',
+            axes[row_idx, col_idx].set_title(f'{title}\nColored by {domain_display} (Domain Variable)',
                                             fontsize=10)
             axes[row_idx, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
             axes[row_idx, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)

@@ -187,9 +187,7 @@ def visualize_reconstructions(model, epoch, batch_data, image_dir, args):
         axes[domain * 2, 0].set_ylabel(f'{hospital_names[domain]}\nOriginal')
         axes[domain * 2 + 1, 0].set_ylabel(f'{hospital_names[domain]}\nRecon')
     
-    plt.suptitle(f'Histopathology Image Reconstruction Quality Assessment - Epoch {epoch}\n'
-                 f'Each hospital domain shows original tissue images (top) vs. reconstructions (bottom). '
-                 f'Good reconstruction preserves pathology (tumor/normal) and hospital-specific imaging characteristics.',
+    plt.suptitle(f'Histopathology Image Reconstruction - Epoch {epoch}',
                  y=1.005, fontsize=13, fontweight='bold')
     plt.tight_layout()
     plt.savefig(image_dir)
@@ -230,9 +228,7 @@ def visualize_conditional_generation(model, device, output_dir):
             # Add both class and hospital labels
             ax.set_title(f"{class_names[label]}\n{hospital_names[hospital]}", pad=10)
     
-    plt.suptitle("Conditional Histopathology Image Generation by Tissue Type and Hospital\n"
-                 "Each cell shows a generated sample conditioned on specific tissue class (Normal/Tumor) and hospital domain. "
-                 "Consistent pathology per class and distinct hospital characteristics indicate good conditional control.",
+    plt.suptitle("Conditional Image Generation by Tissue Type and Hospital",
                  y=1.05, fontsize=14, fontweight='bold')
     plt.savefig(os.path.join(output_dir, 'conditional_generations.png'), bbox_inches='tight', dpi=300)
     plt.close()
@@ -289,9 +285,7 @@ def save_domain_samples_visualization(x, y, metadata, epoch, output_dir):
         # Add hospital ID as y-label
         axes[hospital, 0].set_ylabel(f"Hospital {hospital}")
 
-    plt.suptitle(f"Hospital Domain Sample Distribution - Epoch {epoch}\n"
-                 f"Each row shows tissue samples from one hospital. "
-                 f"This visualization confirms balanced sampling across hospital domains and pathology distribution.",
+    plt.suptitle(f"Hospital Domain Sample Distribution - Epoch {epoch}",
                  y=1.005, fontsize=12, fontweight='bold')
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, f"domain_samples_epoch_{epoch}.png"))
@@ -425,9 +419,7 @@ def generate_images_latent(model, device, data_type, output_dir, batch_data, mod
 
     # Save the figure
     save_dir = os.path.join(output_dir, f'latent_reconstructions_{data_type}_{mode}.png')
-    plt.suptitle(f"Histopathology Latent Space Ablation Study - {args.model.upper()} Model ({mode} mode)\n"
-                 f"Each row shows reconstruction using different latent space combinations. "
-                 f"Compares individual latent space contributions to understand which factors they encode.",
+    plt.suptitle(f"Latent Space Ablation - {args.model.upper()} ({mode} mode)",
                  y=1.02, fontsize=13, fontweight='bold')
     plt.subplots_adjust(left=0.2)
     plt.savefig(save_dir, bbox_inches='tight', dpi=300)

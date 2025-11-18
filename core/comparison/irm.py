@@ -229,17 +229,13 @@ class IRM(nn.Module):
         # Create three subplots: one for task classes, one for colors, one for rotations
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
 
-        # Add overall title explaining IRM
-        fig.suptitle('IRM (Invariant Risk Minimization) Learned Feature Space via t-SNE\n'
-                     'IRM learns features that enable domain-invariant prediction by minimizing gradient variance across environments. '
-                     'Good invariance = strong task clustering, weak domain clustering.',
+        # Add overall title
+        fig.suptitle('IRM Feature Space t-SNE',
                      fontsize=13, fontweight='bold', y=1.02)
 
         # Plot task classes (digits)
         scatter1 = ax1.scatter(features_2d[:, 0], features_2d[:, 1], c=y_labels, cmap='tab10', vmin=0, vmax=9, alpha=0.4)
-        ax1.set_title('Task Classes (Digits)\n'
-                     'Strong clustering indicates IRM successfully\n'
-                     'learned task-relevant invariant features',
+        ax1.set_title('Colored by Digits (Target Variable)',
                      fontsize=11)
         ax1.set_xlabel('t-SNE Component 1', fontsize=10)
         ax1.set_ylabel('t-SNE Component 2', fontsize=10)
@@ -247,9 +243,7 @@ class IRM(nn.Module):
 
         # Plot colors
         scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='Set1', vmin=0, vmax=6, alpha=0.4)
-        ax2.set_title('Image Colors (Spurious Feature)\n'
-                     'Uniform distribution indicates color\n'
-                     'is not captured (good for invariance)',
+        ax2.set_title('Colored by Color (Spurious Variable)',
                      fontsize=11)
         ax2.set_xlabel('t-SNE Component 1', fontsize=10)
         ax2.set_ylabel('t-SNE Component 2', fontsize=10)
@@ -257,9 +251,7 @@ class IRM(nn.Module):
 
         # Plot rotations (domains)
         scatter3 = ax3.scatter(features_2d[:, 0], features_2d[:, 1], c=r_labels, cmap='Set2', vmin=0, vmax=5, alpha=0.4)
-        ax3.set_title('Domains (Rotation Angles)\n'
-                     'Uniform distribution indicates domain-invariant\n'
-                     'features (primary goal of IRM)',
+        ax3.set_title('Colored by Rotation (Domain Variable)',
                      fontsize=11)
         ax3.set_xlabel('t-SNE Component 1', fontsize=10)
         ax3.set_ylabel('t-SNE Component 2', fontsize=10)
