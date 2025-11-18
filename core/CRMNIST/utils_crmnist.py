@@ -438,14 +438,18 @@ def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_di
     model.eval()
     with torch.no_grad():
         if model_name == 'dann':
-            y_logits, domain_predictions = model.forward(y = y, x = x, r = r)
+            # DANN forward signature: forward(self, x, y, r, λ=1.0)
+            y_logits, domain_predictions = model.forward(x, y, r)
             x_recon = y_logits
         elif model_name == 'irm':
-            x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(y = y, x = x, r = r)
+            # IRM forward signature: forward(self, x, y=None, r=None)
+            x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(x, y, r)
         elif model_name == 'nvae':
-            x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(y = y, x = x, r = r)
+            # NVAE forward signature: forward(self, y, x, a) - note: parameter is 'a' not 'r'
+            x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(y, x, r)
         elif model_name == 'diva':
-            x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(y = y, x = x, r = r)
+            # DIVA forward signature: forward(self, y, x, a) - note: parameter is 'a' not 'r'
+            x_recon, _, _, _, _, _, _, _, _, _, _, _, _ = model.forward(y, x, r)
     
     # Get labels in the right format
     if len(y.shape) > 1 and y.shape[1] > 1:
