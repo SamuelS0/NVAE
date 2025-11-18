@@ -879,7 +879,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     """
     # Adjust max_samples for CRMNIST experiments
     if type == "crmnist":
-        max_samples = 500
+        max_samples = 375
 
     model.eval()
     
@@ -1034,7 +1034,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     for col_idx, (space_2d, title) in enumerate(tsne_results):
         # First row: color by digit/label
         scatter = axes[0, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
-                                         c=y_labels, cmap='tab10', alpha=0.5)
+                                         c=y_labels, cmap='tab10', alpha=0.35)
         label_type = "Class Label" if type == "wild" else "Digit"
         axes[0, col_idx].set_title(f'{title}\nColored by {label_type} (Target Variable)',
                                    fontsize=10)
@@ -1059,13 +1059,13 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
                 # Create color array for scatter plot
                 point_colors = [crmnist_color_map[int(val)] for val in domain_values]
                 scatter = axes[row_idx, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
-                                                       c=point_colors, alpha=0.5)
+                                                       c=point_colors, alpha=0.35)
             else:
                 # Use standard colormap for other domains
                 scatter = axes[row_idx, col_idx].scatter(space_2d[:, 0], space_2d[:, 1],
                                                        c=domain_values, cmap='tab10',
                                                        vmin=0, vmax=len(unique_hospitals)-1 if type == "wild" else len(labels_dict[domain_name])-1,
-                                                       alpha=0.5)
+                                                       alpha=0.35)
 
             domain_display = domain_name.capitalize()
             axes[row_idx, col_idx].set_title(f'{title}\nColored by {domain_display} (Domain Variable)',

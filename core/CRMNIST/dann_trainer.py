@@ -87,6 +87,7 @@ class DANNTrainer:
                 lambda_val = self.model.update_lambda_schedule(epoch, num_epochs)
                 self.lambda_history.append(lambda_val)
                 print(f'Epoch {epoch+1}/{num_epochs}: Gradient Reversal λ = {lambda_val:.4f}')
+                print(f'  Sparsity weights: zdy={self.model.sparsity_weight_zdy_current:.4f}, other={self.model.sparsity_weight_other_current:.4f}')
             
             # Training phase
             train_loss, train_metrics = self._train_epoch(train_loader)
@@ -145,9 +146,9 @@ class DANNTrainer:
             
             # Move data to device
             x, y, r = process_batch(batch, self.device, dataset_type=self.dataset)
-            
+
             # Forward pass and detailed loss calculation
-            loss, loss_dict = self.model.detailed_loss(y, x, r)
+            loss, loss_dict = self.model.detailed_loss(x, y, r)
             
             # Backward pass
             loss.backward()
@@ -200,9 +201,9 @@ class DANNTrainer:
         with torch.no_grad():
             for batch_idx, batch in val_pbar:
                 x, y, r = process_batch(batch, self.device, dataset_type=self.dataset)
-                
+
                 # Forward pass and detailed loss calculation
-                loss, loss_dict = self.model.detailed_loss(y, x, r)
+                loss, loss_dict = self.model.detailed_loss(x, y, r)
                 val_loss += loss.item()
                 
                 # Calculate metrics

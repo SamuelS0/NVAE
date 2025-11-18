@@ -164,7 +164,7 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
                 y_dim=spec_data['num_y_classes'],
                 d_dim=spec_data['num_r_classes'],
                 lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
-                sparsity_weight=getattr(args, 'sparsity_weight', 0.01),
+                sparsity_weight=getattr(args, 'sparsity_weight', 2.0),
                 alpha_y=args.alpha_1,
                 alpha_d=args.alpha_2,
                 beta_adv=getattr(args, 'beta_adv', 0.1),
@@ -375,12 +375,12 @@ def get_args():
     parser.add_argument('--zx_dim', type=int, default=128, help='Latent dimension for zx (VAE only)')
     parser.add_argument('--zay_dim', type=int, default=128, help='Latent dimension for zay (VAE only)')
     parser.add_argument('--za_dim', type=int, default=128, help='Latent dimension for za (VAE only)')
-    parser.add_argument('--beta_1', type=float, default=1.0, help='Beta 1 for VAE loss')
-    parser.add_argument('--beta_2', type=float, default=1.0, help='Beta 2 for VAE loss')
-    parser.add_argument('--beta_3', type=float, default=1.0, help='Beta 3 for VAE loss')
-    parser.add_argument('--beta_4', type=float, default=1.0, help='Beta 4 for VAE loss')
-    parser.add_argument('--alpha_1', type=float, default=150.0, help='y label loss multiplier')
-    parser.add_argument('--alpha_2', type=float, default=40.0, help='domain label loss multiplier')
+    parser.add_argument('--beta_1', type=float, default=2.0, help='Beta 1 for VAE loss')
+    parser.add_argument('--beta_2', type=float, default=2.0, help='Beta 2 for VAE loss')
+    parser.add_argument('--beta_3', type=float, default=2.0, help='Beta 3 for VAE loss')
+    parser.add_argument('--beta_4', type=float, default=2.0, help='Beta 4 for VAE loss')
+    parser.add_argument('--alpha_1', type=float, default=300.0, help='y label loss multiplier')
+    parser.add_argument('--alpha_2', type=float, default=50.0, help='domain label loss multiplier')
     parser.add_argument('--recon_weight', type=float, default=1.0, help='Weight for reconstruction loss (VAE only)')
     parser.add_argument('--num_y_classes', type=int, default=2, help='Class dimension for DIVA_VAE')
     parser.add_argument('--num_r_classes', type=int, default=5, help='Domain dimension for DIVA_VAE')
@@ -408,23 +408,23 @@ def get_args():
     parser.add_argument('--independence_penalty', type=float, default=10.0, help='Weight for independence penalty in stage 2')
     parser.add_argument('--use_zay_annealing', action='store_true', default=True, help='Enable zay capacity annealing in staged training (default: True)')
     parser.add_argument('--no_zay_annealing', dest='use_zay_annealing', action='store_false', help='Disable zay capacity annealing in staged training')
-    parser.add_argument('--patience', type=int, default=100, help='Patience for early stopping')
+    parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
 
     # L1 sparsity penalty arguments
     parser.add_argument('--l1_lambda_zy', type=float, default=10.0,
                        help='L1 penalty weight for zy latent (default: 10.0)')
     parser.add_argument('--l1_lambda_zx', type=float, default=10.0,
                        help='L1 penalty weight for zx latent (default: 10.0)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=100.0,
-                       help='L1 penalty weight for zay latent (default: 100.0)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=50.0,
+                       help='L1 penalty weight for zay latent (default: 50.0)')
     parser.add_argument('--l1_lambda_za', type=float, default=10.0,
                        help='L1 penalty weight for za latent (default: 10.0)')
 
     # AugmentedDANN-specific parameters
     parser.add_argument('--lambda_reversal', type=float, default=1.0,
                        help='Lambda parameter for gradient reversal in AugmentedDANN (default: 1.0)')
-    parser.add_argument('--sparsity_weight', type=float, default=0.01,
-                       help='Weight for sparsity penalty on zdy in AugmentedDANN (default: 0.01)')
+    parser.add_argument('--sparsity_weight', type=float, default=2.0,
+                       help='Target weight for sparsity penalty on zdy in AugmentedDANN, increases from 0 with DANN schedule (default: 2.0)')
     parser.add_argument('--beta_adv', type=float, default=0.1,
                        help='Weight for adversarial loss in AugmentedDANN (default: 0.1)')
 
@@ -781,7 +781,7 @@ if __name__ == "__main__":
         dann_aug_params = {
             **model_params,
             'lambda_reversal': getattr(args, 'lambda_reversal', 1.0),
-            'sparsity_weight': getattr(args, 'sparsity_weight', 0.01),
+            'sparsity_weight': getattr(args, 'sparsity_weight', 2.0),
             'beta_adv': getattr(args, 'beta_adv', 0.1)
         }
 

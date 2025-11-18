@@ -440,7 +440,7 @@ def train_dann_augmented(args, spec_data, train_loader, val_loader, dataset, see
         y_dim=spec_data['num_y_classes'],
         d_dim=spec_data['num_r_classes'],
         lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
-        sparsity_weight=getattr(args, 'sparsity_weight', 0.01),
+        sparsity_weight=getattr(args, 'sparsity_weight', 2.0),
         alpha_y=args.alpha_1,
         alpha_d=args.alpha_2,
         beta_adv=getattr(args, 'beta_adv', 0.1),
