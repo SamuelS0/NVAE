@@ -10,6 +10,13 @@ from core.utils import process_batch, visualize_latent_spaces
 class DANNTrainer(WILDTrainer):
     def __init__(self, model, optimizer, device, args, patience=5):
         super().__init__(model, optimizer, device, args, patience)
+
+        # Override models_dir to avoid polluting main models/ directory
+        # Use comparison_models/ for trainer checkpoints (separate from run_wild.py's model saves)
+        setting = getattr(args, 'setting', 'standard')
+        self.models_dir = os.path.join(args.out, 'comparison_models', setting)
+        os.makedirs(self.models_dir, exist_ok=True)
+
         self.dataset = args.dataset
         self.optimizer = optimizer
         self.num_epochs = getattr(args, 'epochs', 100)  # Total epochs for lambda scheduling

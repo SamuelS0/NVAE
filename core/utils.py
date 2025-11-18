@@ -1169,29 +1169,30 @@ def process_batch(batch, device, dataset_type='crmnist'):
         d = torch.argmax(d, dim=1)
     return x, y, d 
 
-def balanced_sample_for_visualization(model, dataloader, device, model_type="generic", 
-                                     max_samples=5000, target_samples_per_combination=50,
+def balanced_sample_for_visualization(model, dataloader, device, model_type="generic",
+                                     max_samples=10000, target_samples_per_combination=100,
                                      feature_extractor_fn=None, dataset_type="crmnist"):
     """
     Generic balanced sampling function for visualization that works with different model types.
-    
+    Automatically detects available combinations in the data for domain generalization scenarios.
+
     Args:
         model: The model to extract features from
         dataloader: DataLoader containing (x, y, c, r) tuples for CRMNIST or (x, y, metadata) for WILD
         device: torch device
         model_type: Type of model ("nvae", "dann", "irm", "diva", "generic")
-        max_samples: Maximum total samples to collect
-        target_samples_per_combination: Target samples per unique combination
+        max_samples: Maximum total samples to collect (increased from 5000 to 10000)
+        target_samples_per_combination: Target samples per unique combination (increased from 50 to 100)
         feature_extractor_fn: Custom function to extract features (optional)
         dataset_type: Type of dataset ("crmnist" or "wild")
-    
+
     Returns:
         features_dict: Dictionary containing extracted features/latents
         labels_dict: Dictionary containing labels (y, c, r) - for WILD, c is dummy, r is hospital
         sampling_stats: Dictionary with sampling statistics
     """
     model.eval()
-    
+
     # Initialize storage
     features_dict = {
         'zy': [], 'za': [], 'zay': [], 'zx': [], 'features': []
@@ -1199,37 +1200,86 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
     labels_dict = {
         'y': [], 'c': [], 'r': []
     }
-    
-    # Initialize counters for balanced sampling
-    # For CRMNIST: combinations of (digit, color, rotation)
-    # For WILD: combinations of (label, hospital) - 2 labels × 5 hospitals = 10 combinations
-    # For simpler models: combinations of (digit, rotation)
-    use_color = model_type in ["nvae", "diva"] and dataset_type == "crmnist"  # Models that use color information
-    
-    counts = {}
+
+    # STEP 1: Auto-detect available combinations by scanning first few batches
+    print(f"🔍 Auto-detecting available combinations in {dataset_type} dataset...")
+    detected_combinations = set()
+    detection_batches = 0
+    max_detection_batches = 20  # Scan first 20 batches to detect available combinations
+
+    with torch.no_grad():
+        for batch in dataloader:
+            if detection_batches >= max_detection_batches:
+                break
+
+            # Process batch according to dataset type
+            if dataset_type == "wild":
+                _, y, metadata = batch
+                y = y.to(device)
+                r = metadata[:, 0].to(device)  # Hospital ID
+                c = torch.zeros_like(y)
+            else:
+                _, y, c, r = batch
+                y = y.to(device)
+                c = c.to(device)
+                r = r.to(device)
+
+            # Convert to indices
+            y_idx = torch.argmax(y, dim=1) if len(y.shape) > 1 else y.long()
+            c_idx = torch.argmax(c, dim=1) if len(c.shape) > 1 else c.long()
+            r_idx = torch.argmax(r, dim=1) if len(r.shape) > 1 else r.long()
+
+            # Record all combinations in this batch
+            use_color = model_type in ["nvae", "diva"] and dataset_type == "crmnist"
+            for i in range(len(y_idx)):
+                if use_color:
+                    detected_combinations.add((y_idx[i].item(), c_idx[i].item(), r_idx[i].item()))
+                else:
+                    detected_combinations.add((y_idx[i].item(), r_idx[i].item()))
+
+            detection_batches += 1
+
+    # Handle empty dataset case
+    if not detected_combinations:
+        print("⚠️  Warning: No combinations detected in first 20 batches. Dataset may be empty.")
+        return {}, {}, {
+            'total_collected': 0,
+            'target_per_combination': target_samples_per_combination,
+            'min_per_combination': 0,
+            'max_per_combination': 0,
+            'num_combinations': 0,
+            'all_satisfied': False,
+            'combination_counts': {}
+        }
+
+    # Initialize counts only for detected combinations
+    counts = {combo: 0 for combo in detected_combinations}
+
+    # Print detection results
     if dataset_type == "wild":
-        # WILD dataset: label × hospital combinations
-        for label in range(2):  # Normal (0), Tumor (1)
-            for hospital in range(5):  # 5 hospitals (0, 1, 2, 3, 4)
-                counts[(label, hospital)] = 0
-    elif use_color:
-        # Full combinations: digit × color × rotation
-        for digit in range(10):
-            for color in range(7):
-                for rotation in range(6):
-                    counts[(digit, color, rotation)] = 0
+        available_hospitals = sorted(set(combo[1] for combo in detected_combinations))
+        available_labels = sorted(set(combo[0] for combo in detected_combinations))
+        label_names_str = ', '.join(['Normal', 'Tumor'][l] if l < 2 else f'Label {l}' for l in available_labels)
+        print(f"✅ Detected {len(detected_combinations)} combinations:")
+        print(f"   Labels: {label_names_str}")
+        print(f"   Hospitals: {available_hospitals}")
+        print(f"   (This dataset appears to have domain generalization splits)")
     else:
-        # Simplified combinations: digit × rotation
-        for digit in range(10):
-            for rotation in range(6):
-                counts[(digit, rotation)] = 0
-    
+        print(f"✅ Detected {len(detected_combinations)} active combinations")
+
     total_collected = 0
     all_combinations_satisfied = False
-    
-    print(f"Starting balanced sampling for {model_type} model...")
+    last_progress_count = 0
+    batches_without_progress = 0
+    max_batches_without_progress = 50  # Early stopping threshold
+
+    # Determine use_color for sampling phase (same logic as detection)
+    use_color = model_type in ["nvae", "diva"] and dataset_type == "crmnist"
+
+    print(f"\n📊 Starting balanced sampling for {model_type} model...")
     print(f"Target samples per combination: {target_samples_per_combination}")
-    print(f"Total combinations: {len(counts)}")
+    print(f"Total combinations detected: {len(counts)}")
+    print(f"Maximum samples to collect: {max_samples}")
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
@@ -1280,13 +1330,17 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
                 else:
                     digit = y_indices[j].item()
                     rotation = r_indices[j].item()
-                    
+
                     if use_color:
                         color = c_indices[j].item()
                         combination = (digit, color, rotation)
                     else:
                         combination = (digit, rotation)
-                
+
+                # Dynamically add new combinations if discovered after detection phase
+                if combination not in counts:
+                    counts[combination] = 0
+
                 if counts[combination] < target_samples_per_combination:
                     keep_mask[j] = True
                     counts[combination] += 1
@@ -1321,11 +1375,27 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
             
             # Check if all combinations are satisfied
             all_combinations_satisfied = all(count >= target_samples_per_combination for count in counts.values())
-            
+
+            # Early stopping: check if we're making progress
+            if total_collected > last_progress_count:
+                last_progress_count = total_collected
+                batches_without_progress = 0
+            else:
+                batches_without_progress += 1
+
+            # Stop if no progress for many batches (likely exhausted available combinations)
+            if batches_without_progress >= max_batches_without_progress:
+                print(f"\n⚠️  Early stopping: No new samples collected in {max_batches_without_progress} batches")
+                print(f"   Likely reason: Dataset doesn't contain all expected combinations")
+                print(f"   (This is normal for domain generalization datasets with held-out test domains)")
+                break
+
             # Progress update every 100 batches
             if batch_idx % 100 == 0:
-                min_count = min(counts.values())
-                print(f"Batch {batch_idx}: collected {total_collected} samples, min_count: {min_count}")
+                min_count = min(counts.values()) if counts else 0
+                max_count = max(counts.values()) if counts else 0
+                satisfied = sum(1 for count in counts.values() if count >= target_samples_per_combination)
+                print(f"Batch {batch_idx}: {total_collected} samples | min: {min_count}, max: {max_count} | {satisfied}/{len(counts)} combinations satisfied")
     
     # Concatenate all collected data
     final_features = {}
@@ -1344,17 +1414,31 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
     sampling_stats = {
         'total_collected': total_collected,
         'target_per_combination': target_samples_per_combination,
-        'min_per_combination': min(counts.values()),
-        'max_per_combination': max(counts.values()),
+        'min_per_combination': min(counts.values()) if counts else 0,
+        'max_per_combination': max(counts.values()) if counts else 0,
         'num_combinations': len(counts),
-        'all_satisfied': all_combinations_satisfied
+        'all_satisfied': all_combinations_satisfied,
+        'combination_counts': counts
     }
-    
-    print(f"\nSampling completed:")
-    print(f"Total samples collected: {total_collected}")
-    print(f"Min samples per combination: {sampling_stats['min_per_combination']}")
-    print(f"Max samples per combination: {sampling_stats['max_per_combination']}")
-    
+
+    # Print summary
+    print(f"\n✅ Sampling completed:")
+    print(f"   Total samples collected: {total_collected}")
+    print(f"   Combinations found: {len(counts)}")
+    print(f"   Min/Max per combination: {sampling_stats['min_per_combination']}/{sampling_stats['max_per_combination']}")
+    print(f"   Target per combination: {target_samples_per_combination}")
+    satisfied_count = sum(1 for count in counts.values() if count >= target_samples_per_combination)
+    print(f"   Satisfied target: {satisfied_count}/{len(counts)} combinations")
+
+    # Show detailed breakdown for WILD dataset
+    if dataset_type == "wild" and len(counts) <= 10:  # Only show details if reasonable number
+        print(f"\n   Breakdown by combination:")
+        label_names = {0: "Normal", 1: "Tumor"}
+        for (label, hospital), count in sorted(counts.items()):
+            label_str = label_names.get(label, f"Label {label}")
+            status = "✓" if count >= target_samples_per_combination else "✗"
+            print(f"      {status} {label_str}, Hospital {hospital}: {count} samples")
+
     return final_features, final_labels, sampling_stats
 
 def _extract_features_by_model_type(model, model_type, x, y, c, r):

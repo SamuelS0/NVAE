@@ -56,7 +56,9 @@ class DANNTrainer:
         }
         
         # Create output directories
-        self.models_dir = os.path.join(args.out, 'comparison_models', args.setting)
+        # Use getattr to support both CRMNIST (has 'setting') and WILD (doesn't have 'setting')
+        setting = getattr(args, 'setting', 'standard')
+        self.models_dir = os.path.join(args.out, 'comparison_models', setting)
         os.makedirs(self.models_dir, exist_ok=True)
         
         # Track training progress for lambda scheduling
