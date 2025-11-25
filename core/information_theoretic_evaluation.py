@@ -631,12 +631,22 @@ def extract_latents_from_model(
             x, y = batch[0].to(device), batch[1].to(device)
 
             # Extract domain labels (dataset-specific logic)
-            if len(batch) > 2:
+            # CRMNIST batch format: (x, y, c, r) where r is rotation/domain (one-hot)
+            # WILD batch format: (x, y, metadata) where metadata[:, 0] is hospital_id
+            if len(batch) == 4:
+                # CRMNIST: batch = (x, y, c, r) - use r (rotation) as domain
+                r = batch[3]  # rotation one-hot, shape (batch, 6)
+                if len(r.shape) > 1 and r.shape[1] > 1:
+                    # Convert one-hot to index
+                    d = r.argmax(dim=1).to(device)
+                else:
+                    d = r.to(device)
+            elif len(batch) > 2:
+                # WILD or other: batch = (x, y, metadata)
                 if hasattr(batch[2], 'shape') and len(batch[2].shape) > 1:
                     # WILD: metadata[:, 0] is hospital_id
                     d = batch[2][:, 0].to(device)
                 else:
-                    # CRMNIST: direct domain label
                     d = batch[2].to(device)
             else:
                 # Fallback if no domain labels

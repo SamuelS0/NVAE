@@ -207,7 +207,7 @@ if __name__ == "__main__":
     # L1 sparsity penalty arguments
     parser.add_argument('--l1_lambda_zy', type=float, default=10.0,
                        help='L1 penalty weight for zy latent (default: 10.0)')
-    parser.add_argument('--l1_lambda_zx', type=float, default=50.0,
+    parser.add_argument('--l1_lambda_zx', type=float, default=10.0,
                        help='L1 penalty weight for zx latent (default: 50.0)')
     parser.add_argument('--l1_lambda_zay', type=float, default=125.0,
                        help='L1 penalty weight for zay latent (default: 125.0)')

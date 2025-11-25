@@ -222,8 +222,14 @@ class IRM(nn.Module):
         r_labels = np.concatenate(r_list, axis=0)
         
         # Convert one-hot encoded labels to single dimension
+        # IMPORTANT: Handle grayscale images (all-zeros one-hot) separately
+        # to avoid confusion with blue (index 0)
         if len(c_labels.shape) > 1:
+            # Detect grayscale: where one-hot sum is 0 (no color applied)
+            is_grayscale = np.sum(c_labels, axis=1) == 0
             c_labels = np.argmax(c_labels, axis=1)
+            # Assign grayscale a distinct label (7) to separate from blue (0)
+            c_labels[is_grayscale] = 7  # 7 = grayscale (no color)
         if len(r_labels.shape) > 1:
             r_labels = np.argmax(r_labels, axis=1)
         if len(y_labels.shape) > 1:
@@ -250,8 +256,8 @@ class IRM(nn.Module):
         ax1.set_ylabel('t-SNE Component 2', fontsize=10)
         ax1.legend(*scatter1.legend_elements(), title="Digits", fontsize=9)
 
-        # Plot colors
-        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='Set1', vmin=0, vmax=6, alpha=0.4)
+        # Plot colors (vmax=7 to include grayscale as label 7)
+        scatter2 = ax2.scatter(features_2d[:, 0], features_2d[:, 1], c=c_labels, cmap='Set1', vmin=0, vmax=7, alpha=0.4)
         ax2.set_title('Colored by Color (Spurious Variable)',
                      fontsize=11)
         ax2.set_xlabel('t-SNE Component 1', fontsize=10)
