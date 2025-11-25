@@ -704,13 +704,13 @@ def sample_crmnist(model, dataloader, num_samples, device):
     """
     Sample data from CRMNIST model and collect domain information.
     Handles both NVAE and DIVA models (DIVA doesn't have zay latent space).
-    
+
     Args:
         model: CRMNIST VAE model (NVAE or DIVA)
         dataloader: DataLoader containing (x, y, c, r) tuples
         num_samples: Maximum number of samples to collect
         device: torch device
-    
+
     Returns:
         zy_list, za_list, zay_list, zx_list: Lists of latent vectors (zay_list is dummy for DIVA)
         y_list: List of digit labels
@@ -725,39 +725,45 @@ def sample_crmnist(model, dataloader, num_samples, device):
         "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
         'rotation': ['0°', '10°', '20°', '30°', '40°', '50°']
     }
-    
+
     # Check if model is in DIVA mode
     is_diva = hasattr(model, 'diva') and model.diva
-    
+
     # Initialize counters for each combination
     counts = {}
     for digit in range(10):
         for color in range(7):
             for rotation in range(6):
                 counts[(digit, color, rotation)] = 0
-    
+
     # Target samples per combination - ensure we get enough for visualization
-    target_samples = 50  # Minimum samples per combination for good visualization
+    target_samples = 50
     total_collected = 0
     all_combinations_satisfied = False
-    
+
     with torch.no_grad():
         pbar = tqdm(dataloader, desc=f"Sampling CRMNIST data ({'DIVA' if is_diva else 'NVAE'} mode)")
         for x, y, c, r in pbar:
             # Only check max_samples after we have enough samples for each combination
             if all_combinations_satisfied and total_collected >= num_samples:
                 break
-                
+
             x = x.to(device)
             y = y.to(device)
             c = c.to(device)
             r = r.to(device)
-            
+
+            # Store original c for grayscale detection before argmax
+            c_original = c.clone()
+
             # Convert to indices if one-hot encoded
             if len(y.shape) > 1:
                 y = torch.argmax(y, dim=1)
             if len(c.shape) > 1:
-                c = torch.argmax(c, dim=1)
+                # Detect grayscale (all zeros) and use -1 for visualization
+                c_sums = c.sum(dim=1)
+                c_indices = torch.argmax(c, dim=1)
+                c = torch.where(c_sums == 0, torch.tensor(-1, device=device), c_indices)
             if len(r.shape) > 1:
                 r = torch.argmax(r, dim=1)
             
@@ -879,7 +885,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     """
     # Adjust max_samples for CRMNIST experiments
     if type == "crmnist":
-        max_samples = 375
+        max_samples = 250
 
     model.eval()
     
@@ -965,7 +971,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     
     # Run t-SNE
     print("\nRunning t-SNE (this may take a few minutes)...")
-    tsne = TSNE(n_components=2, random_state=42, n_jobs=-1)
+    tsne = TSNE(n_components=2, random_state=42, n_jobs=-1, n_iter=2000, perplexity=30)
     
     # Apply t-SNE to each latent space
     latent_spaces = [(zy, 'Label-specific (zy)')]
@@ -1046,8 +1052,9 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
         for row_idx, (domain_name, domain_values) in enumerate(domain_dict.items(), 1):
             # For CRMNIST color labels, use actual semantic colors
             if type in ["nvae", "diva", "crmnist"] and domain_name == "color":
-                # Map CRMNIST color indices to actual RGB colors
+                # Map CRMNIST color indices to actual RGB colors (-1 = grayscale)
                 crmnist_color_map = {
+                    -1: '#808080', # Gray (grayscale images)
                     0: '#0000FF',  # Blue
                     1: '#00FF00',  # Green
                     2: '#FFFF00',  # Yellow
@@ -1087,8 +1094,9 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
                     for i, h in enumerate(unique_hospitals)
                 ]
             elif type in ["nvae", "diva", "crmnist"] and domain_name == "color":
-                # For CRMNIST colors, use actual semantic colors in legend
+                # For CRMNIST colors, use actual semantic colors in legend (including grayscale)
                 crmnist_color_map = {
+                    -1: '#808080', # Gray (grayscale images)
                     0: '#0000FF',  # Blue
                     1: '#00FF00',  # Green
                     2: '#FFFF00',  # Yellow
@@ -1097,11 +1105,21 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
                     5: '#FFA500',  # Orange
                     6: '#FF0000'   # Red
                 }
+                crmnist_color_names = {
+                    -1: 'Grayscale',
+                    0: 'Blue',
+                    1: 'Green',
+                    2: 'Yellow',
+                    3: 'Cyan',
+                    4: 'Magenta',
+                    5: 'Orange',
+                    6: 'Red'
+                }
                 legend_elements = [
                     plt.Line2D([0], [0], marker='o', color='w',
                               markerfacecolor=crmnist_color_map[i],
-                              label=labels_dict[domain_name][i], markersize=10)
-                    for i in range(len(labels_dict[domain_name]))
+                              label=crmnist_color_names[i], markersize=10)
+                    for i in [-1, 0, 1, 2, 3, 4, 5, 6]
                 ]
             else:
                 # Standard legend for other domains

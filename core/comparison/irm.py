@@ -232,7 +232,7 @@ class IRM(nn.Module):
         print(f"Visualizing {len(features)} samples")
         
         # Apply t-SNE
-        tsne = TSNE(n_components=2, random_state=42, perplexity=min(30, len(features)//4))
+        tsne = TSNE(n_components=2, random_state=42, n_iter=2000, perplexity=min(30, len(features)//4))
         features_2d = tsne.fit_transform(features)
         
         # Create three subplots: one for task classes, one for colors, one for rotations

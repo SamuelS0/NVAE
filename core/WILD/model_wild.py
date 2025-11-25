@@ -438,7 +438,7 @@ class VAE(NModule):
         from sklearn.manifold import TSNE
         import matplotlib.pyplot as plt
         
-        tsne = TSNE(n_components=2, random_state=42)
+        tsne = TSNE(n_components=2, random_state=42, n_iter=2000)
         
         # Determine number of subplots based on DIVA mode
         if self.diva:

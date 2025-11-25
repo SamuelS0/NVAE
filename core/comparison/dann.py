@@ -208,7 +208,7 @@ class DANN(nn.Module):
         assert len(r_labels) == len(features), f"Rotation label dimension mismatch: {len(r_labels)} vs {len(features)}"
         
         # Apply t-SNE
-        tsne = TSNE(n_components=2, random_state=42)
+        tsne = TSNE(n_components=2, random_state=42, n_iter=2000)
         features_2d = tsne.fit_transform(features)
         
         # Create three subplots: one for task classes, one for colors, one for rotations
