@@ -22,13 +22,13 @@ This document provides a comprehensive technical description of our experimental
 - **Input dimensions:** 28×28×3 (RGB)
 - **Task variable (Y):** 10 digit classes (0-9)
 - **Spurious variable (C):** 7 color transformations
-- **Domain variable (R):** 6 rotation angles (0°, 60°, 120°, 180°, 240°, 300°)
+- **Domain variable (R):** 6 rotation angles (0°, 10°, 20°, 30°, 40°, 50°)
 - **Total samples:** ~60,000 training, ~10,000 test
 
 **Data Generation Process:**
 1. Load grayscale MNIST digits (28×28×1)
 2. Apply color transformation: Multiply by RGB color vector with intensity ∈ [1.0, 1.5]
-3. Apply rotation: Rotate image by discrete angle from R = {0°, 60°, 120°, 180°, 240°, 300°}
+3. Apply rotation: Rotate image by discrete angle from R = {0°, 10°, 20°, 30°, 40°, 50°}
 4. Normalize pixel values to [0, 1]
 
 **Domain Configuration:**

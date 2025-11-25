@@ -296,7 +296,9 @@ if __name__ == "__main__":
     class_map = spec_data['class_map']
     
     # Choose labels subset if not already chosen
-    spec_data['y_c'], subsets = core.CRMNIST.utils_crmnist.choose_label_subset(spec_data)
+    # Use a fixed seed for reproducibility (can be overridden via args.label_seed if added)
+    label_seed = getattr(args, 'label_seed', 42)
+    spec_data['y_c'], subsets = core.CRMNIST.utils_crmnist.choose_label_subset(spec_data, seed=label_seed)
     # Update domain_data with subsets
     for i, subset in subsets.items():
         if i in domain_data:
@@ -325,12 +327,29 @@ if __name__ == "__main__":
 
     if ood_domain is not None:
         # OOD mode: Generate ID training data (exclude OOD domain)
+        # Generate train dataset using base_split='train' to prevent data leakage
+        # This ensures validation images are completely different base MNIST images
         train_dataset = generate_crmnist_dataset(
             spec_data, train=True,
             transform_intensity=args.intensity,
             transform_decay=args.intensity_decay,
             use_cache=use_cache,
-            exclude_domains=[ood_domain]
+            exclude_domains=[ood_domain],
+            base_split='train',  # Use only 80% of base MNIST images for training
+            base_split_ratio=0.8,
+            base_split_seed=42
+        )
+
+        # Generate validation dataset from DIFFERENT base images (no leakage!)
+        val_dataset = generate_crmnist_dataset(
+            spec_data, train=True,  # Use MNIST training set, but different base images
+            transform_intensity=args.intensity,
+            transform_decay=args.intensity_decay,
+            use_cache=use_cache,
+            exclude_domains=[ood_domain],
+            base_split='val',  # Use remaining 20% of base MNIST images for validation
+            base_split_ratio=0.8,
+            base_split_seed=42
         )
 
         # Generate full test dataset
@@ -351,18 +370,35 @@ if __name__ == "__main__":
             dataset_type='crmnist'
         )
 
-        print(f"\n📊 Dataset sizes:")
-        print(f"   Training (ID only): {len(train_dataset)} samples")
+        print(f"\n📊 Dataset sizes (OOD mode, NO DATA LEAKAGE):")
+        print(f"   Training (ID only): {len(train_dataset)} samples (from unique base images)")
+        print(f"   Validation (ID only): {len(val_dataset)} samples (from DIFFERENT base images)")
         print(f"   ID Test: {len(id_test_dataset)} samples")
         print(f"   OOD Test: {len(ood_test_dataset)} samples")
     else:
         # Standard mode: Use all domains
+        # Generate train dataset using base_split='train' to prevent data leakage
         train_dataset = generate_crmnist_dataset(
             spec_data, train=True,
             transform_intensity=args.intensity,
             transform_decay=args.intensity_decay,
-            use_cache=use_cache
+            use_cache=use_cache,
+            base_split='train',  # Use only 80% of base MNIST images for training
+            base_split_ratio=0.8,
+            base_split_seed=42
         )
+
+        # Generate validation dataset from DIFFERENT base images (no leakage!)
+        val_dataset = generate_crmnist_dataset(
+            spec_data, train=True,  # Use MNIST training set, but different base images
+            transform_intensity=args.intensity,
+            transform_decay=args.intensity_decay,
+            use_cache=use_cache,
+            base_split='val',  # Use remaining 20% of base MNIST images for validation
+            base_split_ratio=0.8,
+            base_split_seed=42
+        )
+
         test_dataset = generate_crmnist_dataset(
             spec_data, train=False,
             transform_intensity=args.intensity,
@@ -372,23 +408,18 @@ if __name__ == "__main__":
         id_test_dataset = test_dataset
         ood_test_dataset = None
 
-        print(f"\n📊 Dataset sizes:")
-        print(f"   Training: {len(train_dataset)} samples")
+        print(f"\n📊 Dataset sizes (NO DATA LEAKAGE):")
+        print(f"   Training: {len(train_dataset)} samples (from unique base images)")
+        print(f"   Validation: {len(val_dataset)} samples (from DIFFERENT base images)")
         print(f"   Test: {len(test_dataset)} samples")
 
-    # Create validation split from training data to avoid data leakage
-    train_size = len(train_dataset)
-    val_size = int(0.2 * train_size)  # Use 20% for validation
-    train_size = train_size - val_size
+    # NOTE: We no longer use random_split() here because that causes data leakage!
+    # Instead, train_dataset and val_dataset are generated from completely different
+    # base MNIST images using the base_split parameter above.
 
-    train_subset, val_subset = torch.utils.data.random_split(
-        train_dataset, [train_size, val_size],
-        generator=torch.Generator().manual_seed(42)  # For reproducibility
-    )
-
-    # Create data loaders
-    train_loader = DataLoader(train_subset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_subset, batch_size=args.batch_size, shuffle=False)
+    # Create data loaders (train_dataset and val_dataset are already properly separated)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
     id_test_loader = DataLoader(id_test_dataset, batch_size=args.batch_size, shuffle=False)
     ood_test_loader = DataLoader(ood_test_dataset, batch_size=args.batch_size, shuffle=False) if ood_test_dataset else None
 

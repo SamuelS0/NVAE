@@ -36,6 +36,8 @@ def extract_latent_representations(model, dataloader, device, num_classes=10):
 
     if is_augmented_dann:
         print("Detected AugmentedDANN model - using extract_features() for 3-space latent extraction")
+        print("⚠️  Note: AugmentedDANN maps zx=za=zd for interface compatibility.")
+        print("   Expressiveness metrics for zx and za will be identical.")
 
     all_zy = []
     all_zx = []
@@ -287,8 +289,10 @@ def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader,
 
         domain_improvement_val = results['domain_za_zay']['val_acc'] - results['domain_za_alone']['val_acc']
         domain_improvement_test = results['domain_za_zay']['test_acc'] - results['domain_za_alone']['test_acc']
-        domain_improvement_val_pct = (domain_improvement_val / results['domain_za_alone']['val_acc']) * 100
-        domain_improvement_test_pct = (domain_improvement_test / results['domain_za_alone']['test_acc']) * 100
+        baseline_val = results['domain_za_alone']['val_acc']
+        baseline_test = results['domain_za_alone']['test_acc']
+        domain_improvement_val_pct = (domain_improvement_val / baseline_val) * 100 if baseline_val > 0 else 0.0
+        domain_improvement_test_pct = (domain_improvement_test / baseline_test) * 100 if baseline_test > 0 else 0.0
         print(f"   📊 IMPROVEMENT (Val): za+zay is {domain_improvement_val:.4f} ({domain_improvement_val_pct:.2f}%) better than za alone")
         print(f"   📊 IMPROVEMENT (Test): za+zay is {domain_improvement_test:.4f} ({domain_improvement_test_pct:.2f}%) better than za alone")
     
@@ -301,8 +305,10 @@ def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader,
 
         label_improvement_val = results['label_zy_zay']['val_acc'] - results['label_zy_alone']['val_acc']
         label_improvement_test = results['label_zy_zay']['test_acc'] - results['label_zy_alone']['test_acc']
-        label_improvement_val_pct = (label_improvement_val / results['label_zy_alone']['val_acc']) * 100
-        label_improvement_test_pct = (label_improvement_test / results['label_zy_alone']['test_acc']) * 100
+        baseline_val = results['label_zy_alone']['val_acc']
+        baseline_test = results['label_zy_alone']['test_acc']
+        label_improvement_val_pct = (label_improvement_val / baseline_val) * 100 if baseline_val > 0 else 0.0
+        label_improvement_test_pct = (label_improvement_test / baseline_test) * 100 if baseline_test > 0 else 0.0
         print(f"   📊 IMPROVEMENT (Val): zy+zay is {label_improvement_val:.4f} ({label_improvement_val_pct:.2f}%) better than zy alone")
         print(f"   📊 IMPROVEMENT (Test): zy+zay is {label_improvement_test:.4f} ({label_improvement_test_pct:.2f}%) better than zy alone")
     
@@ -496,11 +502,15 @@ def create_expressiveness_visualization(results, save_dir, has_zay):
         label_improvement_val = results['label_zy_zay']['val_acc'] - results['label_zy_alone']['val_acc']
         label_improvement_test = results['label_zy_zay']['test_acc'] - results['label_zy_alone']['test_acc']
 
-        # Calculate percentage improvements (relative to baseline)
-        domain_improvement_val_pct = (domain_improvement_val / results['domain_za_alone']['val_acc']) * 100
-        domain_improvement_test_pct = (domain_improvement_test / results['domain_za_alone']['test_acc']) * 100
-        label_improvement_val_pct = (label_improvement_val / results['label_zy_alone']['val_acc']) * 100
-        label_improvement_test_pct = (label_improvement_test / results['label_zy_alone']['test_acc']) * 100
+        # Calculate percentage improvements (relative to baseline) with zero protection
+        domain_base_val = results['domain_za_alone']['val_acc']
+        domain_base_test = results['domain_za_alone']['test_acc']
+        label_base_val = results['label_zy_alone']['val_acc']
+        label_base_test = results['label_zy_alone']['test_acc']
+        domain_improvement_val_pct = (domain_improvement_val / domain_base_val) * 100 if domain_base_val > 0 else 0.0
+        domain_improvement_test_pct = (domain_improvement_test / domain_base_test) * 100 if domain_base_test > 0 else 0.0
+        label_improvement_val_pct = (label_improvement_val / label_base_val) * 100 if label_base_val > 0 else 0.0
+        label_improvement_test_pct = (label_improvement_test / label_base_test) * 100 if label_base_test > 0 else 0.0
 
     plt.tight_layout(rect=[0, 0, 1, 0.97])
 

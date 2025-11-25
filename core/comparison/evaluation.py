@@ -1,11 +1,11 @@
 from core.train import train
-from core.test import test_nvae, test_dann
+from core.test import test_nvae, test_dann, test_irm
 from core.CRMNIST.model import VAE
-from core.CRMNIST.comparison.dann import DANN
-from core.CRMNIST.comparison.irm import IRM
+from core.comparison.dann import DANN
+from core.comparison.irm import IRM
 import torch
 from core.CRMNIST.data_generation import generate_crmnist_dataset
-from core.CRMNIST.comparison.train import train_nvae, train_diva, train_dann, train_irm
+from core.comparison.train import train_nvae, train_diva, train_dann, train_irm
 import core.CRMNIST.utils_crmnist as utils_crmnist
 import core.utils
 from core.utils import visualize_latent_spaces
@@ -25,60 +25,7 @@ import datetime
     python -m core.CRMNIST.comparison.evaluation --config conf/crmnist.json --out results/ --cuda
 """
 
-device = None 
-
-def test_irm(model, test_loader, device):
-    """
-    Test function for IRM model
-    
-    Args:
-        model: IRM model to test
-        test_loader: DataLoader for test data
-        device: Device to run inference on
-        
-    Returns:
-        tuple: (test_loss, metrics_dict)
-    """
-    if model is None:
-        raise ValueError("Model cannot be None")
-    if test_loader is None:
-        raise ValueError("Test loader cannot be None")
-        
-    model.eval()
-    test_loss = 0
-    correct = 0
-    total = 0
-    
-    with torch.no_grad():
-        for batch_idx, (x, y, c, r) in enumerate(test_loader):
-            try:
-                x, y, r = x.to(device), y.to(device), r.to(device)
-                
-                logits, _ = model.forward(x, y, r)
-                loss = torch.nn.functional.cross_entropy(logits, y)
-                
-                predictions = torch.argmax(logits, dim=1)
-                correct += (predictions == y).sum().item()
-                total += y.size(0)
-                test_loss += loss.item()
-                
-            except Exception as e:
-                print(f"Error processing batch {batch_idx}: {e}")
-                continue
-    
-    if len(test_loader) == 0:
-        print("Warning: Empty test loader")
-        return 0.0, {'y_accuracy': 0.0, 'classification_accuracy': 0.0}
-    
-    test_loss /= len(test_loader)
-    accuracy = correct / total if total > 0 else 0.0
-    
-    metrics = {
-        'y_accuracy': accuracy,
-        'classification_accuracy': accuracy  # For consistency with other models
-    }
-    
-    return test_loss, metrics
+device = None
 
 def calculate_confidence_interval(accuracies, confidence=0.95):
     """
@@ -121,10 +68,10 @@ def evaluate_models_with_seeds(nvae, diva, dann, irm, test_loader, test_domain=N
     else:
         domain_test_loader = test_loader
     
-    test_loss_nvae, test_metrics_nvae = test_nvae(nvae, domain_test_loader, device)
-    test_loss_diva, test_metrics_diva = test_nvae(diva, domain_test_loader, device)  # DIVA uses same test function as NVAE (both are VAE architectures)
-    test_loss_dann, test_metrics_dann = test_dann(dann, domain_test_loader, device)
-    test_loss_irm, test_metrics_irm = test_irm(irm, domain_test_loader, device)
+    test_loss_nvae, test_metrics_nvae = test_nvae(nvae, domain_test_loader, 'crmnist', device)
+    test_loss_diva, test_metrics_diva = test_nvae(diva, domain_test_loader, 'crmnist', device)  # DIVA uses same test function as NVAE (both are VAE architectures)
+    test_loss_dann, test_metrics_dann = test_dann(dann, domain_test_loader, 'crmnist', device)
+    test_loss_irm, test_metrics_irm = test_irm(irm, domain_test_loader, 'crmnist', device)
 
     print("--------------------------------")
     print(f"NVAE test results:")
@@ -247,7 +194,7 @@ def print_results(results, holdout=False):
         print(f"--------------------------------")
         print(f"Domain results for {model.upper()}:")
         for domain in results[model]:
-            print(f"\n{'Held out test' if holdout else 'Cross-domain test'} domain {domain} ({domain * 15}°):")
+            print(f"\n{'Held out test' if holdout else 'Cross-domain test'} domain {domain} ({domain * 10}°):")
             print(f"Loss: {results[model][domain]['loss']:.4f}")
             for metric in results[model][domain]['metrics']:
                 print(f"{metric}: {results[model][domain]['metrics'][metric]:.4f}")
@@ -278,7 +225,7 @@ def run_cross_domain_evaluation(args, nvae, diva, dann, irm, test_loader, spec_d
     
     # Evaluate on each domain
     for domain in range(num_domains):
-        print(f"\nEvaluating on domain {domain} ({domain * 15}°)")
+        print(f"\nEvaluating on domain {domain} ({domain * 10}°)")
         results = evaluate_models_with_seeds(nvae, diva, dann, irm, test_loader, test_domain=domain, path=os.path.join(args.out, f'cross_domain_domain_{domain}'))
         for model in cross_domain_results:
             cross_domain_results[model][domain] = {
@@ -290,7 +237,7 @@ def run_cross_domain_evaluation(args, nvae, diva, dann, irm, test_loader, spec_d
 
 def run_holdout_evaluation_with_seeds(args, train_loader, test_loader, class_map, spec_data, num_seeds=10):
     """
-    Run evaluation where we hold out the final domain (domain 5, 75°) for testing.
+    Run evaluation where we hold out the final domain (domain 5, 50°) for testing.
     Train each model 10 times with different seeds and compute confidence intervals.
     
     Args:
@@ -307,9 +254,9 @@ def run_holdout_evaluation_with_seeds(args, train_loader, test_loader, class_map
     num_domains = spec_data['num_r_classes']  # Use the correct number from config (6 domains)
     holdout_results = {'nvae': {}, 'diva': {}, 'dann': {}, 'irm': {}}
     
-    # Hold out only the final domain (domain 5, which is 75°)
-    holdout_domain = num_domains - 1  # Domain 5 (75°)
-    print(f"\nHolding out final domain {holdout_domain} ({holdout_domain * 15}°)")
+    # Hold out only the final domain (domain 5, which is 50°)
+    holdout_domain = num_domains - 1  # Domain 5 (50°)
+    print(f"\nHolding out final domain {holdout_domain} ({holdout_domain * 10}°)")
     
     # Filter training data to exclude holdout domain (train on domains 0-4)
     filtered_train_loader = filter_domain_loader(train_loader, holdout_domain, exclude=True)
@@ -330,26 +277,26 @@ def run_holdout_evaluation_with_seeds(args, train_loader, test_loader, class_map
             torch.cuda.manual_seed_all(seed)
         
         # Train NVAE
-        nvae, _ = train_nvae(args, spec_data, filtered_train_loader, holdout_test_loader, None)
-        _, nvae_metrics = test_nvae(nvae, holdout_test_loader, args.device)
+        nvae, _ = train_nvae(args, spec_data, filtered_train_loader, holdout_test_loader, 'crmnist')
+        _, nvae_metrics = test_nvae(nvae, holdout_test_loader, 'crmnist', args.device)
         model_accuracies['nvae'].append(nvae_metrics.get('y_accuracy', 0.0))
         del nvae  # Free memory
-        
+
         # Train DIVA
-        diva, _ = train_diva(args, spec_data, filtered_train_loader, holdout_test_loader, None)
-        _, diva_metrics = test_nvae(diva, holdout_test_loader, args.device)  # DIVA uses same test function as NVAE
+        diva, _ = train_diva(args, spec_data, filtered_train_loader, holdout_test_loader, 'crmnist')
+        _, diva_metrics = test_nvae(diva, holdout_test_loader, 'crmnist', args.device)  # DIVA uses same test function as NVAE
         model_accuracies['diva'].append(diva_metrics.get('y_accuracy', 0.0))
         del diva  # Free memory
-        
+
         # Train DANN
-        dann, _ = train_dann(args, spec_data, filtered_train_loader, holdout_test_loader, None)
-        _, dann_metrics = test_dann(dann, holdout_test_loader, args.device)
+        dann, _ = train_dann(args, spec_data, filtered_train_loader, holdout_test_loader, 'crmnist')
+        _, dann_metrics = test_dann(dann, holdout_test_loader, 'crmnist', args.device)
         model_accuracies['dann'].append(dann_metrics.get('y_accuracy', 0.0))
         del dann  # Free memory
-        
+
         # Train IRM
-        irm, _ = train_irm(args, spec_data, filtered_train_loader, holdout_test_loader, None, seed=seed)
-        _, irm_metrics = test_irm(irm, holdout_test_loader, args.device)
+        irm, _ = train_irm(args, spec_data, filtered_train_loader, holdout_test_loader, 'crmnist', seed=seed)
+        _, irm_metrics = test_irm(irm, holdout_test_loader, 'crmnist', args.device)
         model_accuracies['irm'].append(irm_metrics.get('y_accuracy', 0.0))
         del irm  # Free memory
         
@@ -409,19 +356,19 @@ def run_cross_domain_evaluation_with_seeds(args, train_loader, test_loader, spec
             torch.cuda.manual_seed_all(seed)
         
         # Train NVAE
-        nvae, _ = train_nvae(args, spec_data, train_loader, test_loader, None)
+        nvae, _ = train_nvae(args, spec_data, train_loader, test_loader, 'crmnist')
         trained_models['nvae'].append(nvae)
-        
+
         # Train DIVA
-        diva, _ = train_diva(args, spec_data, train_loader, test_loader, None)
+        diva, _ = train_diva(args, spec_data, train_loader, test_loader, 'crmnist')
         trained_models['diva'].append(diva)
-        
+
         # Train DANN
-        dann, _ = train_dann(args, spec_data, train_loader, test_loader, None)
+        dann, _ = train_dann(args, spec_data, train_loader, test_loader, 'crmnist')
         trained_models['dann'].append(dann)
-        
+
         # Train IRM
-        irm, _ = train_irm(args, spec_data, train_loader, test_loader, None, seed=seed)
+        irm, _ = train_irm(args, spec_data, train_loader, test_loader, 'crmnist', seed=seed)
         trained_models['irm'].append(irm)
         
         # Clear GPU cache if using CUDA
@@ -430,7 +377,7 @@ def run_cross_domain_evaluation_with_seeds(args, train_loader, test_loader, spec
     
     # Evaluate on each domain
     for domain in range(num_domains):
-        print(f"\nEvaluating on domain {domain} ({domain * 15}°)")
+        print(f"\nEvaluating on domain {domain} ({domain * 10}°)")
         domain_test_loader = filter_domain_loader(test_loader, domain)
         
         # Store accuracies for each model across seeds
@@ -439,19 +386,19 @@ def run_cross_domain_evaluation_with_seeds(args, train_loader, test_loader, spec
         # Test each trained model on this domain
         for seed in range(num_seeds):
             # Test NVAE
-            _, nvae_metrics = test_nvae(trained_models['nvae'][seed], domain_test_loader, args.device)
+            _, nvae_metrics = test_nvae(trained_models['nvae'][seed], domain_test_loader, 'crmnist', args.device)
             model_accuracies['nvae'].append(nvae_metrics.get('y_accuracy', 0.0))
             
             # Test DIVA
-            _, diva_metrics = test_nvae(trained_models['diva'][seed], domain_test_loader, args.device)  # DIVA uses same test function as NVAE
+            _, diva_metrics = test_nvae(trained_models['diva'][seed], domain_test_loader, 'crmnist', args.device)  # DIVA uses same test function as NVAE
             model_accuracies['diva'].append(diva_metrics.get('y_accuracy', 0.0))
             
             # Test DANN
-            _, dann_metrics = test_dann(trained_models['dann'][seed], domain_test_loader, args.device)
+            _, dann_metrics = test_dann(trained_models['dann'][seed], domain_test_loader, 'crmnist', args.device)
             model_accuracies['dann'].append(dann_metrics.get('y_accuracy', 0.0))
             
             # Test IRM
-            _, irm_metrics = test_irm(trained_models['irm'][seed], domain_test_loader, args.device)
+            _, irm_metrics = test_irm(trained_models['irm'][seed], domain_test_loader, 'crmnist', args.device)
             model_accuracies['irm'].append(irm_metrics.get('y_accuracy', 0.0))
         
         # Calculate confidence intervals for each model
@@ -504,7 +451,7 @@ def print_results_with_ci(results, holdout=False):
         print(f"Domain results for {model.upper()}:")
         for domain in results[model]:
             result = results[model][domain]
-            print(f"\n{'Held out test' if holdout else 'Cross-domain test'} domain {domain} ({domain * 15}°):")
+            print(f"\n{'Held out test' if holdout else 'Cross-domain test'} domain {domain} ({domain * 10}°):")
             print(f"Mean Accuracy: {result['mean_accuracy']:.4f}")
             print(f"Std Accuracy: {result['std_accuracy']:.4f}")
             print(f"95% CI: [{result['ci_lower']:.4f}, {result['ci_upper']:.4f}]")
@@ -680,7 +627,7 @@ def prep_domain_data(spec_data):
     class_map = spec_data['class_map']
     
     # Choose labels subset if not already chosen
-    y_c, subsets = core.CRMNIST.utils.choose_label_subset(spec_data)
+    y_c, subsets = utils_crmnist.choose_label_subset(spec_data)
     spec_data['y_c'] = y_c
 
     return spec_data, class_map
@@ -855,10 +802,10 @@ def run_experiment(args):
     
     if setting == 'cross-domain' and mode == 'train':
         
-        nvae, training_results_nvae = train_nvae(args, spec_data, train_loader, test_loader, models_dir)
-        diva, training_results_diva = train_diva(args, spec_data, train_loader, test_loader, models_dir)
-        dann, training_results_dann = train_dann(args, spec_data, train_loader, test_loader, models_dir)
-        irm, training_results_irm = train_irm(args, spec_data, train_loader, test_loader, models_dir)
+        nvae, training_results_nvae = train_nvae(args, spec_data, train_loader, test_loader, 'crmnist')
+        diva, training_results_diva = train_diva(args, spec_data, train_loader, test_loader, 'crmnist')
+        dann, training_results_dann = train_dann(args, spec_data, train_loader, test_loader, 'crmnist')
+        irm, training_results_irm = train_irm(args, spec_data, train_loader, test_loader, 'crmnist')
 
         print("--------------------------------")
         print("NVAE training results:")

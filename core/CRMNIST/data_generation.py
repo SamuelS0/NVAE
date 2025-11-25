@@ -84,9 +84,15 @@ class CRMNISTDataset(Dataset):
 
 
 
-def generate_cache_key(spec_data, train, transform_intensity, transform_decay, p, exclude_domains=None):
+def generate_cache_key(spec_data, train, transform_intensity, transform_decay, p, exclude_domains=None,
+                       base_split=None, base_split_ratio=0.8, base_split_seed=42):
     """
     Generate a unique cache key based on dataset configuration parameters.
+
+    Args:
+        base_split: 'train', 'val', or None (use all images)
+        base_split_ratio: Fraction of base images to use for training (default 0.8)
+        base_split_seed: Seed for reproducible base image splitting (default 42)
     """
     cache_dict = {
         'domain_data': spec_data['domain_data'],
@@ -97,14 +103,19 @@ def generate_cache_key(spec_data, train, transform_intensity, transform_decay, p
         'transform_intensity': transform_intensity,
         'transform_decay': transform_decay,
         'p': p,
-        'exclude_domains': sorted(exclude_domains) if exclude_domains else None
+        'exclude_domains': sorted(exclude_domains) if exclude_domains else None,
+        'base_split': base_split,
+        'base_split_ratio': base_split_ratio if base_split else None,
+        'base_split_seed': base_split_seed if base_split else None
     }
 
     # Create a hash of the configuration
     cache_str = json.dumps(cache_dict, sort_keys=True)
     cache_hash = hashlib.md5(cache_str.encode()).hexdigest()
 
-    return f"crmnist_{'train' if train else 'test'}_{cache_hash}.pkl"
+    # Include base_split in filename for clarity
+    split_suffix = f"_{base_split}" if base_split else ""
+    return f"crmnist_{'train' if train else 'test'}{split_suffix}_{cache_hash}.pkl"
 
 def save_dataset_cache(dataset, cache_path):
     """
@@ -150,7 +161,8 @@ def load_dataset_cache(cache_path):
     print(f"Dataset loaded from cache: {cache_path}")
     return dataset
 
-def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transform_decay=1, p=0.5, use_cache=True, exclude_domains=None):
+def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transform_decay=1, p=0.5, use_cache=True, exclude_domains=None,
+                            base_split=None, base_split_ratio=0.8, base_split_seed=42):
     """
     Generates CRMNIST dataset with caching support.
 
@@ -162,6 +174,12 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
         p: probability with which an image which may be colored is colored
         use_cache (bool): Whether to use cached datasets if available
         exclude_domains (list): List of domain indices to exclude (for OOD testing)
+        base_split (str): 'train', 'val', or None. When specified, splits BASE MNIST images
+                         BEFORE domain transformation to prevent data leakage. Images in
+                         'train' split will never appear in 'val' split (even with different
+                         rotations/colors).
+        base_split_ratio (float): Fraction of base images for training (default 0.8)
+        base_split_seed (int): Seed for reproducible base image splitting (default 42)
     Returns:
         crmnist_dataset (dataset):
             - if 'train' is 'true', returns training dataset.
@@ -169,7 +187,8 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
     """
 
     # Generate unique cache key based on all parameters
-    cache_filename = generate_cache_key(spec_data, train, transform_intensity, transform_decay, p, exclude_domains)
+    cache_filename = generate_cache_key(spec_data, train, transform_intensity, transform_decay, p, exclude_domains,
+                                        base_split, base_split_ratio, base_split_seed)
     cache_path = os.path.join(crmnist_path, 'cache', cache_filename)
 
     # Try to load from cache first
@@ -206,13 +225,48 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
     # Get images and labels - MNIST labels are already integers 0-9
     mnist_imgs = mnist_data.data.unsqueeze(1)  # Add channel dim
     mnist_labels = mnist_data.targets
-    
+
     # Convert grayscale images to RGB (3 channels)
     # First normalize to [0,1] range
     mnist_imgs = mnist_imgs.float() / 255.0
     # Then expand to 3 channels [B, 1, H, W] -> [B, 3, H, W]
     mnist_imgs = mnist_imgs.repeat(1, 3, 1, 1)
-    
+
+    # ============================================================
+    # BASE SPLIT: Split MNIST images BEFORE domain transformation
+    # This prevents data leakage where the same base image appears
+    # in both train and validation sets (with different rotations)
+    # ============================================================
+    if base_split is not None:
+        total_base_images = len(mnist_imgs)
+
+        # Create deterministic split using a separate generator
+        # This ensures the same split regardless of other random operations
+        split_generator = torch.Generator().manual_seed(base_split_seed)
+        all_indices = torch.randperm(total_base_images, generator=split_generator)
+
+        train_count = int(total_base_images * base_split_ratio)
+        train_indices = all_indices[:train_count]
+        val_indices = all_indices[train_count:]
+
+        if base_split == 'train':
+            selected_indices = train_indices
+            print(f"\n🔒 BASE SPLIT: Using {len(selected_indices)}/{total_base_images} base images for TRAINING")
+            print(f"   (Remaining {len(val_indices)} base images reserved for validation)")
+        elif base_split == 'val':
+            selected_indices = val_indices
+            print(f"\n🔒 BASE SPLIT: Using {len(selected_indices)}/{total_base_images} base images for VALIDATION")
+            print(f"   (These are DIFFERENT base images than training set - no leakage!)")
+        else:
+            raise ValueError(f"Invalid base_split value: {base_split}. Must be 'train', 'val', or None")
+
+        # Filter MNIST images and labels to only include selected indices
+        mnist_imgs = mnist_imgs[selected_indices]
+        mnist_labels = mnist_labels[selected_indices]
+
+        print(f"   Base split seed: {base_split_seed}, ratio: {base_split_ratio}")
+        print(f"   Filtered base images: {len(mnist_imgs)}")
+
     # imgs and labels are lists containing tensors of images and y labels,
     # each index corresponds to a domain
     imgs, labels, c_labels, r_labels = [],[],[],[]
@@ -266,8 +320,8 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
         print(f"  Rotation: {domain_data[i]['rotation']}°")
         print(f"  Color: {domain_data[i]['color']}")
         print(f"  Subset size: {len(subset_imgs)}")
-        print(f"  y_c images in subset: {len(yc_non_subset_imgs)}")
-        print(f"  y_c images not in subset: {len(non_yc_non_subset_imgs)}")
+        print(f"  y_c images (not in subset): {len(yc_non_subset_imgs)}")
+        print(f"  Non-y_c images (not in subset): {len(non_yc_non_subset_imgs)}")
 
         # Get unique color - handle if it's a list
         unique_color_val = unique_color[0] if isinstance(unique_color, list) else unique_color

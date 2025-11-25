@@ -68,7 +68,7 @@ def visualize_disentanglement(model, dataloader, device, save_path=None, num_var
         
         color_names = ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red']
         color_name = color_names[color_label] if 0 <= color_label < len(color_names) else 'None'
-        rotation_angle = rotation_label * 15 if rotation_label >= 0 else 0
+        rotation_angle = rotation_label * 10 if rotation_label >= 0 else 0
         
         fig.suptitle(f'Disentanglement Analysis - Example {example_idx + 1}\n'
                     f'Digit: {digit_label}, Color: {color_name}, Rotation: {rotation_angle}°',

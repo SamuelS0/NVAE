@@ -150,7 +150,7 @@ def sample_nvae(model, dataloader, num_samples, device):
     domain_dict = {"color": [], 'rotation': []}
     labels_dict = {
         "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
-        'rotation': ['0°', '15°', '30°', '45°', '60°', '75°']
+        'rotation': ['0°', '10°', '20°', '30°', '40°', '50°']
     }
     
     # Initialize counters for each combination
@@ -296,7 +296,7 @@ def sample_diva(model, dataloader, num_samples, device):
     domain_dict = {"color": [], 'rotation': []}
     labels_dict = {
         "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
-        'rotation': ['0°', '15°', '30°', '45°', '60°', '75°']
+        'rotation': ['0°', '10°', '20°', '30°', '40°', '50°']
     }
     
     # Initialize counters for each combination
@@ -441,7 +441,7 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
     domain_dict = {"color": [], "rotation": []}  # DANN uses both color and rotation
     labels_dict = {
         "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
-        "rotation": ['0°', '15°', '30°', '45°', '60°', '75°']
+        "rotation": ['0°', '10°', '20°', '30°', '40°', '50°']
     }
     
     # Initialize counters for each combination
@@ -723,7 +723,7 @@ def sample_crmnist(model, dataloader, num_samples, device):
     domain_dict = {"color": [], 'rotation': []}
     labels_dict = {
         "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
-        'rotation': ['0°', '15°', '30°', '45°', '60°', '75°']
+        'rotation': ['0°', '10°', '20°', '30°', '40°', '50°']
     }
     
     # Check if model is in DIVA mode
@@ -1147,21 +1147,28 @@ def get_model_name(args, model_type=None):
 def process_batch(batch, device, dataset_type='crmnist'):
     """
     Process a batch of data for different dataset types.
-    
+
     Args:
         batch: Tuple of (x, y, c, d) where:
             x: input images
             y: labels (could be one-hot encoded)
-            c: color labels (could be one-hot encoded)
+            c: color labels (could be one-hot encoded) - NOTE: intentionally not returned
             d: domain labels (could be one-hot encoded)
         device: torch device to move tensors to
-        dataset_type: Type of dataset ('crmnist', 'irm', 'dann', etc.)
-        
+        dataset_type: Type of dataset ('crmnist', 'wild', etc.)
+
     Returns:
         Tuple of (x, y, d) where:
             x: processed input images
             y: processed labels (converted to indices if one-hot)
             d: processed domain labels (converted to indices if one-hot)
+
+    Note:
+        Color labels (c) are intentionally NOT returned to models. They are used only
+        for dataset generation and visualization purposes. Models learn to handle
+        color through the pixel values in images, not as a separate supervision signal.
+        This design choice ensures models don't have direct access to spurious color
+        correlations during training.
     """
 
     

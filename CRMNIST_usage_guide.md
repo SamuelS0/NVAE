@@ -612,7 +612,7 @@ Models trained and saved:
 - **Images (x)**: 28×28 RGB images of colored, rotated digits
 - **Digit labels (y)**: The digit class (0-9) - this is what models predict
 - **Color labels (c)**: The color applied to the digit (7 colors total)
-- **Domain/Rotation labels (d)**: The rotation angle (0°, 15°, 30°, 45°, 60°, 75°)
+- **Domain/Rotation labels (d)**: The rotation angle (0°, 10°, 20°, 30°, 40°, 50°)
 
 **Color labels are NOT used for model training**. They exist for:
 - Dataset generation (controlling which colors are applied)
@@ -626,7 +626,7 @@ Models trained and saved:
 - The domain label `d` represents rotation angle, which is the primary domain identifier
 
 **Relationship between color and rotation**:
-- Each rotation domain is assigned a primary color (e.g., 0° → Blue, 15° → Green)
+- Each rotation domain is assigned a primary color (e.g., 0° → Blue, 10° → Green)
 - Some digits get colored "red" across all domains (spurious correlation)
 - This creates a rich multi-domain structure for testing invariance
 

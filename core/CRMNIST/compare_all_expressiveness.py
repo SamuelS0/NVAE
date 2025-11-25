@@ -161,7 +161,7 @@ def create_comprehensive_comparison(results, save_dir):
                 'Model': model_name.upper(),
                 'Task': 'Domain',
                 'Improvement': domain_improvement,
-                'Improvement_Percent': (domain_improvement / domain_baseline) * 100
+                'Improvement_Percent': (domain_improvement / domain_baseline) * 100 if domain_baseline > 0 else 0.0
             })
 
         # Label improvement
@@ -172,7 +172,7 @@ def create_comprehensive_comparison(results, save_dir):
                 'Model': model_name.upper(),
                 'Task': 'Label',
                 'Improvement': label_improvement,
-                'Improvement_Percent': (label_improvement / label_baseline) * 100
+                'Improvement_Percent': (label_improvement / label_baseline) * 100 if label_baseline > 0 else 0.0
             })
     
     if improvements:

@@ -215,10 +215,11 @@ class AddColor:
         
         return colored_img
 
-def choose_label_subset(spec_data):
+def choose_label_subset(spec_data, seed=None):
     """Generates y_c and subsets of five labels to be colored in each domain
     Args:
         spec_data: dict containing domain_data and other configuration
+        seed: Optional random seed for reproducibility. If None, uses current random state.
 
     Returns:
         y_c (int): The chosen label for special coloring
@@ -230,6 +231,10 @@ def choose_label_subset(spec_data):
         raise ValueError("spec_data must contain 'domain_data' key")
 
     domain_data = spec_data['domain_data']
+
+    # Set seed for reproducibility if provided
+    if seed is not None:
+        random.seed(seed)
 
     # Generate new random assignments
     y_c = random.choice(range(10))
@@ -471,7 +476,7 @@ def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_di
     fig, axes = plt.subplots(num_domains * 2, samples_per_domain, figsize=(20, 4 * num_domains))
     
     # Get rotation angles for titles
-    rotation_angles = ['0°', '15°', '30°', '45°', '60°', '75°']
+    rotation_angles = ['0°', '10°', '20°', '30°', '40°', '50°']
     
     # Color mapping for labels
     color_map = {0: 'blue', 1: 'green', 2: 'yellow', 3: 'cyan', 4: 'magenta', 5: 'orange', 6: 'red'}
@@ -598,7 +603,7 @@ def save_domain_samples_visualization(x, y, c, r, epoch, output_dir):
     fig, axes = plt.subplots(num_domains + 1, samples_per_domain, figsize=(20, 14))
     
     # Get rotation angles for titles
-    rotation_angles = ['0°', '15°', '30°', '45°', '60°', '75°']
+    rotation_angles = ['0°', '10°', '20°', '30°', '40°', '50°']
     
     # First, display red images in the top row if any
     red_images_found = 0
@@ -646,7 +651,7 @@ def save_domain_samples_visualization(x, y, c, r, epoch, output_dir):
         axes[domain + 1, 0].set_ylabel(f'{rotation_angles[domain]}')
     
     plt.suptitle(f'Domain Sample Distribution - Epoch {epoch}\n'
-                 f'Top row shows rare red images. Following rows show samples organized by rotation domain (0°-75°). '
+                 f'Top row shows rare red images. Following rows show samples organized by rotation domain (0°-50°). '
                  f'This visualization confirms balanced sampling across domains and color distributions.',
                  y=1.005, fontsize=12, fontweight='bold')
     plt.tight_layout()

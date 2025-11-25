@@ -155,7 +155,7 @@ Reconstruction visualizations compare original images with model reconstructions
 #### Organization
 
 **CRMNIST:**
-- 6 rotation domains (0°, 15°, 30°, 45°, 60°, 75°)
+- 6 rotation domains (0°, 10°, 20°, 30°, 40°, 50°)
 - 10 samples per domain
 - 2 rows per domain: original (top), reconstruction (bottom)
 
@@ -249,7 +249,7 @@ Quantitative metrics complement visual assessment of disentanglement quality.
 - **Input**: 28×28 colored MNIST digits
 - **Factors of Variation**:
   - **Task Factor (y)**: Digit identity (0-9)
-  - **Domain Factor (r)**: Rotation angle (0°, 15°, 30°, 45°, 60°, 75°)
+  - **Domain Factor (r)**: Rotation angle (0°, 10°, 20°, 30°, 40°, 50°)
   - **Spurious Factor (c)**: Color (Blue, Green, Yellow, Cyan, Magenta, Orange, Red)
 
 #### Latent Spaces
@@ -286,7 +286,7 @@ Quantitative metrics complement visual assessment of disentanglement quality.
 
 Shows:
 - Top row: Rare red images
-- Following 6 rows: Rotation domains (0°-75°)
+- Following 6 rows: Rotation domains (0°-50°)
 - Confirms balanced sampling
 
 ---

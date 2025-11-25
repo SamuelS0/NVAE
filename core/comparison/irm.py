@@ -171,40 +171,49 @@ class IRM(nn.Module):
         
         return irm_loss, total_loss, total_penalty
 
-    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=750):
+    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=750, dataset_type="crmnist"):
         """
         Visualize the latent space using t-SNE
         Args:
-            dataloader: DataLoader containing (x, y, c, r) tuples
+            dataloader: DataLoader containing (x, y, c, r) tuples for CRMNIST or (x, y, metadata) for WILD
             device: torch device
             save_path: Optional path to save the visualization
             max_samples: Maximum number of samples to use for visualization
+            dataset_type: Type of dataset ("crmnist" or "wild")
         """
         self.eval()
         features_list = []
         y_list = []
         c_list = []
         r_list = []
-        
+
         sample_count = 0
-        
+
         with torch.no_grad():
-            for x, y, c, r in dataloader:
+            for batch in dataloader:
                 if sample_count >= max_samples:
                     break
-                    
+
+                # Handle different dataset formats
+                if dataset_type == "wild":
+                    x, y, metadata = batch
+                    c = torch.zeros_like(y)  # Dummy color for WILD
+                    r = metadata[:, 0]  # Hospital ID as domain
+                else:
+                    x, y, c, r = batch
+
                 x = x.to(device)
                 features = self.get_features(x)
-                
+
                 batch_size = x.size(0)
                 remaining_samples = max_samples - sample_count
                 samples_to_take = min(batch_size, remaining_samples)
-                
+
                 features_list.append(features[:samples_to_take].cpu().numpy())
                 y_list.append(y[:samples_to_take].cpu().numpy())
                 c_list.append(c[:samples_to_take].cpu().numpy())
                 r_list.append(r[:samples_to_take].cpu().numpy())
-                
+
                 sample_count += samples_to_take
         
         features = np.concatenate(features_list, axis=0)
@@ -272,18 +281,29 @@ class IRM(nn.Module):
             predictions = torch.softmax(logits, dim=1)
         return predictions
 
-    def get_accuracy(self, dataloader, device):
-        """Compute accuracy on a dataset"""
+    def get_accuracy(self, dataloader, device, dataset_type="crmnist"):
+        """Compute accuracy on a dataset
+        Args:
+            dataloader: DataLoader containing batches
+            device: torch device
+            dataset_type: Type of dataset ("crmnist" or "wild")
+        """
         self.eval()
         correct = 0
         total = 0
-        
+
         with torch.no_grad():
-            for x, y, c, r in dataloader:
+            for batch in dataloader:
+                # Handle different dataset formats
+                if dataset_type == "wild":
+                    x, y, metadata = batch
+                else:
+                    x, y, c, r = batch
+
                 x, y = x.to(device), y.to(device)
                 logits, _ = self.forward(x)
                 predictions = torch.argmax(logits, dim=1)
                 correct += (predictions == y).sum().item()
                 total += y.size(0)
-        
+
         return correct / total if total > 0 else 0.0 

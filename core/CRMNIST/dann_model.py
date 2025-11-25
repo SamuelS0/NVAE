@@ -763,7 +763,7 @@ class AugmentedDANN(NModule):
         zdy_2d, zdy_labels = tsne_results[2]
         
         # Define labels for legend
-        rotation_angles = ['0°', '15°', '30°', '45°', '60°', '75°']
+        rotation_angles = ['0°', '10°', '20°', '30°', '40°', '50°']
         color_labels = ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red']
         
         # Create figure with 3 rows and 3 columns for DANN

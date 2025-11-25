@@ -64,12 +64,7 @@ def test_dann(model, test_loader, dataset_type, device):
         for batch_idx, batch in test_pbar:
             #x, y, c, r = x.to(device), y.to(device), c.to(device), r.to(device)
             x, y, r = process_batch(batch, device, dataset_type=dataset_type)
-            
-            # Convert one-hot encoded labels to class indices
-            if len(y.shape) > 1 and y.shape[1] > 1:
-                y = torch.argmax(y, dim=1)
-            if len(r.shape) > 1 and r.shape[1] > 1:
-                r = torch.argmax(r, dim=1)
+            # Note: process_batch already converts one-hot labels to class indices
 
             # Handle both basic DANN (2 outputs) and AugmentedDANN (13 outputs)
             output = model(x, y, r)
@@ -115,12 +110,7 @@ def test_irm(model, test_loader, dataset_type, device):
     with torch.no_grad():
         for batch_idx, batch in test_pbar:
             x, y, r = process_batch(batch, device, dataset_type=dataset_type)
-
-            # Convert one-hot encoded labels to class indices
-            if len(y.shape) > 1 and y.shape[1] > 1:
-                y = torch.argmax(y, dim=1)
-            if len(r.shape) > 1 and r.shape[1] > 1:
-                r = torch.argmax(r, dim=1)
+            # Note: process_batch already converts one-hot labels to class indices
 
             # IRM forward returns (logits, features)
             logits, features = model(x, y, r)
