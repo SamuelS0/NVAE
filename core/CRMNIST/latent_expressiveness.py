@@ -12,9 +12,9 @@ import os
 
 
 class MLPClassifier(nn.Module):
-    """Simple 2-layer MLP for expressiveness evaluation."""
+    """3-layer MLP with 32 hidden units for expressiveness evaluation."""
 
-    def __init__(self, input_dim, num_classes, hidden_dim=64):
+    def __init__(self, input_dim, num_classes, hidden_dim=32):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
@@ -132,7 +132,7 @@ def extract_latent_representations(model, dataloader, device, num_classes=10):
     return latent_data
 
 def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test=None, num_classes=None,
-                             batch_size=256, num_epochs=50, hidden_dim=64):
+                             batch_size=256, num_epochs=50, hidden_dim=32):
     """Train a 2-layer MLP classifier using PyTorch with mini-batch training.
 
     Args:
@@ -146,7 +146,7 @@ def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test
                      dimension or max label value. Recommended to pass explicitly.
         batch_size: Mini-batch size for training (default: 256)
         num_epochs: Maximum number of training epochs (default: 50)
-        hidden_dim: Hidden layer dimension (default: 64)
+        hidden_dim: Hidden layer dimension (default: 32)
 
     Returns:
         tuple: (train_acc, val_acc, test_acc, trained_classifier)

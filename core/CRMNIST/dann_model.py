@@ -6,9 +6,11 @@ import numpy as np
 
 try:
     from sklearn.manifold import TSNE
+    from sklearn.preprocessing import StandardScaler
 except ImportError:
     print("Warning: scikit-learn not available. t-SNE visualization will be disabled.")
     TSNE = None
+    StandardScaler = None
 
 try:
     import matplotlib.pyplot as plt
@@ -118,50 +120,42 @@ class AugmentedDANN(NModule):
         self.shared_encoder = self._create_encoder(in_channels, total_latent_dim, image_size)
         
         # System 1: Class-focused DANN components
-        # Main class classifier (operates on Z_y ∪ Z_dy)
+        # Main class classifier (operates on Z_y ∪ Z_dy) - 3-layer MLP with 32 hidden units
         self.class_classifier_main = nn.Sequential(
-            nn.Linear(zy_dim + zdy_dim, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(zy_dim + zdy_dim, 32),
             nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
+            nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(64, y_dim)
+            nn.Linear(32, y_dim)
         )
-        
+
         # System 2: Domain-focused DANN components
-        # Main domain classifier (operates on Z_d ∪ Z_dy)
+        # Main domain classifier (operates on Z_d ∪ Z_dy) - 3-layer MLP with 32 hidden units
         self.domain_classifier_main = nn.Sequential(
-            nn.Linear(zd_dim + zdy_dim, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(zd_dim + zdy_dim, 32),
             nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Linear(64, d_dim)
-        )
-        
-        # Separate GRL modules for fine-grained control
-        self.grl_zy = GradientReversalLayer(lambda_reversal)
-        self.grl_zd = GradientReversalLayer(lambda_reversal)
-        
-        # Adversarial classifiers without embedded GRL
-        self.adversarial_domain_classifier = nn.Sequential(
-            nn.Linear(zy_dim, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.BatchNorm1d(32),
+            nn.Linear(32, 32),
             nn.ReLU(),
             nn.Linear(32, d_dim)
         )
-        
-        self.adversarial_class_classifier = nn.Sequential(
-            nn.Linear(zd_dim, 64),
-            nn.BatchNorm1d(64),
+
+        # Separate GRL modules for fine-grained control
+        self.grl_zy = GradientReversalLayer(lambda_reversal)
+        self.grl_zd = GradientReversalLayer(lambda_reversal)
+
+        # Adversarial classifiers without embedded GRL - 3-layer MLP with 32 hidden units
+        self.adversarial_domain_classifier = nn.Sequential(
+            nn.Linear(zy_dim, 32),
             nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.BatchNorm1d(32),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, d_dim)
+        )
+
+        self.adversarial_class_classifier = nn.Sequential(
+            nn.Linear(zd_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
             nn.ReLU(),
             nn.Linear(32, y_dim)
         )
@@ -733,6 +727,9 @@ class AugmentedDANN(NModule):
         r_labels = r_labels.cpu().numpy()
         
         # Apply t-SNE to each latent space with proper convergence settings
+        # Initialize scaler for standardizing data before t-SNE
+        scaler = StandardScaler() if StandardScaler is not None else None
+
         def run_tsne(data, labels):
             try:
                 n_samples = data.shape[0]
@@ -743,18 +740,21 @@ class AugmentedDANN(NModule):
                 # Sufficient iterations for convergence
                 n_iter = 4000  # High iterations for better convergence
 
-                # Learning rate: use sklearn's 'auto' formula: n_samples / early_exaggeration / 4
-                learning_rate = max(50, n_samples / 48)
-
                 print(f"  t-SNE params: n_samples={n_samples}, perplexity={perplexity}, "
-                      f"n_iter={n_iter}, lr={learning_rate:.0f}")
+                      f"n_iter={n_iter}, lr=auto")
+
+                # Standardize data before t-SNE (critical for avoiding crescent shapes)
+                if scaler is not None:
+                    data_scaled = scaler.fit_transform(data)
+                else:
+                    data_scaled = data
 
                 tsne = TSNE(
                     n_components=2,
                     random_state=42,
                     n_iter=n_iter,
                     perplexity=perplexity,
-                    learning_rate=learning_rate,
+                    learning_rate='auto',  # Let sklearn choose optimal learning rate
                     init='pca',  # PCA init for stability
                     method='barnes_hut',  # Fast approximation
                     early_exaggeration=12.0,  # Default, helps form clusters early
@@ -762,7 +762,7 @@ class AugmentedDANN(NModule):
                     min_grad_norm=1e-7,  # Convergence threshold
                     n_jobs=-1  # Parallel computation
                 )
-                return tsne.fit_transform(data), labels
+                return tsne.fit_transform(data_scaled), labels
             except Exception as e:
                 print(f"t-SNE failed: {e}. Using first 2 PCA components as fallback.")
                 # Simple PCA fallback if t-SNE fails

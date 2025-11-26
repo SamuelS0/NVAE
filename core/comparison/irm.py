@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
 class IRM(nn.Module):
@@ -68,16 +69,16 @@ class IRM(nn.Module):
                 nn.Linear(512 * 6 * 6, self.z_dim)  # Project to z_dim
             )
 
-        # Classifier matching VAE's qy architecture
+        # 3-layer MLP with 32 hidden units
         self.classifier = nn.Sequential(
-            nn.Linear(self.z_dim, 64),
+            nn.Linear(self.z_dim, 32),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(64, self.num_y_classes)
+            nn.Linear(32, self.num_y_classes)
         )
 
-        # Classifier head
+        # Initialize classifier weights
         torch.nn.init.xavier_uniform_(self.classifier[0].weight)
         with torch.no_grad():
             self.classifier[0].bias.zero_()
@@ -253,18 +254,22 @@ class IRM(nn.Module):
         # Apply t-SNE with proper convergence settings
         n_samples = features.shape[0]
         perplexity = min(30, max(5, n_samples // 100))
-        learning_rate = max(50, n_samples / 48)
+
+        # Standardize data before t-SNE (critical for avoiding crescent shapes)
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features)
+
         tsne = TSNE(
             n_components=2,
             random_state=42,
             n_iter=4000,
             perplexity=perplexity,
-            learning_rate=learning_rate,
+            learning_rate='auto',  # Let sklearn choose optimal learning rate
             init='pca',
             n_jobs=-1,
             n_iter_without_progress=500
         )
-        features_2d = tsne.fit_transform(features)
+        features_2d = tsne.fit_transform(features_scaled)
         
         # Create three subplots: one for task classes, one for colors, one for rotations
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))

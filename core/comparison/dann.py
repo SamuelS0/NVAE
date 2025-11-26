@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.autograd import Function
 import numpy as np
 from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
 class GradReverse(Function):
@@ -20,14 +21,15 @@ def grad_reverse(x, λ=1.0):
     return GradReverse.apply(x, λ)
 
 class DomainDiscriminator(nn.Module):
-    def __init__(self, feature_dim, num_r_classes, hidden_dim=100):
+    def __init__(self, feature_dim, num_r_classes, hidden_dim=32):
         super().__init__()
+        # 3-layer MLP with 32 hidden units
         self.net = nn.Sequential(
             nn.Linear(feature_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, num_r_classes),  # Output num_r_classes
+            nn.Linear(hidden_dim, num_r_classes),
         )
 
     def forward(self, features, λ):
@@ -96,17 +98,17 @@ class DANN(nn.Module):
             raise ValueError(f"Dataset {self.dataset} not supported")
 
         self.domain_discriminator = DomainDiscriminator(self.z_dim, self.num_r_classes)
-        
-        # Changed: Classifier now matches VAE's qy architecture
+
+        # 3-layer MLP with 32 hidden units
         self.classifier = nn.Sequential(
-            nn.Linear(self.z_dim, 64),
+            nn.Linear(self.z_dim, 32),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(64, self.num_y_classes)
+            nn.Linear(32, self.num_y_classes)
         )
-        
-        # Initialize classifier weights to match VAE's qy initialization
+
+        # Initialize classifier weights
         torch.nn.init.xavier_uniform_(self.classifier[0].weight)
         with torch.no_grad():
             self.classifier[0].bias.zero_()
@@ -216,18 +218,22 @@ class DANN(nn.Module):
         # Apply t-SNE with proper convergence settings
         n_samples = features.shape[0]
         perplexity = min(30, max(5, n_samples // 100))
-        learning_rate = max(50, n_samples / 48)
+
+        # Standardize data before t-SNE (critical for avoiding crescent shapes)
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features)
+
         tsne = TSNE(
             n_components=2,
             random_state=42,
             n_iter=4000,
             perplexity=perplexity,
-            learning_rate=learning_rate,
+            learning_rate='auto',  # Let sklearn choose optimal learning rate
             init='pca',
             n_jobs=-1,
             n_iter_without_progress=500
         )
-        features_2d = tsne.fit_transform(features)
+        features_2d = tsne.fit_transform(features_scaled)
         
         # Create three subplots: one for task classes, one for colors, one for rotations
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))

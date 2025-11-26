@@ -590,9 +590,10 @@ class qy(NModule):
             self.zay_dim = zay_dim
             self.z_combined_dim = zy_dim + zay_dim
 
-        self.fc1 = nn.Linear(self.z_combined_dim, 64)
-        self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(64, y_dim)
+        # 3-layer MLP with 32 hidden units
+        self.fc1 = nn.Linear(self.z_combined_dim, 32)
+        self.fc2 = nn.Linear(32, 32)
+        self.fc3 = nn.Linear(32, y_dim)
 
         torch.nn.init.xavier_uniform_(self.fc1.weight)
         torch.nn.init.xavier_uniform_(self.fc2.weight)
@@ -638,9 +639,10 @@ class qa(NModule):
             self.zay_dim = zay_dim
             self.z_combined_dim = za_dim + zay_dim
 
-        self.fc1 = nn.Linear(self.z_combined_dim, 64)
-        self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(64, a_dim)
+        # 3-layer MLP with 32 hidden units
+        self.fc1 = nn.Linear(self.z_combined_dim, 32)
+        self.fc2 = nn.Linear(32, 32)
+        self.fc3 = nn.Linear(32, a_dim)
 
         torch.nn.init.xavier_uniform_(self.fc1.weight)
         torch.nn.init.xavier_uniform_(self.fc2.weight)

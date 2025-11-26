@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 import os
 from typing import Dict
@@ -1025,22 +1026,23 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     
     # Run t-SNE with proper convergence settings
     n_samples = zy.shape[0]
-    # Perplexity 30 works well for multi-class clustering (better than sqrt(n) which gets too high)
+    # Perplexity 30 works well for multi-class clustering
     perplexity = min(30, max(5, n_samples // 100))
-    # Learning rate: use sklearn's 'auto' formula: n_samples / early_exaggeration / 4
-    learning_rate = max(50, n_samples / 48)
-    print(f"\nRunning t-SNE with {n_samples} samples, perplexity={perplexity}, lr={learning_rate:.0f}...")
+    print(f"\nRunning t-SNE with {n_samples} samples, perplexity={perplexity}, lr=auto...")
     tsne = TSNE(
         n_components=2,
         random_state=42,
         n_jobs=-1,
-        n_iter=4000,  # High iterations for better convergence
+        n_iter=4000,
         perplexity=perplexity,
-        learning_rate=learning_rate,
+        learning_rate='auto',  # Let sklearn choose optimal learning rate
         init='pca',
         early_exaggeration=12.0,
-        n_iter_without_progress=500  # Prevent premature stopping
+        n_iter_without_progress=500
     )
+
+    # Standardizer for normalizing latent spaces before t-SNE
+    scaler = StandardScaler()
     
     # Apply t-SNE to each latent space
     latent_spaces = [(zy, 'Label-specific (zy)')]
@@ -1073,7 +1075,6 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     tsne_results = []
     for space, title in tqdm(latent_spaces, desc="Computing t-SNE", unit="space"):
         # Add safety check for zero variance (collapsed latent space)
-        space_std = np.std(space, axis=0)
         space_var = np.var(space)
 
         if space_var < 1e-10 or np.any(np.isnan(space)) or np.any(np.isinf(space)):
@@ -1081,9 +1082,9 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
             # Create a dummy 2D space with zeros for visualization
             space_2d = np.zeros((space.shape[0], 2))
         else:
-            # Add small noise to prevent numerical issues
-            space_safe = space + np.random.normal(0, 1e-8, space.shape)
-            space_2d = tsne.fit_transform(space_safe)
+            # Standardize the data before t-SNE (critical for good results)
+            space_scaled = scaler.fit_transform(space)
+            space_2d = tsne.fit_transform(space_scaled)
 
         tsne_results.append((space_2d, title))
     
