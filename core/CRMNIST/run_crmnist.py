@@ -147,7 +147,9 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
                 alpha_y=args.alpha_1,
                 alpha_d=args.alpha_2,
                 beta_adv=getattr(args, 'beta_adv', 0.2),
-                image_size=28
+                image_size=28,
+                use_conditional_adversarial=getattr(args, 'use_conditional_adversarial', True),
+                lambda_schedule_gamma=getattr(args, 'lambda_schedule_gamma', 5.0)
             )
 
         elif model_name == 'irm':
@@ -190,12 +192,12 @@ if __name__ == "__main__":
     parser.add_argument('--zx_dim', type=int, default=8)
     parser.add_argument('--zay_dim', type=int, default=8)
     parser.add_argument('--za_dim', type=int, default=8)
-    parser.add_argument('--beta_1', type=float, default=15.0)
+    parser.add_argument('--beta_1', type=float, default=10.0)
     parser.add_argument('--beta_2', type=float, default=10.0)
     parser.add_argument('--beta_3', type=float, default=10.0)
-    parser.add_argument('--beta_4', type=float, default=15.0)
-    parser.add_argument('--alpha_1', type=float, default=50.0)
-    parser.add_argument('--alpha_2', type=float, default=50.0)
+    parser.add_argument('--beta_4', type=float, default=10.0)
+    parser.add_argument('--alpha_1', type=float, default=75.0)
+    parser.add_argument('--alpha_2', type=float, default=75.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--dataset', type=str, default='crmnist')
     parser.add_argument('--use_cache', action='store_true', default=True, 
@@ -234,6 +236,13 @@ if __name__ == "__main__":
                        help='Target weight for sparsity penalty on zy and zd in AugmentedDANN (default: 1.5)')
     parser.add_argument('--beta_adv', type=float, default=0.5,
                        help='Weight for adversarial loss in AugmentedDANN (default: 0.5)')
+    parser.add_argument('--use_conditional_adversarial', action='store_true', default=True,
+                       help='Use conditional adversarial for I(Z_Y;D|Y)=0 and I(Z_D;Y|D)=0 (default: True)')
+    parser.add_argument('--no_conditional_adversarial', dest='use_conditional_adversarial',
+                       action='store_false',
+                       help='Disable conditional adversarial (use unconditional)')
+    parser.add_argument('--lambda_schedule_gamma', type=float, default=5.0,
+                       help='Controls adversarial ramp-up speed: 10=fast (DANN paper), 5=moderate, 2=slow (default: 5.0)')
 
     # IRM-specific parameters
     # Note: With environment-averaged loss (fixed), penalty_weight=5 is appropriate
@@ -747,7 +756,9 @@ if __name__ == "__main__":
                 alpha_y=args.alpha_1,
                 alpha_d=args.alpha_2,
                 beta_adv=getattr(args, 'beta_adv', 0.2),
-                image_size=28
+                image_size=28,
+                use_conditional_adversarial=getattr(args, 'use_conditional_adversarial', True),
+                lambda_schedule_gamma=getattr(args, 'lambda_schedule_gamma', 5.0)
             ).to(args.device)
 
             # Create optimizer and LR scheduler

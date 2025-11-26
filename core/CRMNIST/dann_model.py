@@ -62,12 +62,56 @@ class GradientReversalLayer(nn.Module):
     def __init__(self, lambda_=1.0):
         super().__init__()
         self.lambda_ = lambda_
-    
+
     def forward(self, x):
         return GradientReversalFunction.apply(x, self.lambda_)
-    
+
     def set_lambda(self, lambda_):
         self.lambda_ = lambda_
+
+
+class ConditionalDiscriminator(nn.Module):
+    """
+    Conditional discriminator for enforcing conditional independence.
+
+    g^{cond}(z, c): Predicts target from latent z given conditioning c.
+
+    Used for:
+    - Z_Y purity: g_D^{cond}(z_y, y) -> d, enforces I(Z_Y; D | Y) = 0
+    - Z_D purity: g_Y^{cond}(z_d, d) -> y, enforces I(Z_D; Y | D) = 0
+
+    The discriminator receives both the latent representation and the conditioning
+    variable (one-hot encoded), concatenates them, and predicts the target.
+    """
+    def __init__(self, z_dim, cond_dim, output_dim, hidden_dim=32):
+        """
+        Args:
+            z_dim: Dimension of latent representation (e.g., zy_dim or zd_dim)
+            cond_dim: Dimension of conditioning variable (e.g., y_dim or d_dim)
+            output_dim: Number of output classes to predict
+            hidden_dim: Hidden layer dimension (default: 32)
+        """
+        super().__init__()
+        input_dim = z_dim + cond_dim
+
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.Linear(hidden_dim, output_dim)
+        )
+
+    def forward(self, z, cond_onehot):
+        """
+        Args:
+            z: Latent tensor (batch, z_dim)
+            cond_onehot: One-hot conditioning (batch, cond_dim)
+        Returns:
+            logits: Output logits (batch, output_dim)
+        """
+        combined = torch.cat([z, cond_onehot], dim=1)
+        return self.net(combined)
 
 
 class AugmentedDANN(NModule):
@@ -90,7 +134,9 @@ class AugmentedDANN(NModule):
         alpha_y=1.0,
         alpha_d=1.0,
         beta_adv=0.15,
-        image_size=28  # Image dimensions: 28 for CRMNIST, 96 for WILD
+        image_size=28,  # Image dimensions: 28 for CRMNIST, 96 for WILD
+        use_conditional_adversarial=True,  # Use conditional adversarial for I(Z_Y;D|Y)=0 and I(Z_D;Y|D)=0
+        lambda_schedule_gamma=10.0  # Controls speed of adversarial ramp-up (lower = slower). Default DANN paper: 10
     ):
         super().__init__()
 
@@ -113,6 +159,7 @@ class AugmentedDANN(NModule):
         self.alpha_y = alpha_y
         self.alpha_d = alpha_d
         self.beta_adv = beta_adv
+        self.lambda_schedule_gamma = lambda_schedule_gamma
 
         # Single shared encoder that outputs to combined latent space
         # This matches the architecture pattern of NVAE/DIVA/DANN/IRM
@@ -159,7 +206,27 @@ class AugmentedDANN(NModule):
             nn.ReLU(),
             nn.Linear(32, y_dim)
         )
-        
+
+        # Conditional adversarial configuration
+        self.use_conditional_adversarial = use_conditional_adversarial
+
+        # Conditional discriminators for enforcing conditional independence
+        # g_D^{cond}(z_y, y) -> d : Enforces I(Z_Y; D | Y) = 0
+        self.conditional_domain_discriminator = ConditionalDiscriminator(
+            z_dim=zy_dim,
+            cond_dim=y_dim,
+            output_dim=d_dim,
+            hidden_dim=32
+        )
+
+        # g_Y^{cond}(z_d, d) -> y : Enforces I(Z_D; Y | D) = 0
+        self.conditional_class_discriminator = ConditionalDiscriminator(
+            z_dim=zd_dim,
+            cond_dim=d_dim,
+            output_dim=y_dim,
+            hidden_dim=32
+        )
+
         self._init_weights()
         self._validate_dimensions()
     
@@ -335,29 +402,47 @@ class AugmentedDANN(NModule):
 
         Args:
             x: input images
-            y: class labels (for compatibility, not used in forward pass)
-            d: domain labels (for compatibility, not used in forward pass)
+            y: class labels (used for conditional adversarial training)
+            d: domain labels (used for conditional adversarial training)
 
         Returns:
             Tuple matching DANN output format for compatibility
         """
         # Extract partitioned features
         zy, zd, zdy = self.extract_features(x)
-        
+
         # Main predictions (use combined features)
         zy_zdy = torch.cat([zy, zdy], dim=1)
         y_pred_main = self.class_classifier_main(zy_zdy)
-        
+
         zd_zdy = torch.cat([zd, zdy], dim=1)
         d_pred_main = self.domain_classifier_main(zd_zdy)
-        
+
         # Adversarial predictions with explicit GRL application
         zy_reversed = self.grl_zy(zy)
-        d_pred_adversarial = self.adversarial_domain_classifier(zy_reversed)
-        
         zd_reversed = self.grl_zd(zd)
-        y_pred_adversarial = self.adversarial_class_classifier(zd_reversed)
-        
+
+        if self.use_conditional_adversarial and y is not None and d is not None:
+            # Convert one-hot to indices if necessary
+            if len(y.shape) > 1 and y.shape[1] > 1:
+                y_idx = torch.argmax(y, dim=1)
+            else:
+                y_idx = y.long()
+            if len(d.shape) > 1 and d.shape[1] > 1:
+                d_idx = torch.argmax(d, dim=1)
+            else:
+                d_idx = d.long()
+
+            # Conditional adversarial: discriminator receives (z, label)
+            y_onehot = F.one_hot(y_idx, self.y_dim).float()
+            d_onehot = F.one_hot(d_idx, self.d_dim).float()
+            d_pred_adversarial = self.conditional_domain_discriminator(zy_reversed, y_onehot)
+            y_pred_adversarial = self.conditional_class_discriminator(zd_reversed, d_onehot)
+        else:
+            # Original unconditional adversarial (fallback)
+            d_pred_adversarial = self.adversarial_domain_classifier(zy_reversed)
+            y_pred_adversarial = self.adversarial_class_classifier(zd_reversed)
+
         # For compatibility with NVAE interface, return similar structure
         # We'll use dummy values for reconstruction since DANN doesn't generate
         device = x.device
@@ -392,30 +477,54 @@ class AugmentedDANN(NModule):
         
         return x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za
     
-    def dann_forward(self, x):
+    def dann_forward(self, x, y=None, d=None):
         """
         DANN-specific forward pass with clean gradient flow
+
+        Args:
+            x: Input images
+            y: Class labels (required for conditional adversarial training)
+            d: Domain labels (required for conditional adversarial training)
 
         Returns:
             dict containing all predictions and features
         """
         # Extract features using shared encoder and split into latent spaces
         zy, zd, zdy = self.extract_features(x)
-        
+
         # Main predictions (use combined features)
         zy_zdy = torch.cat([zy, zdy], dim=1)
         y_pred_main = self.class_classifier_main(zy_zdy)
-        
+
         zd_zdy = torch.cat([zd, zdy], dim=1)
         d_pred_main = self.domain_classifier_main(zd_zdy)
-        
+
         # Adversarial predictions with explicit GRL application
         zy_reversed = self.grl_zy(zy)
-        d_pred_adversarial = self.adversarial_domain_classifier(zy_reversed)
-        
         zd_reversed = self.grl_zd(zd)
-        y_pred_adversarial = self.adversarial_class_classifier(zd_reversed)
-        
+
+        if self.use_conditional_adversarial and y is not None and d is not None:
+            # Convert one-hot to indices if necessary
+            if len(y.shape) > 1 and y.shape[1] > 1:
+                y_idx = torch.argmax(y, dim=1)
+            else:
+                y_idx = y.long()
+            if len(d.shape) > 1 and d.shape[1] > 1:
+                d_idx = torch.argmax(d, dim=1)
+            else:
+                d_idx = d.long()
+
+            # Conditional adversarial: discriminator receives (z, label)
+            # This enforces I(Z_Y; D | Y) = 0 and I(Z_D; Y | D) = 0
+            y_onehot = F.one_hot(y_idx, self.y_dim).float()
+            d_onehot = F.one_hot(d_idx, self.d_dim).float()
+            d_pred_adversarial = self.conditional_domain_discriminator(zy_reversed, y_onehot)
+            y_pred_adversarial = self.conditional_class_discriminator(zd_reversed, d_onehot)
+        else:
+            # Original unconditional adversarial (fallback)
+            d_pred_adversarial = self.adversarial_domain_classifier(zy_reversed)
+            y_pred_adversarial = self.adversarial_class_classifier(zd_reversed)
+
         return {
             'y_pred_main': y_pred_main,           # Main class prediction
             'd_pred_main': d_pred_main,           # Main domain prediction
@@ -465,13 +574,14 @@ class AugmentedDANN(NModule):
         Returns:
             total_loss, loss_dict
         """
-        outputs = self.dann_forward(x)
-        
-        # Convert one-hot to indices if necessary
+        # Convert one-hot to indices if necessary (do this BEFORE dann_forward)
         if len(y.shape) > 1 and y.shape[1] > 1:
             y = torch.argmax(y, dim=1)
         if len(d.shape) > 1 and d.shape[1] > 1:
             d = torch.argmax(d, dim=1)
+
+        # Pass y and d for conditional adversarial training
+        outputs = self.dann_forward(x, y=y, d=d)
         
         # Main task losses (use combined features)
         loss_y_main = F.cross_entropy(outputs['y_pred_main'], y.long())
@@ -540,12 +650,17 @@ class AugmentedDANN(NModule):
     
     def update_lambda_schedule(self, epoch, total_epochs):
         """
-        Update gradient reversal lambda using standard DANN scheduling
-        λ(p) = 2/(1+exp(-10p)) - 1 where p is training progress
+        Update gradient reversal lambda using DANN scheduling
+        λ(p) = 2/(1+exp(-γp)) - 1 where p is training progress, γ is lambda_schedule_gamma
+
+        The gamma parameter controls ramp-up speed:
+        - γ = 10 (default): Standard DANN paper schedule, fast ramp-up
+        - γ = 5: Slower ramp-up, reaches ~0.5 at midpoint
+        - γ = 2: Very gradual ramp-up, more linear
 
         Also updates sparsity weights for all latent spaces using the same schedule:
-        - zdy: increases from 0 to sparsity_weight_zdy_target (default 10.0)
-        - zy, zd: increase from 0 to sparsity_weight_other_target (default 0.5)
+        - zdy: increases from 0 to sparsity_weight_zdy_target
+        - zy, zd: increase from 0 to sparsity_weight_other_target
         """
         # Ensure numerical stability
         if total_epochs <= 0:
@@ -554,7 +669,8 @@ class AugmentedDANN(NModule):
         p = max(0.0, min(1.0, epoch / total_epochs))  # Clamp p to [0, 1]
 
         # Use numpy.clip to prevent overflow in exponential
-        exp_arg = np.clip(-10 * p, -50, 50)  # Prevent extreme values
+        # gamma controls the speed: lower gamma = slower ramp-up
+        exp_arg = np.clip(-self.lambda_schedule_gamma * p, -50, 50)  # Prevent extreme values
         try:
             lambda_val = 2 / (1 + np.exp(exp_arg)) - 1
             # Ensure lambda_val is in valid range

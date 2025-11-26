@@ -247,18 +247,19 @@ class DANNTrainer:
     def _calculate_dann_metrics(self, y, x, r) -> Dict[str, float]:
         """Calculate DANN-specific metrics."""
         with torch.no_grad():
-            outputs = self.model.dann_forward(x)
-            
-            # Convert one-hot to indices if necessary
+            # Convert one-hot to indices if necessary (do this BEFORE dann_forward)
             if len(y.shape) > 1 and y.shape[1] > 1:
                 y_true = torch.argmax(y, dim=1)
             else:
                 y_true = y.long()
-                
+
             if len(r.shape) > 1 and r.shape[1] > 1:
                 r_true = torch.argmax(r, dim=1)
             else:
                 r_true = r.long()
+
+            # Pass y and d for conditional adversarial training
+            outputs = self.model.dann_forward(x, y=y_true, d=r_true)
             
             # Main task accuracies
             y_pred = outputs['y_pred_main'].argmax(dim=1)
@@ -448,19 +449,20 @@ class DANNTrainer:
         with torch.no_grad():
             for batch in tqdm(test_loader, desc="Evaluating Disentanglement"):
                 x, y, r = process_batch(batch, self.device, dataset_type=self.dataset)
-                
-                outputs = self.model.dann_forward(x)
-                
-                # Convert one-hot to indices if necessary
+
+                # Convert one-hot to indices if necessary (do this BEFORE dann_forward)
                 if len(y.shape) > 1 and y.shape[1] > 1:
                     y_true = torch.argmax(y, dim=1)
                 else:
                     y_true = y.long()
-                    
+
                 if len(r.shape) > 1 and r.shape[1] > 1:
                     r_true = torch.argmax(r, dim=1)
                 else:
                     r_true = r.long()
+
+                # Pass y and d for conditional adversarial evaluation
+                outputs = self.model.dann_forward(x, y=y_true, d=r_true)
                 
                 # Main task predictions
                 y_pred = outputs['y_pred_main'].argmax(dim=1)
