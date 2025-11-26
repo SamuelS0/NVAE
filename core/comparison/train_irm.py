@@ -36,7 +36,7 @@ def train_irm_model():
     }
     
     # Model setup
-    z_dim = 48  # Same total dimension as your VAE (12+12+12+12=48)
+    z_dim = 32  # Same total dimension as your VAE (8+8+8+8=32)
     penalty_weight = 1e4  # IRM penalty weight
     penalty_anneal_iters = 500  # Start applying penalty after 500 iterations
     

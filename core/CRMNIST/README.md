@@ -28,7 +28,7 @@ python -m core.CRMNIST.run_crmnist --out results/ --config conf/crmnist.json
 - `--epochs`: Number of training epochs (default: 10)
 - `--intensity`: Transform intensity (default: 1.5)
 - `--intensity_decay`: Transform decay (default: 1.0)
-- `--zy_dim`, `--zx_dim`, `--zay_dim`, `--za_dim`: Latent space dimensions (default: 32 each)
+- `--zy_dim`, `--zx_dim`, `--zay_dim`, `--za_dim`: Latent space dimensions (default: 8 each, 32 total)
 - `--beta_1`, `--beta_2`, `--beta_3`, `--beta_4`: Beta weights for KL terms (default: 1.0 each)
 - `--cuda`: Enable CUDA for GPU training (default: True)
 

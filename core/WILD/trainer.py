@@ -11,13 +11,14 @@ from core.WILD.utils_wild import (
 from core.utils import process_batch, get_model_name, _calculate_metrics, visualize_latent_spaces
 
 class WILDTrainer:
-    def __init__(self, model, optimizer, device, args, patience=5):
+    def __init__(self, model, optimizer, device, args, patience=5, scheduler=None):
         self.model = model
         self.optimizer = optimizer
+        self.scheduler = scheduler  # LR scheduler (optional)
         self.device = device
         self.args = args
         self.patience = patience
-        
+
         # Early stopping setup
         self.best_val_accuracy = 0.0
         self.best_val_loss = float('inf')
@@ -35,6 +36,7 @@ class WILDTrainer:
         self.val_acc_history = []
         self.train_recon_history = []
         self.val_recon_history = []
+        self.lr_history = []  # Track learning rate
 
         # Create output directories
         self.models_dir = os.path.join(args.out, 'models')
@@ -84,6 +86,14 @@ class WILDTrainer:
             # Validation phase (use final beta for comparable losses across epochs)
             val_loss, val_metrics = self._validate(val_loader, epoch, current_beta=self.beta_scale)
 
+            # Step the LR scheduler at the end of each epoch
+            current_lr = self.optimizer.param_groups[0]['lr']
+            if self.scheduler is not None:
+                self.scheduler.step()
+                new_lr = self.optimizer.param_groups[0]['lr']
+                if new_lr != current_lr:
+                    print(f"  LR decay: {current_lr:.6f} → {new_lr:.6f}")
+
             # Store training history
             self.epoch_history.append(epoch + 1)
             self.train_loss_history.append(train_loss)
@@ -92,9 +102,10 @@ class WILDTrainer:
             self.val_acc_history.append(val_metrics.get('y_accuracy', 0))
             self.train_recon_history.append(train_metrics.get('recon_mse', 0))
             self.val_recon_history.append(val_metrics.get('recon_mse', 0))
+            self.lr_history.append(current_lr)
 
             print(f'Epoch {epoch+1}/{self.args.epochs}:')
-            print(f'  Train Loss: {train_loss:.4f}')
+            print(f'  Train Loss: {train_loss:.4f}, LR: {current_lr:.6f}')
             for k, v in train_metrics.items():
                 print(f'  Train {k}: {v:.4f}')
                 

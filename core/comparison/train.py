@@ -365,8 +365,9 @@ def train_irm(args, spec_data, train_loader, val_loader, dataset, seed=None):
     z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
 
     # Use command-line arguments if available, otherwise use defaults
-    penalty_weight = getattr(args, 'irm_penalty_weight', 1e4)
-    anneal_iters = getattr(args, 'irm_anneal_iters', 500)
+    # Note: With environment-averaged loss, penalty_weight=10 is appropriate
+    penalty_weight = getattr(args, 'irm_penalty_weight', 10.0)
+    anneal_iters = getattr(args, 'irm_anneal_iters', 1000)
 
     irm = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], dataset,
              penalty_weight=penalty_weight, penalty_anneal_iters=anneal_iters)

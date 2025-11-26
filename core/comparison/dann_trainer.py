@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 from core.utils import process_batch, visualize_latent_spaces
 
 class DANNTrainer(WILDTrainer):
-    def __init__(self, model, optimizer, device, args, patience=5):
-        super().__init__(model, optimizer, device, args, patience)
+    def __init__(self, model, optimizer, device, args, patience=5, scheduler=None):
+        super().__init__(model, optimizer, device, args, patience, scheduler=scheduler)
 
         # Override models_dir to avoid polluting main models/ directory
         # Use comparison_models/ for trainer checkpoints (separate from run_wild.py's model saves)
@@ -53,7 +53,7 @@ class DANNTrainer(WILDTrainer):
                     device=self.device,
                     type='dann_augmented',  # Specify augmented variant
                     save_path=latent_path,
-                    max_samples=1000,
+                    max_samples=500,
                     epoch=epoch+1,
                     total_epochs=self.args.epochs
                 )
@@ -64,7 +64,7 @@ class DANNTrainer(WILDTrainer):
                     dataloader=val_loader,
                     device=self.device,
                     save_path=latent_path,
-                    max_samples=1000,
+                    max_samples=500,
                     dataset_type=self.dataset  # Pass dataset type (crmnist or wild)
                 )
 

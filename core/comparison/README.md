@@ -70,7 +70,7 @@ python -m core.CRMNIST.comparison.evaluation --config conf/crmnist.json --out re
 - `--epochs`: Number of training epochs (default: 20)
 - `--batch_size`: Batch size for training (default: 64)
 - `--learning_rate`: Learning rate for optimizers (default: 0.001)
-- `--zy_dim`, `--zx_dim`, `--zay_dim`, `--za_dim`: Latent dimensions for VAE models (default: 32 each)
+- `--zy_dim`, `--zx_dim`, `--zay_dim`, `--za_dim`: Latent dimensions for VAE models (default: 8 each, 32 total)
 - `--beta_1`, `--beta_2`, `--beta_3`, `--beta_4`: Beta weights for KL terms (default: 1.0 each)
 
 ## Output Structure

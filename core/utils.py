@@ -928,9 +928,9 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
         epoch: Current epoch number (optional, for title)
         total_epochs: Total number of epochs (optional, for title)
     """
-    # Adjust max_samples for CRMNIST experiments
+    # Adjust max_samples for CRMNIST experiments (reduced for less crowded plots)
     if type == "crmnist":
-        max_samples = 250
+        max_samples = 500
 
     model.eval()
     
@@ -1023,12 +1023,24 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
         for domain_name in domain_dict:
             domain_dict[domain_name] = domain_dict[domain_name].numpy()
     
-    # Run t-SNE with dynamic perplexity based on sample size
-    # Perplexity should be less than N-1 and typically N/4 works well
+    # Run t-SNE with proper convergence settings
     n_samples = zy.shape[0]
-    perplexity = min(30, max(5, n_samples // 4))  # Clamp between 5 and 30
-    print(f"\nRunning t-SNE with {n_samples} samples, perplexity={perplexity}...")
-    tsne = TSNE(n_components=2, random_state=42, n_jobs=-1, n_iter=2000, perplexity=perplexity)
+    # Perplexity 30 works well for multi-class clustering (better than sqrt(n) which gets too high)
+    perplexity = min(30, max(5, n_samples // 100))
+    # Learning rate: use sklearn's 'auto' formula: n_samples / early_exaggeration / 4
+    learning_rate = max(50, n_samples / 48)
+    print(f"\nRunning t-SNE with {n_samples} samples, perplexity={perplexity}, lr={learning_rate:.0f}...")
+    tsne = TSNE(
+        n_components=2,
+        random_state=42,
+        n_jobs=-1,
+        n_iter=4000,  # High iterations for better convergence
+        perplexity=perplexity,
+        learning_rate=learning_rate,
+        init='pca',
+        early_exaggeration=12.0,
+        n_iter_without_progress=500  # Prevent premature stopping
+    )
     
     # Apply t-SNE to each latent space
     latent_spaces = [(zy, 'Label-specific (zy)')]
@@ -1272,7 +1284,8 @@ def process_batch(batch, device, dataset_type='crmnist'):
 
 def balanced_sample_for_visualization(model, dataloader, device, model_type="generic",
                                      max_samples=10000, target_samples_per_combination=100,
-                                     feature_extractor_fn=None, dataset_type="crmnist"):
+                                     feature_extractor_fn=None, dataset_type="crmnist",
+                                     use_color_in_combination=None):
     """
     Generic balanced sampling function for visualization that works with different model types.
     Automatically detects available combinations in the data for domain generalization scenarios.
@@ -1286,6 +1299,8 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
         target_samples_per_combination: Target samples per unique combination (increased from 50 to 100)
         feature_extractor_fn: Custom function to extract features (optional)
         dataset_type: Type of dataset ("crmnist" or "wild")
+        use_color_in_combination: Whether to include color in combination key (default: None = auto-detect).
+            Set to False for IT evaluation to ensure domain diversity without color sparsity.
 
     Returns:
         features_dict: Dictionary containing extracted features/latents
@@ -1345,7 +1360,11 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
                 r_idx = r.squeeze().long() if len(r.shape) > 1 else r.long()
 
             # Record all combinations in this batch
-            use_color = model_type in ["nvae", "diva"] and dataset_type == "crmnist"
+            # Determine use_color: if explicitly set, use that; otherwise auto-detect based on model_type
+            if use_color_in_combination is None:
+                use_color = model_type in ["nvae", "diva"] and dataset_type == "crmnist"
+            else:
+                use_color = use_color_in_combination and dataset_type == "crmnist"
             for i in range(len(y_idx)):
                 if use_color:
                     detected_combinations.add((y_idx[i].item(), c_idx[i].item(), r_idx[i].item()))
@@ -1389,7 +1408,10 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
     max_batches_without_progress = 50  # Early stopping threshold
 
     # Determine use_color for sampling phase (same logic as detection)
-    use_color = model_type in ["nvae", "diva"] and dataset_type == "crmnist"
+    if use_color_in_combination is None:
+        use_color = model_type in ["nvae", "diva"] and dataset_type == "crmnist"
+    else:
+        use_color = use_color_in_combination and dataset_type == "crmnist"
 
     print(f"\n📊 Starting balanced sampling for {model_type} model...")
     print(f"Target samples per combination: {target_samples_per_combination}")

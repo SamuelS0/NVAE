@@ -19,8 +19,8 @@ class StagedWILDTrainer(WILDTrainer):
     Stage 3: Full training with all latent variables active
     """
     
-    def __init__(self, model, optimizer, device, args, patience=5):
-        super().__init__(model, optimizer, device, args, patience)
+    def __init__(self, model, optimizer, device, args, patience=5, scheduler=None):
+        super().__init__(model, optimizer, device, args, patience, scheduler=scheduler)
         
         # Staged training parameters
         self.stage1_epochs = args.stage1_epochs if hasattr(args, 'stage1_epochs') and args.stage1_epochs is not None else max(10, args.epochs // 3)

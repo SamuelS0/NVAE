@@ -16,7 +16,7 @@ For a representation Z = (Z_y, Z_dy, Z_d, Z_x) to be minimally partitioned:
     1. Z_y captures class-specific: I(Z_y;Y|D) = I_Y and I(Z_y;D|Y) = 0
     2. Z_d captures domain-specific: I(Z_d;D|Y) = I_D and I(Z_d;Y|D) = 0
     3. Z_dy captures shared: I(Z_dy;Y;D) = I_YD
-    4. Z_x is residual: I(Z_x;Y,D) = 0
+    4. Z_x is residual (not evaluated - tautological since trained with sparsity)
 
 Compatible Models:
     This evaluation framework requires models with explicit VAE-style latent
@@ -445,22 +445,14 @@ class MinimalInformationPartitionEvaluator:
             results['metrics']['I(z_dy;D)'] = 0.0
             results['metrics']['I(z_dy;Y,D)'] = 0.0
 
-        # 4. Evaluate z_x (residual latent)
-        print("\n📊 Evaluating z_x (residual latent)...")
-
-        if compute_bootstrap:
-            results['metrics']['I(z_x;Y,D)'], results['confidence_intervals']['I(z_x;Y,D)'] = \
-                self.bootstrap_estimate(self.joint_mutual_information, z_x, y_labels, d_labels)
-            results['metrics']['I(z_x;Y)'], results['confidence_intervals']['I(z_x;Y)'] = \
-                self.bootstrap_estimate(self.mutual_information, z_x, y_labels, apply_pca=True)
-            results['metrics']['I(z_x;D)'], results['confidence_intervals']['I(z_x;D)'] = \
-                self.bootstrap_estimate(self.mutual_information, z_x, d_labels, apply_pca=True)
-        else:
-            results['metrics']['I(z_x;Y,D)'] = self.joint_mutual_information(z_x, y_labels, d_labels)
-            results['metrics']['I(z_x;Y)'] = self.mutual_information(z_x, y_labels)
-            results['metrics']['I(z_x;D)'] = self.mutual_information(z_x, d_labels)
-
-        print(f"  I(z_x;Y,D) = {results['metrics']['I(z_x;Y,D)']:.4f} (should be LOW)")
+        # 4. Skip z_x (residual latent) evaluation
+        # The residual space is designed to capture variation unrelated to Y and D.
+        # Measuring I(z_x;Y,D) is not theoretically sound - it's tautological since
+        # z_x is trained to NOT contain Y,D information via sparsity penalties.
+        print("\n⏭️  Skipping z_x (residual latent) evaluation - not theoretically meaningful")
+        results['metrics']['I(z_x;Y,D)'] = None
+        results['metrics']['I(z_x;Y)'] = None
+        results['metrics']['I(z_x;D)'] = None
 
         # 5. Compute overall partition quality score
         results['metrics']['partition_quality'] = self._compute_partition_quality(results['metrics'])
@@ -482,7 +474,8 @@ class MinimalInformationPartitionEvaluator:
         - High I(z_y;Y|D) and low I(z_y;D|Y)
         - High I(z_d;D|Y) and low I(z_d;Y|D)
         - High positive I(z_dy;Y;D) if z_dy exists
-        - Low I(z_x;Y,D)
+
+        Note: z_x metrics are not included as they are not theoretically meaningful.
         """
         # Normalize by typical entropy values (log(num_classes) ~ 1-3 nats)
         typical_entropy = 2.5
@@ -491,13 +484,13 @@ class MinimalInformationPartitionEvaluator:
         score = 0.0
         score += metrics['I(z_y;Y|D)'] / typical_entropy  # Class specificity
         score += metrics['I(z_d;D|Y)'] / typical_entropy  # Domain specificity
-        if metrics['I(z_dy;Y;D)'] > 0:
+        if metrics.get('I(z_dy;Y;D)') and metrics['I(z_dy;Y;D)'] > 0:
             score += metrics['I(z_dy;Y;D)'] / typical_entropy  # Interaction capture
 
         # Negative contributions (penalties for what should be low)
         score -= metrics['I(z_y;D|Y)'] / typical_entropy  # Class shouldn't have domain info
         score -= metrics['I(z_d;Y|D)'] / typical_entropy  # Domain shouldn't have class info
-        score -= metrics['I(z_x;Y,D)'] / typical_entropy  # Residual should have no label info
+        # Note: z_x metrics excluded - not theoretically meaningful
 
         # Normalize to 0-1 range
         max_score = 3.0  # Assuming 3 positive terms

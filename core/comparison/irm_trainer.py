@@ -12,8 +12,8 @@ import torch.nn.functional as F
 
 
 class IRMTrainer(WILDTrainer):
-    def __init__(self, model, optimizer, device, args, patience=5):
-        super().__init__(model, optimizer, device, args, patience)
+    def __init__(self, model, optimizer, device, args, patience=5, scheduler=None):
+        super().__init__(model, optimizer, device, args, patience, scheduler=scheduler)
         self.dataset = args.dataset
         self.optimizer = optimizer
 
@@ -43,7 +43,7 @@ class IRMTrainer(WILDTrainer):
                 dataloader=val_loader,
                 device=self.device,
                 save_path=latent_path,
-                max_samples=1000,
+                max_samples=500,
                 dataset_type=self.dataset  # Pass dataset type (crmnist or wild)
             )
 

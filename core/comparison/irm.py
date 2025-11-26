@@ -6,7 +6,7 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
 class IRM(nn.Module):
-    def __init__(self, z_dim, num_y_classes, num_r_classes, dataset, penalty_weight=1e3, penalty_anneal_iters=0):
+    def __init__(self, z_dim, num_y_classes, num_r_classes, dataset, penalty_weight=10.0, penalty_anneal_iters=1000):
         super(IRM, self).__init__()
         self.num_y_classes = num_y_classes
         self.num_r_classes = num_r_classes
@@ -124,54 +124,67 @@ class IRM(nn.Module):
         Compute IRM loss with environment-specific penalties
         Args:
             x: input images
-            y: digit labels  
+            y: digit labels
             r: domain/rotation labels (used to split into environments)
         """
         logits, features = self.forward(x, y, r)
-        
+
         # Convert r to environment indices if it's one-hot encoded
         if len(r.shape) > 1:
             env_labels = torch.argmax(r, dim=1)
         else:
             env_labels = r
-        
+
         # Get unique environments
         unique_envs = torch.unique(env_labels)
-        
+        num_envs = len(unique_envs)
+
         total_loss = 0.0
         total_penalty = 0.0
-        
+        env_count = 0
+
         # Compute loss and penalty for each environment
         for env in unique_envs:
             env_mask = (env_labels == env)
             if env_mask.sum() == 0:
                 continue
-                
+
             env_logits = logits[env_mask]
             env_y = y[env_mask]
-            
+
             # Classification loss for this environment
             env_loss = F.cross_entropy(env_logits, env_y)
             total_loss += env_loss
-            
+            env_count += 1
+
             # IRM penalty for this environment
             # Only compute penalty if gradients are enabled (training mode)
             # Validation runs with torch.no_grad() which breaks compute_irm_penalty()
             if self.step_count >= self.penalty_anneal_iters and torch.is_grad_enabled():
                 env_penalty = self.compute_irm_penalty(env_logits, env_y)
                 total_penalty += env_penalty
-        
+
+        # CRITICAL FIX: Average over environments instead of summing
+        # This ensures the loss scale is independent of the number of environments
+        # and matches the scale the penalty_weight was calibrated for
+        if env_count > 0:
+            avg_loss = total_loss / env_count
+            avg_penalty = total_penalty / env_count if self.step_count >= self.penalty_anneal_iters else 0.0
+        else:
+            avg_loss = total_loss
+            avg_penalty = total_penalty
+
         # Current penalty weight (with annealing)
         current_penalty_weight = self.penalty_weight if self.step_count >= self.penalty_anneal_iters else 0.0
-        
-        # Total IRM loss
-        irm_loss = total_loss + current_penalty_weight * total_penalty
-        
-        self.step_count += 1
-        
-        return irm_loss, total_loss, total_penalty
 
-    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=750, dataset_type="crmnist"):
+        # Total IRM loss (now properly scaled)
+        irm_loss = avg_loss + current_penalty_weight * avg_penalty
+
+        self.step_count += 1
+
+        return irm_loss, avg_loss, avg_penalty
+
+    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=500, dataset_type="crmnist"):
         """
         Visualize the latent space using t-SNE
         Args:
@@ -236,9 +249,21 @@ class IRM(nn.Module):
             y_labels = y_labels.reshape(-1)
         
         print(f"Visualizing {len(features)} samples")
-        
-        # Apply t-SNE
-        tsne = TSNE(n_components=2, random_state=42, n_iter=2000, perplexity=min(30, len(features)//4))
+
+        # Apply t-SNE with proper convergence settings
+        n_samples = features.shape[0]
+        perplexity = min(30, max(5, n_samples // 100))
+        learning_rate = max(50, n_samples / 48)
+        tsne = TSNE(
+            n_components=2,
+            random_state=42,
+            n_iter=4000,
+            perplexity=perplexity,
+            learning_rate=learning_rate,
+            init='pca',
+            n_jobs=-1,
+            n_iter_without_progress=500
+        )
         features_2d = tsne.fit_transform(features)
         
         # Create three subplots: one for task classes, one for colors, one for rotations

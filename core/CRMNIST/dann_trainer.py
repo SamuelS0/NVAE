@@ -32,16 +32,18 @@ class DANNTrainer:
         device: torch.device,
         args,
         patience: int = 5,
-        lambda_schedule: bool = True
+        lambda_schedule: bool = True,
+        scheduler=None
     ):
         self.model = model.to(device)
         self.optimizer = optimizer
+        self.scheduler = scheduler  # LR scheduler (optional)
         self.device = device
         self.args = args
         self.patience = patience
         self.dataset = args.dataset
         self.lambda_schedule = lambda_schedule
-        
+
         # Early stopping setup
         self.best_val_loss = float('inf')
         self.best_val_accuracy = 0.0
@@ -54,13 +56,13 @@ class DANNTrainer:
             'loss_y_adversarial': 0, 'sparsity_loss_zdy': 0, 'sparsity_loss_zy': 0, 'sparsity_loss_zd': 0,
             'y_accuracy': 0, 'a_accuracy': 0
         }
-        
+
         # Create output directories
         # Use getattr to support both CRMNIST (has 'setting') and WILD (doesn't have 'setting')
         setting = getattr(args, 'setting', 'standard')
         self.models_dir = os.path.join(args.out, 'comparison_models', setting)
         os.makedirs(self.models_dir, exist_ok=True)
-        
+
         # Track training progress for lambda scheduling
         self.current_epoch = 0
         self.total_epochs = 0
@@ -74,6 +76,7 @@ class DANNTrainer:
         self.val_y_acc_history = []
         self.train_d_acc_history = []
         self.val_d_acc_history = []
+        self.lr_history = []  # Track learning rate
 
     def train(self, train_loader, val_loader, num_epochs: int) -> torch.nn.Module:
         """Train the DANN model with gradient reversal lambda scheduling."""
@@ -91,9 +94,17 @@ class DANNTrainer:
             
             # Training phase
             train_loss, train_metrics = self._train_epoch(train_loader)
-            
+
             # Validation phase
             val_loss, val_metrics = self._validate(val_loader)
+
+            # Step the LR scheduler at the end of each epoch
+            current_lr = self.optimizer.param_groups[0]['lr']
+            if self.scheduler is not None:
+                self.scheduler.step()
+                new_lr = self.optimizer.param_groups[0]['lr']
+                if new_lr != current_lr:
+                    print(f"  LR decay: {current_lr:.6f} → {new_lr:.6f}")
 
             # Store training history
             self.epoch_history.append(epoch + 1)
@@ -103,10 +114,11 @@ class DANNTrainer:
             self.val_y_acc_history.append(val_metrics.get('y_accuracy', 0))
             self.train_d_acc_history.append(train_metrics.get('a_accuracy', 0))
             self.val_d_acc_history.append(val_metrics.get('a_accuracy', 0))
+            self.lr_history.append(current_lr)
 
             # Print epoch results
             print(f'Epoch {epoch+1}/{num_epochs}:')
-            print(f'  Train Loss: {train_loss:.4f}')
+            print(f'  Train Loss: {train_loss:.4f}, LR: {current_lr:.6f}')
             self._print_metrics(train_metrics, prefix='Train')
             print(f'  Val Loss: {val_loss:.4f}')
             self._print_metrics(val_metrics, prefix='Val')

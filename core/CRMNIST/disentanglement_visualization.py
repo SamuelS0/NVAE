@@ -7,11 +7,11 @@ from tqdm import tqdm
 import random
 
 
-def visualize_disentanglement(model, dataloader, device, save_path=None, num_variations=7, num_examples=3):
+def visualize_disentanglement(model, dataloader, device, save_path=None, num_variations=7, num_examples=3, rotation_step=15):
     """
     Visualize disentanglement by showing how changing each latent space affects generation
     while keeping others fixed. This demonstrates the quality of learned disentangled representations.
-    
+
     Args:
         model: Trained VAE model
         dataloader: DataLoader containing (x, y, c, r) tuples
@@ -19,6 +19,7 @@ def visualize_disentanglement(model, dataloader, device, save_path=None, num_var
         save_path: Optional path to save visualization
         num_variations: Number of variations to show per latent space (default: 7)
         num_examples: Number of base examples to use (default: 3)
+        rotation_step: Degrees between rotation domains (default: 15)
     """
     model.eval()
     
@@ -68,7 +69,7 @@ def visualize_disentanglement(model, dataloader, device, save_path=None, num_var
         
         color_names = ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red']
         color_name = color_names[color_label] if 0 <= color_label < len(color_names) else 'None'
-        rotation_angle = rotation_label * 10 if rotation_label >= 0 else 0
+        rotation_angle = rotation_label * rotation_step if rotation_label >= 0 else 0
         
         fig.suptitle(f'Disentanglement Analysis - Example {example_idx + 1}\n'
                     f'Digit: {digit_label}, Color: {color_name}, Rotation: {rotation_angle}°',

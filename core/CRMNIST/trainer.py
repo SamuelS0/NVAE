@@ -14,10 +14,12 @@ class CRMNISTTrainer:
         optimizer: torch.optim.Optimizer,
         device: torch.device,
         args,
-        patience: int = 5
+        patience: int = 5,
+        scheduler=None
     ):
         self.model = model.to(device)  # Move model to device immediately
         self.optimizer = optimizer
+        self.scheduler = scheduler  # LR scheduler (optional)
         self.device = device
         self.args = args
         self.patience = patience
@@ -39,15 +41,16 @@ class CRMNISTTrainer:
         self.val_acc_history = []
         self.train_recon_history = []
         self.val_recon_history = []
+        self.lr_history = []  # Track learning rate
 
         # Create output directories with simpler structure
         self.models_dir = os.path.join(args.out, 'comparison_models')
         os.makedirs(self.models_dir, exist_ok=True)
-        
+
         # Create reconstructions directory
         self.reconstructions_dir = os.path.join(args.out, 'reconstructions')
         os.makedirs(self.reconstructions_dir, exist_ok=True)
-        
+
         # Create latent visualization directory
         self.latent_viz_dir = os.path.join(args.out, 'latent_epoch_viz')
         os.makedirs(self.latent_viz_dir, exist_ok=True)
@@ -64,6 +67,14 @@ class CRMNISTTrainer:
             # Validation phase
             val_loss, val_metrics = self._validate(val_loader)
 
+            # Step the LR scheduler at the end of each epoch
+            current_lr = self.optimizer.param_groups[0]['lr']
+            if self.scheduler is not None:
+                self.scheduler.step()
+                new_lr = self.optimizer.param_groups[0]['lr']
+                if new_lr != current_lr:
+                    print(f"  LR decay: {current_lr:.6f} → {new_lr:.6f}")
+
             # Store training history
             self.epoch_history.append(epoch + 1)
             self.train_loss_history.append(train_loss)
@@ -72,10 +83,11 @@ class CRMNISTTrainer:
             self.val_acc_history.append(val_metrics.get('y_accuracy', 0))
             self.train_recon_history.append(train_metrics.get('recon_mse', 0))
             self.val_recon_history.append(val_metrics.get('recon_mse', 0))
+            self.lr_history.append(current_lr)
 
             # Print epoch results
             print(f'Epoch {epoch+1}/{num_epochs}:')
-            print(f'  Train Loss: {train_loss:.4f}')
+            print(f'  Train Loss: {train_loss:.4f}, LR: {current_lr:.6f}')
             for k, v in train_metrics.items():
                 print(f'  Train {k}: {v:.4f}')
             print(f'  Val Loss: {val_loss:.4f}')
@@ -284,7 +296,7 @@ class CRMNISTTrainer:
                 device=self.device,
                 type='crmnist',  # Uses balanced sampling for color × rotation combinations
                 save_path=latent_path,
-                max_samples=750
+                max_samples=500
             )
             print(f"  Latent visualization saved to {latent_path}")
         except Exception as e:

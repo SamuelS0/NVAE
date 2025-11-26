@@ -128,8 +128,9 @@ def plot_interaction_and_residual(
     """
     Plot interaction information I(z_dy;Y;D) and residual information I(z_x;Y,D).
     """
-    interaction_values = [metrics['I(z_dy;Y;D)'].get(model, 0.0) for model in models]
-    residual_values = [metrics['I(z_x;Y,D)'].get(model, 0.0) for model in models]
+    # Handle None values (null in JSON) by converting to 0.0
+    interaction_values = [metrics['I(z_dy;Y;D)'].get(model, 0.0) or 0.0 for model in models]
+    residual_values = [metrics['I(z_x;Y,D)'].get(model, 0.0) or 0.0 for model in models]
 
     x = np.arange(len(models))
     width = 0.35
@@ -244,7 +245,7 @@ def create_comparison_table(
     for metric in metric_names:
         row = {'Metric': metric_labels.get(metric, metric)}
         for model in models:
-            value = metrics[metric].get(model, 0.0)
+            value = metrics[metric].get(model, 0.0) or 0.0  # Handle None values
 
             if include_confidence_intervals and f'{model}_CI' in metrics[metric]:
                 ci = metrics[metric][f'{model}_CI']
@@ -311,7 +312,8 @@ def plot_heatmap(
     display_names = []
     for metric in metric_names:
         if metric in metrics:
-            row = [metrics[metric].get(model, 0.0) for model in models]
+            # Handle None values (null in JSON) by converting to 0.0
+            row = [metrics[metric].get(model, 0.0) or 0.0 for model in models]
             data_matrix.append(row)
             display_names.append(metric)
 
@@ -412,7 +414,7 @@ def generate_summary_report(
         for metric in key_metrics:
             f.write(f"{metric:<25} ")
             for model in models:
-                value = metrics[metric].get(model, 0.0)
+                value = metrics[metric].get(model, 0.0) or 0.0  # Handle None values
                 f.write(f"{value:<15.4f} ")
             f.write("\n")
 

@@ -182,18 +182,20 @@ if __name__ == "__main__":
     parser = get_parser('CRMNIST')
     parser.add_argument('--intensity', '-i', type=float, default=1.5)
     parser.add_argument('--intensity_decay', '-d', type=float, default=1.0)
+    parser.add_argument('--rotation_step', type=int, default=15,
+                       help='Rotation step between domains in degrees (default: 15). Domains will rotate by 0, step, 2*step, ...')
     parser.add_argument('--config', type=str, default = 'conf/crmnist.json')
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--zy_dim', type=int, default=8)
     parser.add_argument('--zx_dim', type=int, default=8)
     parser.add_argument('--zay_dim', type=int, default=8)
     parser.add_argument('--za_dim', type=int, default=8)
-    parser.add_argument('--beta_1', type=float, default=10.0)
+    parser.add_argument('--beta_1', type=float, default=15.0)
     parser.add_argument('--beta_2', type=float, default=10.0)
     parser.add_argument('--beta_3', type=float, default=10.0)
-    parser.add_argument('--beta_4', type=float, default=10.0)
-    parser.add_argument('--alpha_1', type=float, default=75.0)
-    parser.add_argument('--alpha_2', type=float, default=75.0)
+    parser.add_argument('--beta_4', type=float, default=15.0)
+    parser.add_argument('--alpha_1', type=float, default=50.0)
+    parser.add_argument('--alpha_2', type=float, default=50.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--dataset', type=str, default='crmnist')
     parser.add_argument('--use_cache', action='store_true', default=True, 
@@ -205,14 +207,14 @@ if __name__ == "__main__":
     parser.add_argument('--beta_scale', type=float, default=1.0)
 
     # L1 sparsity penalty arguments
-    parser.add_argument('--l1_lambda_zy', type=float, default=10.0,
-                       help='L1 penalty weight for zy latent (default: 10.0)')
-    parser.add_argument('--l1_lambda_zx', type=float, default=10.0,
-                       help='L1 penalty weight for zx latent (default: 10.0)')
+    parser.add_argument('--l1_lambda_zy', type=float, default=15.0,
+                       help='L1 penalty weight for zy latent (default: 15.0)')
+    parser.add_argument('--l1_lambda_zx', type=float, default=5.0,
+                       help='L1 penalty weight for zx latent (default: 5.0)')
     parser.add_argument('--l1_lambda_zay', type=float, default=25.0,
                        help='L1 penalty weight for zay latent (default: 25.0)')
-    parser.add_argument('--l1_lambda_za', type=float, default=10.0,
-                       help='L1 penalty weight for za latent (default: 10.0)')
+    parser.add_argument('--l1_lambda_za', type=float, default=15.0,
+                       help='L1 penalty weight for za latent (default: 15.0)')
 
     # Model selection arguments
     parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],
@@ -228,10 +230,10 @@ if __name__ == "__main__":
                        help='Lambda parameter for gradient reversal in AugmentedDANN (default: 1.0)')
     parser.add_argument('--sparsity_weight', type=float, default=5.0,
                        help='Target weight for sparsity penalty on zdy in AugmentedDANN, increases from 0 with DANN schedule (default: 5.0)')
-    parser.add_argument('--sparsity_weight_other', type=float, default=0.5,
-                       help='Target weight for sparsity penalty on zy and zd in AugmentedDANN (default: 0.5)')
-    parser.add_argument('--beta_adv', type=float, default=0.2,
-                       help='Weight for adversarial loss in AugmentedDANN (default: 0.2)')
+    parser.add_argument('--sparsity_weight_other', type=float, default=1.5,
+                       help='Target weight for sparsity penalty on zy and zd in AugmentedDANN (default: 1.5)')
+    parser.add_argument('--beta_adv', type=float, default=0.5,
+                       help='Weight for adversarial loss in AugmentedDANN (default: 0.5)')
 
     # IRM-specific parameters
     # Note: With environment-averaged loss (fixed), penalty_weight=5 is appropriate
@@ -296,6 +298,16 @@ if __name__ == "__main__":
     domain_data = {int(key): value for key, value in spec_data['domain_data'].items()}
     spec_data['domain_data'] = domain_data
     class_map = spec_data['class_map']
+
+    # Override rotation values based on rotation_step argument
+    # This allows configuring rotations like 0, 10, 20, 30, 40, 50 (step=10) instead of 0, 15, 30, 45, 60, 75 (step=15)
+    print(f"Rotation step: {args.rotation_step}°")
+    for domain_idx in domain_data:
+        old_rotation = domain_data[domain_idx].get('rotation', domain_idx * 15)
+        new_rotation = domain_idx * args.rotation_step
+        domain_data[domain_idx]['rotation'] = new_rotation
+        if old_rotation != new_rotation:
+            print(f"  Domain {domain_idx}: rotation {old_rotation}° -> {new_rotation}°")
     
     # Choose labels subset if not already chosen
     # Use a fixed seed for reproducibility (can be overridden via args.label_seed if added)
@@ -427,7 +439,17 @@ if __name__ == "__main__":
 
     # For backward compatibility, keep test_loader pointing to id_test_loader
     test_loader = id_test_loader
-    
+
+    # Verify OOD domain is excluded from ID test data (in OOD mode)
+    if ood_domain is not None:
+        id_test_domains = set()
+        for batch in id_test_loader:
+            r_labels = batch[3]  # rotation/domain labels (one-hot)
+            domains = r_labels.argmax(dim=1).tolist()
+            id_test_domains.update(domains)
+        assert ood_domain not in id_test_domains, f"OOD domain {ood_domain} found in ID test data!"
+        print(f"   Verified: ID test data contains only domains {sorted(id_test_domains)} (OOD domain {ood_domain} excluded)")
+
     # Get dataset dimensions
     num_y_classes = spec_data['num_y_classes']
     num_r_classes = spec_data['num_r_classes']
@@ -525,7 +547,8 @@ if __name__ == "__main__":
                     nvae_model, val_loader, args.device,
                     save_path=disentangle_path,
                     num_variations=7,
-                    num_examples=3
+                    num_examples=3,
+                    rotation_step=args.rotation_step
                 )
                 print(f"   ✅ Disentanglement visualization saved")
 
@@ -605,7 +628,8 @@ if __name__ == "__main__":
                     diva_model, val_loader, args.device,
                     save_path=disentangle_path,
                     num_variations=7,
-                    num_examples=3
+                    num_examples=3,
+                    rotation_step=args.rotation_step
                 )
                 print(f"   ✅ Disentanglement visualization saved")
 
@@ -726,11 +750,12 @@ if __name__ == "__main__":
                 image_size=28
             ).to(args.device)
 
-            # Create optimizer
+            # Create optimizer and LR scheduler
             optimizer = optim.Adam(dann_aug_model.parameters(), lr=args.learning_rate)
+            scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)  # 10% decay every 5 epochs
 
             # Train using DANNTrainer
-            trainer = DANNTrainer(dann_aug_model, optimizer, args.device, args, patience=5)
+            trainer = DANNTrainer(dann_aug_model, optimizer, args.device, args, patience=5, scheduler=scheduler)
             trainer.train(train_loader, val_loader, args.epochs)
 
             # Get metrics
@@ -950,7 +975,8 @@ if __name__ == "__main__":
                         model_type=model_type,
                         max_samples=10000,  # Increased from 5000 for better MI estimation
                         target_samples_per_combination=100,  # Increased proportionally
-                        dataset_type="crmnist"
+                        dataset_type="crmnist",
+                        use_color_in_combination=False  # Use (digit, domain) for IT evaluation, not (digit, color, domain)
                     )
 
                     # Extract latents and convert to numpy

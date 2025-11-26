@@ -1,4 +1,5 @@
 import torch
+import torch.optim.lr_scheduler as lr_scheduler
 import os
 from typing import Dict, Tuple
 from tqdm import tqdm
@@ -9,7 +10,7 @@ from core.WILD.trainer import WILDTrainer
 def train(args, model, optimizer, train_loader, val_loader, device, patience, trainer_class=None):
     """
     Train a model with early stopping.
-    
+
     Args:
         args: Arguments object
         model: Model to train
@@ -23,15 +24,18 @@ def train(args, model, optimizer, train_loader, val_loader, device, patience, tr
     """
     # Create output directories
     os.makedirs(args.out, exist_ok=True)
-    
+
+    # Create LR scheduler: 10% decay every 5 epochs
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
+
     # Initialize trainer
-    
     trainer = trainer_class(
         model=model,
         optimizer=optimizer,
         device=device,
         args=args,
-        patience=patience
+        patience=patience,
+        scheduler=scheduler
     )
     
     # Train model (updates model state in-place with best parameters)

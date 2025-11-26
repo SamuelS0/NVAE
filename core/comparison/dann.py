@@ -160,7 +160,7 @@ class DANN(nn.Module):
         """Extract features from the feature extractor"""
         return self.feature_extractor(x)
 
-    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=750, dataset_type="crmnist"):
+    def visualize_latent_space(self, dataloader, device, save_path=None, max_samples=500, dataset_type="crmnist"):
         """
         Visualize the latent space using t-SNE with balanced sampling
         Args:
@@ -213,8 +213,20 @@ class DANN(nn.Module):
         assert len(c_labels) == len(features), f"Color label dimension mismatch: {len(c_labels)} vs {len(features)}"
         assert len(r_labels) == len(features), f"Rotation label dimension mismatch: {len(r_labels)} vs {len(features)}"
         
-        # Apply t-SNE
-        tsne = TSNE(n_components=2, random_state=42, n_iter=2000)
+        # Apply t-SNE with proper convergence settings
+        n_samples = features.shape[0]
+        perplexity = min(30, max(5, n_samples // 100))
+        learning_rate = max(50, n_samples / 48)
+        tsne = TSNE(
+            n_components=2,
+            random_state=42,
+            n_iter=4000,
+            perplexity=perplexity,
+            learning_rate=learning_rate,
+            init='pca',
+            n_jobs=-1,
+            n_iter_without_progress=500
+        )
         features_2d = tsne.fit_transform(features)
         
         # Create three subplots: one for task classes, one for colors, one for rotations

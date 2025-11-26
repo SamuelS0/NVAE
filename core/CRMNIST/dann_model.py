@@ -578,7 +578,7 @@ class AugmentedDANN(NModule):
 
         return lambda_val
     
-    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=750, dataset_type="crmnist"):
+    def visualize_latent_spaces(self, dataloader, device, save_path=None, max_samples=500, dataset_type="crmnist"):
         """
         Visualize all latent spaces using t-SNE
         Args:
@@ -732,16 +732,36 @@ class AugmentedDANN(NModule):
         c_labels = c_labels.cpu().numpy()
         r_labels = r_labels.cpu().numpy()
         
-        # Apply t-SNE to each latent space with memory optimization
-        def run_tsne(data, labels, max_iter=1000):
+        # Apply t-SNE to each latent space with proper convergence settings
+        def run_tsne(data, labels):
             try:
-                # Use fewer iterations for faster computation if dataset is large
-                n_iter = max_iter if data.shape[0] < 2000 else 500
-                # Dynamic perplexity based on sample size (must be < N-1)
-                perplexity = min(30, max(5, data.shape[0] // 4))
-                tsne = TSNE(n_components=2, random_state=42, n_iter=n_iter,
-                           perplexity=perplexity, learning_rate='auto',
-                           init='pca', method='barnes_hut')
+                n_samples = data.shape[0]
+
+                # Perplexity 30 works well for multi-class clustering
+                perplexity = min(30, max(5, n_samples // 100))
+
+                # Sufficient iterations for convergence
+                n_iter = 4000  # High iterations for better convergence
+
+                # Learning rate: use sklearn's 'auto' formula: n_samples / early_exaggeration / 4
+                learning_rate = max(50, n_samples / 48)
+
+                print(f"  t-SNE params: n_samples={n_samples}, perplexity={perplexity}, "
+                      f"n_iter={n_iter}, lr={learning_rate:.0f}")
+
+                tsne = TSNE(
+                    n_components=2,
+                    random_state=42,
+                    n_iter=n_iter,
+                    perplexity=perplexity,
+                    learning_rate=learning_rate,
+                    init='pca',  # PCA init for stability
+                    method='barnes_hut',  # Fast approximation
+                    early_exaggeration=12.0,  # Default, helps form clusters early
+                    n_iter_without_progress=500,  # Prevent premature stopping
+                    min_grad_norm=1e-7,  # Convergence threshold
+                    n_jobs=-1  # Parallel computation
+                )
                 return tsne.fit_transform(data), labels
             except Exception as e:
                 print(f"t-SNE failed: {e}. Using first 2 PCA components as fallback.")

@@ -434,11 +434,22 @@ class VAE(NModule):
         assert len(y_labels) == len(zy_features), f"Label dimension mismatch: {len(y_labels)} vs {len(zy_features)}"
         assert len(r_labels) == len(zy_features), f"Hospital label dimension mismatch: {len(r_labels)} vs {len(zy_features)}"
         
-        # Apply t-SNE to each latent space
+        # Apply t-SNE to each latent space with proper convergence settings
         from sklearn.manifold import TSNE
         import matplotlib.pyplot as plt
-        
-        tsne = TSNE(n_components=2, random_state=42, n_iter=2000)
+
+        n_samples = zy_features.shape[0]
+        perplexity = min(50, max(5, int(n_samples ** 0.5)))
+        learning_rate = max(200, n_samples / 12)
+        tsne = TSNE(
+            n_components=2,
+            random_state=42,
+            n_iter=2000,
+            perplexity=perplexity,
+            learning_rate=learning_rate,
+            init='pca',
+            n_jobs=-1
+        )
         
         # Determine number of subplots based on DIVA mode
         if self.diva:

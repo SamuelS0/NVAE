@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 from sklearn.metrics import accuracy_score, classification_report
 import matplotlib.pyplot as plt
@@ -14,14 +14,16 @@ import os
 class MLPClassifier(nn.Module):
     """Simple 2-layer MLP for expressiveness evaluation."""
 
-    def __init__(self, input_dim, num_classes, hidden_dim=32):
+    def __init__(self, input_dim, num_classes, hidden_dim=64):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, num_classes)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, num_classes)
 
     def forward(self, x):
         x = F.relu(self.fc1(x))
-        return self.fc2(x)
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
 
 def extract_latent_representations(model, dataloader, device, num_classes=10):
     """
@@ -56,16 +58,32 @@ def extract_latent_representations(model, dataloader, device, num_classes=10):
     all_zx = []
     all_zay = []
     all_za = []
-    all_y = []
-    all_a = []
+    all_y = []  # Will store INTEGER indices for digit labels
+    all_a = []  # Will store INTEGER indices for domain labels
 
     with torch.no_grad():
-        for batch_idx, (x, y, color,  a) in enumerate(dataloader):
-            x, a = x.to(device), a.to(device)
-            # Use fixed num_classes for all batches to ensure consistent one-hot encoding size
-            y_onehot = F.one_hot(y.long(), num_classes=num_classes).float()
-            y_onehot = y_onehot.to(device)
-            y = y_onehot
+        for batch_idx, (x, y_raw, color, a_raw) in enumerate(dataloader):
+            x = x.to(device)
+
+            # Convert y (digit label) to indices if one-hot, keep as-is if already indices
+            if len(y_raw.shape) > 1 and y_raw.shape[1] > 1:
+                # One-hot encoded -> convert to indices
+                y_indices = y_raw.argmax(dim=1)
+            else:
+                # Already indices
+                y_indices = y_raw.long().squeeze()
+
+            # Convert a (domain label) to indices if one-hot, keep as-is if already indices
+            if len(a_raw.shape) > 1 and a_raw.shape[1] > 1:
+                # One-hot encoded -> convert to indices
+                a_indices = a_raw.argmax(dim=1)
+            else:
+                # Already indices
+                a_indices = a_raw.long().squeeze()
+
+            # For the model forward pass, we need one-hot y and the original a (one-hot)
+            y_onehot = F.one_hot(y_indices.long(), num_classes=num_classes).float().to(device)
+            a_raw = a_raw.to(device)
 
             if is_augmented_dann:
                 # AugmentedDANN has 3 true latent spaces: zy, zd, zdy
@@ -87,7 +105,7 @@ def extract_latent_representations(model, dataloader, device, num_classes=10):
                 zay = zdy  # Interaction features
             else:
                 # VAE models (NVAE/DIVA) - use standard forward pass
-                x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model(y, x, a)
+                x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model(y_onehot, x, a_raw)
 
             all_zy.append(zy.cpu())
             all_zx.append(zx.cpu())
@@ -97,8 +115,9 @@ def extract_latent_representations(model, dataloader, device, num_classes=10):
                 # For DIVA models or empty zay, create zeros
                 all_zay.append(torch.zeros(zy.shape[0], 0))
             all_za.append(za.cpu())
-            all_y.append(y.cpu())
-            all_a.append(a.cpu())
+            # Store INTEGER indices for labels (not one-hot)
+            all_y.append(y_indices.cpu())
+            all_a.append(a_indices.cpu())
     
     # Concatenate all batches
     latent_data = {
@@ -112,8 +131,9 @@ def extract_latent_representations(model, dataloader, device, num_classes=10):
     
     return latent_data
 
-def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test=None):
-    """Train a 2-layer MLP classifier using PyTorch for classification tasks.
+def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test=None, num_classes=None,
+                             batch_size=256, num_epochs=50, hidden_dim=64):
+    """Train a 2-layer MLP classifier using PyTorch with mini-batch training.
 
     Args:
         X_train: Training features (numpy array)
@@ -122,12 +142,31 @@ def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test
         y_val: Validation labels (can be one-hot or indices)
         X_test: Test features (optional, numpy array)
         y_test: Test labels (optional)
+        num_classes: Number of classes (optional). If None, inferred from one-hot
+                     dimension or max label value. Recommended to pass explicitly.
+        batch_size: Mini-batch size for training (default: 256)
+        num_epochs: Maximum number of training epochs (default: 50)
+        hidden_dim: Hidden layer dimension (default: 64)
 
     Returns:
         tuple: (train_acc, val_acc, test_acc, trained_classifier)
     """
     # Determine device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Determine num_classes from one-hot dimension if not provided
+    if num_classes is None:
+        if len(y_train.shape) > 1:
+            # One-hot encoded: use the dimension
+            num_classes = y_train.shape[1]
+        else:
+            # Indices: use max + 1 across all splits to be safe
+            all_labels = [y_train]
+            if y_val is not None:
+                all_labels.append(y_val)
+            if y_test is not None:
+                all_labels.append(y_test)
+            num_classes = int(max(np.max(l) for l in all_labels)) + 1
 
     # Convert one-hot encoded labels to class indices if needed
     if len(y_train.shape) > 1:
@@ -136,14 +175,14 @@ def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test
         if X_test is not None and y_test is not None:
             y_test_indices = np.argmax(y_test, axis=1)
     else:
-        y_train_indices = y_train
-        y_val_indices = y_val
+        y_train_indices = y_train.astype(np.int64) if isinstance(y_train, np.ndarray) else y_train
+        y_val_indices = y_val.astype(np.int64) if isinstance(y_val, np.ndarray) else y_val
         if X_test is not None and y_test is not None:
-            y_test_indices = y_test
+            y_test_indices = y_test.astype(np.int64) if isinstance(y_test, np.ndarray) else y_test
 
     # Convert to tensors
-    X_train_t = torch.tensor(X_train, dtype=torch.float32, device=device)
-    y_train_t = torch.tensor(y_train_indices, dtype=torch.long, device=device)
+    X_train_t = torch.tensor(X_train, dtype=torch.float32)
+    y_train_t = torch.tensor(y_train_indices, dtype=torch.long)
     X_val_t = torch.tensor(X_val, dtype=torch.float32, device=device)
     y_val_t = torch.tensor(y_val_indices, dtype=torch.long, device=device)
 
@@ -151,13 +190,17 @@ def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test
         X_test_t = torch.tensor(X_test, dtype=torch.float32, device=device)
         y_test_t = torch.tensor(y_test_indices, dtype=torch.long, device=device)
 
-    # Create MLP classifier
-    input_dim = X_train.shape[1]
-    num_classes = len(np.unique(y_train_indices))
-    clf = MLPClassifier(input_dim, num_classes, hidden_dim=32).to(device)
+    # Create DataLoader for mini-batch training
+    train_dataset = TensorDataset(X_train_t, y_train_t)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-    # Training setup
+    # Create MLP classifier with correct number of output classes
+    input_dim = X_train.shape[1]
+    clf = MLPClassifier(input_dim, num_classes, hidden_dim=hidden_dim).to(device)
+
+    # Training setup with LR scheduler
     optimizer = optim.Adam(clf.parameters(), lr=1e-3)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)  # 10% decay every 5 epochs
     criterion = nn.CrossEntropyLoss()
 
     # Training loop with early stopping
@@ -166,16 +209,25 @@ def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test
     patience = 10
     patience_counter = 0
 
-    for epoch in range(100):
-        # Training
+    for epoch in range(num_epochs):
+        # Training with mini-batches
         clf.train()
-        optimizer.zero_grad()
-        logits = clf(X_train_t)
-        loss = criterion(logits, y_train_t)
-        loss.backward()
-        optimizer.step()
+        epoch_loss = 0.0
+        for X_batch, y_batch in train_loader:
+            X_batch = X_batch.to(device)
+            y_batch = y_batch.to(device)
 
-        # Validation
+            optimizer.zero_grad()
+            logits = clf(X_batch)
+            loss = criterion(logits, y_batch)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+
+        # Step LR scheduler at end of epoch
+        scheduler.step()
+
+        # Validation (full batch is fine since it's smaller)
         clf.eval()
         with torch.no_grad():
             val_logits = clf(X_val_t)
@@ -198,8 +250,13 @@ def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test
     # Evaluate
     clf.eval()
     with torch.no_grad():
-        # Train accuracy
-        train_preds = clf(X_train_t).argmax(dim=1).cpu().numpy()
+        # Train accuracy (evaluate in batches to avoid memory issues)
+        all_train_preds = []
+        for X_batch, _ in train_loader:
+            X_batch = X_batch.to(device)
+            preds = clf(X_batch).argmax(dim=1).cpu()
+            all_train_preds.append(preds)
+        train_preds = torch.cat(all_train_preds).numpy()
         train_acc = accuracy_score(y_train_indices, train_preds)
 
         # Validation accuracy
@@ -257,12 +314,21 @@ def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader,
     has_zay = train_zay is not None and train_zay.shape[1] > 0
     
     print(f"📊 Training classifiers...")
+    print(f"   - Training samples: {train_zy.shape[0]}")
+    print(f"   - Validation samples: {val_zy.shape[0]}")
+    print(f"   - Test samples: {test_zy.shape[0]}")
     print(f"   - zy dim: {train_zy.shape[1]}")
     print(f"   - za dim: {train_za.shape[1]}")
     if has_zay:
         print(f"   - zay dim: {train_zay.shape[1]}")
     else:
         print(f"   - zay: Not available (DIVA model)")
+
+    # Verify label distributions
+    print(f"   - Digit labels (y): unique values = {np.unique(train_y)}")
+    print(f"   - Domain labels (a): unique values = {np.unique(train_a)}")
+    print(f"   - Test digit labels (y): unique values = {np.unique(test_y)}")
+    print(f"   - Test domain labels (a): unique values = {np.unique(test_a)}")
     
     # =============================================================================
     # DOMAIN CLASSIFICATION (predict 'a' from latent variables)
