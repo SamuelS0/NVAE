@@ -612,7 +612,7 @@ Models trained and saved:
 - **Images (x)**: 28×28 RGB images of colored, rotated digits
 - **Digit labels (y)**: The digit class (0-9) - this is what models predict
 - **Color labels (c)**: The color applied to the digit (7 colors total)
-- **Domain/Rotation labels (d)**: The rotation angle (0°, 10°, 20°, 30°, 40°, 50°)
+- **Domain labels (d)**: The domain index (D0-D5), each with a specific rotation angle
 
 **Color labels are NOT used for model training**. They exist for:
 - Dataset generation (controlling which colors are applied)

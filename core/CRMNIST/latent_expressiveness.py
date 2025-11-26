@@ -1,14 +1,27 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 from torch.utils.data import DataLoader
 import numpy as np
 from sklearn.metrics import accuracy_score, classification_report
-from sklearn.linear_model import LogisticRegression
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import os
+
+
+class MLPClassifier(nn.Module):
+    """Simple 2-layer MLP for expressiveness evaluation."""
+
+    def __init__(self, input_dim, num_classes, hidden_dim=32):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        return self.fc2(x)
 
 def extract_latent_representations(model, dataloader, device, num_classes=10):
     """
@@ -32,7 +45,7 @@ def extract_latent_representations(model, dataloader, device, num_classes=10):
     # Detect AugmentedDANN model (uses 3-component latent structure)
     is_augmented_dann = (hasattr(model, 'extract_features') and
                          hasattr(model, 'name') and
-                         model.name == 'dann')
+                         model.name == 'dann_augmented')
 
     if is_augmented_dann:
         print("Detected AugmentedDANN model - using extract_features() for 3-space latent extraction")
@@ -100,21 +113,22 @@ def extract_latent_representations(model, dataloader, device, num_classes=10):
     return latent_data
 
 def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test=None):
-    """Train a logistic regression classifier using sklearn for classification tasks.
+    """Train a 2-layer MLP classifier using PyTorch for classification tasks.
 
     Args:
-        X_train: Training features
+        X_train: Training features (numpy array)
         y_train: Training labels (can be one-hot or indices)
-        X_val: Validation features
+        X_val: Validation features (numpy array)
         y_val: Validation labels (can be one-hot or indices)
-        X_test: Test features (optional)
+        X_test: Test features (optional, numpy array)
         y_test: Test labels (optional)
 
     Returns:
         tuple: (train_acc, val_acc, test_acc, trained_classifier)
     """
-    from sklearn.linear_model import LogisticRegression
-    
+    # Determine device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     # Convert one-hot encoded labels to class indices if needed
     if len(y_train.shape) > 1:
         y_train_indices = np.argmax(y_train, axis=1)
@@ -126,25 +140,78 @@ def train_pytorch_classifier(X_train, y_train, X_val, y_val, X_test=None, y_test
         y_val_indices = y_val
         if X_test is not None and y_test is not None:
             y_test_indices = y_test
-    
-    # Train logistic regression classifier
-    clf = LogisticRegression(random_state=42, max_iter=1000)
-    clf.fit(X_train, y_train_indices)
-    
-    # Evaluate on train set
-    train_preds = clf.predict(X_train)
-    train_acc = accuracy_score(y_train_indices, train_preds)
-    
-    # Evaluate on validation set
-    val_preds = clf.predict(X_val)
-    val_acc = accuracy_score(y_val_indices, val_preds)
-    
-    # Evaluate on test set (if provided)
-    test_acc = None
+
+    # Convert to tensors
+    X_train_t = torch.tensor(X_train, dtype=torch.float32, device=device)
+    y_train_t = torch.tensor(y_train_indices, dtype=torch.long, device=device)
+    X_val_t = torch.tensor(X_val, dtype=torch.float32, device=device)
+    y_val_t = torch.tensor(y_val_indices, dtype=torch.long, device=device)
+
     if X_test is not None and y_test is not None:
-        test_preds = clf.predict(X_test)
-        test_acc = accuracy_score(y_test_indices, test_preds)
-    
+        X_test_t = torch.tensor(X_test, dtype=torch.float32, device=device)
+        y_test_t = torch.tensor(y_test_indices, dtype=torch.long, device=device)
+
+    # Create MLP classifier
+    input_dim = X_train.shape[1]
+    num_classes = len(np.unique(y_train_indices))
+    clf = MLPClassifier(input_dim, num_classes, hidden_dim=32).to(device)
+
+    # Training setup
+    optimizer = optim.Adam(clf.parameters(), lr=1e-3)
+    criterion = nn.CrossEntropyLoss()
+
+    # Training loop with early stopping
+    best_val_loss = float('inf')
+    best_state = None
+    patience = 10
+    patience_counter = 0
+
+    for epoch in range(100):
+        # Training
+        clf.train()
+        optimizer.zero_grad()
+        logits = clf(X_train_t)
+        loss = criterion(logits, y_train_t)
+        loss.backward()
+        optimizer.step()
+
+        # Validation
+        clf.eval()
+        with torch.no_grad():
+            val_logits = clf(X_val_t)
+            val_loss = criterion(val_logits, y_val_t).item()
+
+        # Early stopping check
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_state = {k: v.clone() for k, v in clf.state_dict().items()}
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                break
+
+    # Load best model
+    if best_state is not None:
+        clf.load_state_dict(best_state)
+
+    # Evaluate
+    clf.eval()
+    with torch.no_grad():
+        # Train accuracy
+        train_preds = clf(X_train_t).argmax(dim=1).cpu().numpy()
+        train_acc = accuracy_score(y_train_indices, train_preds)
+
+        # Validation accuracy
+        val_preds = clf(X_val_t).argmax(dim=1).cpu().numpy()
+        val_acc = accuracy_score(y_val_indices, val_preds)
+
+        # Test accuracy (if provided)
+        test_acc = None
+        if X_test is not None and y_test is not None:
+            test_preds = clf(X_test_t).argmax(dim=1).cpu().numpy()
+            test_acc = accuracy_score(y_test_indices, test_preds)
+
     return train_acc, val_acc, test_acc, clf
 
 def evaluate_latent_expressiveness(model, train_loader, val_loader, test_loader, device, save_dir):

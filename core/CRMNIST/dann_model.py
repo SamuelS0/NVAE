@@ -72,9 +72,9 @@ class AugmentedDANN(NModule):
     def __init__(
         self,
         class_map,
-        zy_dim=12,
-        zd_dim=12,
-        zdy_dim=12,
+        zy_dim=11,  # 32 total redistributed: 11+11+10
+        zd_dim=11,
+        zdy_dim=10,
         y_dim=10,  # number of classes
         d_dim=6,   # number of domains
         in_channels=3,
@@ -92,7 +92,7 @@ class AugmentedDANN(NModule):
     ):
         super().__init__()
 
-        self.name = 'dann'
+        self.name = 'dann_augmented'
         self.class_map = class_map
 
         # Model dimensions
@@ -737,8 +737,11 @@ class AugmentedDANN(NModule):
             try:
                 # Use fewer iterations for faster computation if dataset is large
                 n_iter = max_iter if data.shape[0] < 2000 else 500
-                tsne = TSNE(n_components=2, random_state=42, n_iter=n_iter, 
-                           learning_rate='auto', init='pca', method='barnes_hut')
+                # Dynamic perplexity based on sample size (must be < N-1)
+                perplexity = min(30, max(5, data.shape[0] // 4))
+                tsne = TSNE(n_components=2, random_state=42, n_iter=n_iter,
+                           perplexity=perplexity, learning_rate='auto',
+                           init='pca', method='barnes_hut')
                 return tsne.fit_transform(data), labels
             except Exception as e:
                 print(f"t-SNE failed: {e}. Using first 2 PCA components as fallback.")
@@ -767,7 +770,7 @@ class AugmentedDANN(NModule):
         zdy_2d, zdy_labels = tsne_results[2]
         
         # Define labels for legend
-        rotation_angles = ['0°', '10°', '20°', '30°', '40°', '50°']
+        domain_labels = ['D0', 'D1', 'D2', 'D3', 'D4', 'D5']
         color_labels = ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red', 'Gray']
         
         # Create figure with 3 rows and 3 columns for DANN
@@ -802,12 +805,12 @@ class AugmentedDANN(NModule):
                                       fontsize=10)
             axes[1, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
             axes[1, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
-            # Create custom legend for rotations
+            # Create custom legend for domains
             legend_elements = [plt.Line2D([0], [0], marker='o', color='w',
                                         markerfacecolor=plt.cm.tab10(i/5),
-                                        label=angle, markersize=10)
-                             for i, angle in enumerate(rotation_angles)]
-            axes[1, col_idx].legend(handles=legend_elements, title="Rotations", fontsize=8)
+                                        label=label, markersize=10)
+                             for i, label in enumerate(domain_labels)]
+            axes[1, col_idx].legend(handles=legend_elements, title="Domains", fontsize=8)
             
             # Bottom row: color by RGB color
             if len(c_labels.shape) > 1:

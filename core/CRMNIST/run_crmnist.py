@@ -184,16 +184,16 @@ if __name__ == "__main__":
     parser.add_argument('--intensity_decay', '-d', type=float, default=1.0)
     parser.add_argument('--config', type=str, default = 'conf/crmnist.json')
     parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--zy_dim', type=int, default=32)
-    parser.add_argument('--zx_dim', type=int, default=32)
-    parser.add_argument('--zay_dim', type=int, default=32)
-    parser.add_argument('--za_dim', type=int, default=32)
-    parser.add_argument('--beta_1', type=float, default=5.0)
-    parser.add_argument('--beta_2', type=float, default=5.0)
-    parser.add_argument('--beta_3', type=float, default=5.0)
-    parser.add_argument('--beta_4', type=float, default=5.0)
-    parser.add_argument('--alpha_1', type=float, default=125.0)
-    parser.add_argument('--alpha_2', type=float, default=100.0)
+    parser.add_argument('--zy_dim', type=int, default=8)
+    parser.add_argument('--zx_dim', type=int, default=8)
+    parser.add_argument('--zay_dim', type=int, default=8)
+    parser.add_argument('--za_dim', type=int, default=8)
+    parser.add_argument('--beta_1', type=float, default=10.0)
+    parser.add_argument('--beta_2', type=float, default=10.0)
+    parser.add_argument('--beta_3', type=float, default=10.0)
+    parser.add_argument('--beta_4', type=float, default=10.0)
+    parser.add_argument('--alpha_1', type=float, default=75.0)
+    parser.add_argument('--alpha_2', type=float, default=75.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--dataset', type=str, default='crmnist')
     parser.add_argument('--use_cache', action='store_true', default=True, 
@@ -234,10 +234,12 @@ if __name__ == "__main__":
                        help='Weight for adversarial loss in AugmentedDANN (default: 0.2)')
 
     # IRM-specific parameters
-    parser.add_argument('--irm_penalty_weight', type=float, default=1e2,
-                       help='Weight for IRM invariance penalty (default: 1e2)')
-    parser.add_argument('--irm_anneal_iters', type=int, default=500,
-                       help='Number of iterations before applying IRM penalty (default: 500)')
+    # Note: With environment-averaged loss (fixed), penalty_weight=5 is appropriate
+    # Higher values (100+) can cause model collapse to uniform predictions
+    parser.add_argument('--irm_penalty_weight', type=float, default=5.0,
+                       help='Weight for IRM invariance penalty (default: 5.0)')
+    parser.add_argument('--irm_anneal_iters', type=int, default=1000,
+                       help='Number of iterations before applying IRM penalty (default: 1000)')
 
     # OOD Domain Generalization arguments
     parser.add_argument('--no_ood', action='store_true', default=False,
@@ -673,10 +675,10 @@ if __name__ == "__main__":
         print("="*60)
 
         # Calculate AugmentedDANN dimensions first (needed for params)
-        total_dim = args.zy_dim + args.zx_dim + args.zay_dim + args.za_dim  # Total: 128
-        zy_aug = total_dim // 3 + (1 if total_dim % 3 > 0 else 0)  # 43
-        zd_aug = total_dim // 3 + (1 if total_dim % 3 > 1 else 0)   # 43
-        zdy_aug = total_dim // 3  # 42
+        total_dim = args.zy_dim + args.zx_dim + args.zay_dim + args.za_dim  # Total: 32 (default)
+        zy_aug = total_dim // 3 + (1 if total_dim % 3 > 0 else 0)  # 11 for 32 total
+        zd_aug = total_dim // 3 + (1 if total_dim % 3 > 1 else 0)   # 11 for 32 total
+        zdy_aug = total_dim // 3  # 10 for 32 total
         zx_aug = 0  # AugmentedDANN doesn't use zx explicitly
 
         print(f"📏 AugmentedDANN dimension redistribution: zy={zy_aug}, zd={zd_aug}, zdy={zdy_aug} (total={zy_aug+zd_aug+zdy_aug})")
@@ -758,6 +760,14 @@ if __name__ == "__main__":
             dann_aug_latent_path = os.path.join(latent_space_dir, 'dann_augmented_latent_spaces.png')
             visualize_latent_spaces(dann_aug_model, val_loader, args.device, type='dann_augmented', save_path=dann_aug_latent_path)
 
+            # Evaluate latent expressiveness for AugmentedDANN
+            print("🧪 Evaluating AugmentedDANN latent expressiveness...")
+            dann_aug_expressiveness_dir = os.path.join(args.out, 'dann_augmented_expressiveness')
+            os.makedirs(dann_aug_expressiveness_dir, exist_ok=True)
+            dann_aug_expressiveness = evaluate_latent_expressiveness(
+                dann_aug_model, train_loader, val_loader, test_loader, args.device, dann_aug_expressiveness_dir
+            )
+
     # =============================================================================
     # 4. TRAIN AND TEST IRM MODEL
     # =============================================================================
@@ -771,9 +781,9 @@ if __name__ == "__main__":
             'num_y_classes': num_y_classes,
             'num_r_classes': num_r_classes,
 
-            # IRM-specific hyperparameters (CRITICAL!)
-            'penalty_weight': getattr(args, 'irm_penalty_weight', 1e3),
-            'penalty_anneal_iters': getattr(args, 'irm_anneal_iters', 500),
+            # IRM-specific hyperparameters (tuned for environment-averaged loss)
+            'penalty_weight': getattr(args, 'irm_penalty_weight', 5.0),
+            'penalty_anneal_iters': getattr(args, 'irm_anneal_iters', 1000),
 
             # Training config
             **base_training_config,
@@ -938,8 +948,8 @@ if __name__ == "__main__":
                         dataloader=it_eval_loader,  # Use shuffled loader for domain diversity
                         device=args.device,
                         model_type=model_type,
-                        max_samples=5000,
-                        target_samples_per_combination=50,
+                        max_samples=10000,  # Increased from 5000 for better MI estimation
+                        target_samples_per_combination=100,  # Increased proportionally
                         dataset_type="crmnist"
                     )
 
@@ -964,9 +974,10 @@ if __name__ == "__main__":
                     print(f"  Domain distribution: {dict(zip(*np.unique(d_labels, return_counts=True)))}")
 
                     # Run IT evaluation with balanced samples
-                    # For CRMNIST, set max_dims=50 to avoid PCA on 32-dim latents
+                    # For CRMNIST, set max_dims=50 (each latent space is 8-dim by default)
+                    # k=10 is optimal for N=10000 samples (k ≈ √N/10)
                     evaluator = MinimalInformationPartitionEvaluator(
-                        n_neighbors=7,
+                        n_neighbors=10,  # Increased from 7 for better accuracy with more samples
                         n_bootstrap=10,
                         max_dims=50,
                         pca_variance=0.95

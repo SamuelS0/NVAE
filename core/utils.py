@@ -147,10 +147,10 @@ def sample_nvae(model, dataloader, num_samples, device):
     model.eval()
     zy_list, za_list, zay_list, zx_list = [], [], [], []
     y_list = []
-    domain_dict = {"color": [], 'rotation': []}
+    domain_dict = {"color": [], 'domain': []}
     labels_dict = {
         "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
-        'rotation': ['0°', '10°', '20°', '30°', '40°', '50°']
+        'domain': ['D0', 'D1', 'D2', 'D3', 'D4', 'D5']
     }
 
     # Initialize counters for each combination
@@ -158,9 +158,9 @@ def sample_nvae(model, dataloader, num_samples, device):
     counts = {}
     for digit in range(10):
         for color in range(-1, 7):  # -1 = grayscale, 0-6 = colored
-            for rotation in range(6):
-                counts[(digit, color, rotation)] = 0
-    
+            for domain in range(6):
+                counts[(digit, color, domain)] = 0
+
     # Target samples per combination - ensure we get enough for visualization
     target_samples = 50  # Minimum samples per combination for good visualization (matches DIVA/DANN)
     total_collected = 0
@@ -228,7 +228,7 @@ def sample_nvae(model, dataloader, num_samples, device):
                 zx_list.append(zx.cpu())
                 y_list.append(y_batch.cpu())
                 domain_dict["color"].append(c_batch.cpu())
-                domain_dict["rotation"].append(r_batch.cpu())
+                domain_dict["domain"].append(r_batch.cpu())
             
             # Check if we have enough samples for all combinations
             all_combinations_satisfied = all(count >= target_samples for count in counts.values())
@@ -275,13 +275,13 @@ def sample_nvae(model, dataloader, num_samples, device):
             color_name = f'Color {color}'
         print(f"{color_name}: {count} samples")
     
-    # Print distribution of samples across rotations
-    rotation_counts = {i: 0 for i in range(6)}
-    for (_, _, rotation), count in counts.items():
-        rotation_counts[rotation] += count
-    print("\nSamples per rotation:")
-    for rotation, count in rotation_counts.items():
-        print(f"{labels_dict['rotation'][rotation]}: {count} samples")
+    # Print distribution of samples across domains
+    domain_counts = {i: 0 for i in range(6)}
+    for (_, _, domain), count in counts.items():
+        domain_counts[domain] += count
+    print("\nSamples per domain:")
+    for domain, count in domain_counts.items():
+        print(f"{labels_dict['domain'][domain]}: {count} samples")
     
     return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
 
@@ -305,19 +305,19 @@ def sample_diva(model, dataloader, num_samples, device):
     model.eval()
     zy_list, za_list, zx_list = [], [], []
     y_list = []
-    domain_dict = {"color": [], 'rotation': []}
+    domain_dict = {"color": [], 'domain': []}
     labels_dict = {
         "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
-        'rotation': ['0°', '10°', '20°', '30°', '40°', '50°']
+        'domain': ['D0', 'D1', 'D2', 'D3', 'D4', 'D5']
     }
-    
+
     # Initialize counters for each combination
     # Include -1 for grayscale images (color=-1 when one-hot is all zeros)
     counts = {}
     for digit in range(10):
         for color in range(-1, 7):  # -1 = grayscale, 0-6 = colored
-            for rotation in range(6):
-                counts[(digit, color, rotation)] = 0
+            for domain in range(6):
+                counts[(digit, color, domain)] = 0
 
     # Target samples per combination - ensure we get enough for visualization
     target_samples = 50  # Minimum samples per combination for good visualization
@@ -384,7 +384,7 @@ def sample_diva(model, dataloader, num_samples, device):
                 zx_list.append(zx.cpu())
                 y_list.append(y_batch.cpu())
                 domain_dict["color"].append(c_batch.cpu())
-                domain_dict["rotation"].append(r_batch.cpu())
+                domain_dict["domain"].append(r_batch.cpu())
             
             # Check if we have enough samples for all combinations
             all_combinations_satisfied = all(count >= target_samples for count in counts.values())
@@ -431,13 +431,13 @@ def sample_diva(model, dataloader, num_samples, device):
             color_name = f'Color {color}'
         print(f"{color_name}: {count} samples")
     
-    # Print distribution of samples across rotations
-    rotation_counts = {i: 0 for i in range(6)}
-    for (_, _, rotation), count in counts.items():
-        rotation_counts[rotation] += count
-    print("\nSamples per rotation:")
-    for rotation, count in rotation_counts.items():
-        print(f"{labels_dict['rotation'][rotation]}: {count} samples")
+    # Print distribution of samples across domains
+    domain_counts = {i: 0 for i in range(6)}
+    for (_, _, domain), count in counts.items():
+        domain_counts[domain] += count
+    print("\nSamples per domain:")
+    for domain, count in domain_counts.items():
+        print(f"{labels_dict['domain'][domain]}: {count} samples")
     
     # Return None for zay_list since DIVA doesn't have it
     return zy_list, za_list, None, zx_list, y_list, domain_dict, labels_dict
@@ -462,19 +462,19 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
     model.eval()
     zy_list, zd_list, zdy_list = [], [], []
     y_list = []
-    domain_dict = {"color": [], "rotation": []}  # DANN uses both color and rotation
+    domain_dict = {"color": [], "domain": []}  # DANN uses both color and domain
     labels_dict = {
         "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
-        "rotation": ['0°', '10°', '20°', '30°', '40°', '50°']
+        "domain": ['D0', 'D1', 'D2', 'D3', 'D4', 'D5']
     }
-    
+
     # Initialize counters for each combination
     # Include -1 for grayscale images (color=-1 when one-hot is all zeros)
     counts = {}
     for digit in range(10):
         for color in range(-1, 7):  # -1 = grayscale, 0-6 = colored
-            for rotation in range(6):
-                counts[(digit, color, rotation)] = 0
+            for domain in range(6):
+                counts[(digit, color, domain)] = 0
 
     # Target samples per combination - ensure we get enough for visualization
     target_samples = 50  # Minimum samples per combination for good visualization
@@ -548,7 +548,7 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
                 zdy_list.append(zdy.cpu())
                 y_list.append(y_batch.cpu())
                 domain_dict["color"].append(c_batch.cpu())
-                domain_dict["rotation"].append(r_batch.cpu())
+                domain_dict["domain"].append(r_batch.cpu())
             
             # Check if we have enough samples for all combinations
             all_combinations_satisfied = all(count >= target_samples for count in counts.values()) if counts else False
@@ -596,13 +596,13 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
             color_name = f'Color {color}'
         print(f"{color_name}: {count} samples")
     
-    # Print distribution of samples across rotations
-    rotation_counts = {i: 0 for i in range(6)}
-    for (_, _, rotation), count in counts.items():
-        rotation_counts[rotation] += count
-    print("\nSamples per rotation:")
-    for rotation, count in rotation_counts.items():
-        print(f"{labels_dict['rotation'][rotation]}: {count} samples")
+    # Print distribution of samples across domains
+    domain_counts = {i: 0 for i in range(6)}
+    for (_, _, domain), count in counts.items():
+        domain_counts[domain] += count
+    print("\nSamples per domain:")
+    for domain, count in domain_counts.items():
+        print(f"{labels_dict['domain'][domain]}: {count} samples")
     
     # Return in the expected format: zy, za, zay, zx
     # For DANN: zy=zy, za=zd, zay=zdy, zx=zd (domain features)
@@ -756,10 +756,10 @@ def sample_crmnist(model, dataloader, num_samples, device):
     model.eval()
     zy_list, za_list, zay_list, zx_list = [], [], [], []
     y_list = []
-    domain_dict = {"color": [], 'rotation': []}
+    domain_dict = {"color": [], 'domain': []}
     labels_dict = {
         "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
-        'rotation': ['0°', '10°', '20°', '30°', '40°', '50°']
+        'domain': ['D0', 'D1', 'D2', 'D3', 'D4', 'D5']
     }
 
     # Check if model is in DIVA mode
@@ -770,8 +770,8 @@ def sample_crmnist(model, dataloader, num_samples, device):
     counts = {}
     for digit in range(10):
         for color in range(-1, 7):  # -1 = grayscale, 0-6 = colored
-            for rotation in range(6):
-                counts[(digit, color, rotation)] = 0
+            for domain in range(6):
+                counts[(digit, color, domain)] = 0
 
     # Target samples per combination - ensure we get enough for visualization
     target_samples = 50
@@ -849,7 +849,7 @@ def sample_crmnist(model, dataloader, num_samples, device):
                 zx_list.append(zx.cpu())
                 y_list.append(y_batch.cpu())
                 domain_dict["color"].append(c_batch.cpu())
-                domain_dict["rotation"].append(r_batch.cpu())
+                domain_dict["domain"].append(r_batch.cpu())
             
             # Check if we have enough samples for all combinations
             all_combinations_satisfied = all(count >= target_samples for count in counts.values())
@@ -896,13 +896,13 @@ def sample_crmnist(model, dataloader, num_samples, device):
             color_name = f'Color {color}'
         print(f"{color_name}: {count} samples")
     
-    # Print distribution of samples across rotations
-    rotation_counts = {i: 0 for i in range(6)}
-    for (_, _, rotation), count in counts.items():
-        rotation_counts[rotation] += count
-    print("\nSamples per rotation:")
-    for rotation, count in rotation_counts.items():
-        print(f"{labels_dict['rotation'][rotation]}: {count} samples")
+    # Print distribution of samples across domains
+    domain_counts = {i: 0 for i in range(6)}
+    for (_, _, domain), count in counts.items():
+        domain_counts[domain] += count
+    print("\nSamples per domain:")
+    for domain, count in domain_counts.items():
+        print(f"{labels_dict['domain'][domain]}: {count} samples")
     
     return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
 
@@ -1023,9 +1023,12 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
         for domain_name in domain_dict:
             domain_dict[domain_name] = domain_dict[domain_name].numpy()
     
-    # Run t-SNE
-    print("\nRunning t-SNE (this may take a few minutes)...")
-    tsne = TSNE(n_components=2, random_state=42, n_jobs=-1, n_iter=2000, perplexity=30)
+    # Run t-SNE with dynamic perplexity based on sample size
+    # Perplexity should be less than N-1 and typically N/4 works well
+    n_samples = zy.shape[0]
+    perplexity = min(30, max(5, n_samples // 4))  # Clamp between 5 and 30
+    print(f"\nRunning t-SNE with {n_samples} samples, perplexity={perplexity}...")
+    tsne = TSNE(n_components=2, random_state=42, n_jobs=-1, n_iter=2000, perplexity=perplexity)
     
     # Apply t-SNE to each latent space
     latent_spaces = [(zy, 'Label-specific (zy)')]
@@ -1197,24 +1200,25 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
 def get_model_name(args, model_type=None):
     """
     Generate a model name based on the arguments and model type.
-    
+
     Args:
         args: Arguments object containing model parameters
-        model_type: Type of model ('nvae', 'diva', 'dann', or 'irm')
-    
+        model_type: Type of model ('nvae', 'diva', 'dann', 'dann_augmented', or 'irm')
+
     Returns:
-        str: Model name string
+        str: Model name string including model_type prefix
     """
     if model_type is None:
         raise ValueError("Model type must be specified")
-    
+
     # Create parameter string
     param_str = f"alpha1-{args.alpha_1}_alpha2-{args.alpha_2}_zy{args.zy_dim}_zx{args.zx_dim}_zay{args.zay_dim}_za{args.za_dim}_b1-{args.beta_1}_b2-{args.beta_2}_b3-{args.beta_3}_b4-{args.beta_4}_ep{args.epochs}_bs{args.batch_size}_lr{args.learning_rate}"
-    
+
     # Add timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    return f"{param_str}_{timestamp}"
+
+    # Include model_type prefix to prevent name collisions between different models
+    return f"{model_type}_{param_str}_{timestamp}"
 
 def process_batch(batch, device, dataset_type='crmnist'):
     """

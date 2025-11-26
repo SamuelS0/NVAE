@@ -42,10 +42,10 @@ class VAE(NModule):
     def __init__(
             self,
             class_map,
-            zy_dim = 12,
-            zx_dim= 12,
-            zay_dim = 12,
-            za_dim=12,
+            zy_dim = 8,
+            zx_dim= 8,
+            zay_dim = 8,
+            za_dim=8,
             y_dim=10,
             a_dim=6,
             in_channels=3,
@@ -73,11 +73,14 @@ class VAE(NModule):
         self.class_map = class_map
 
         if diva:
-            extra_dim = max(zay_dim // 3, 1)
+            # Redistribute zay dimensions to zy, zx, za to maintain total of 32
+            # With zay_dim=8: extra_dim=2, remainder=2, so zy=11, zx=10, za=11 (total=32)
+            extra_dim = zay_dim // 3  # 8 // 3 = 2
+            remainder = zay_dim % 3   # 8 % 3 = 2
 
-            self.zy_dim = zy_dim + extra_dim
-            self.zx_dim = zx_dim + extra_dim
-            self.za_dim = za_dim + extra_dim
+            self.zy_dim = zy_dim + extra_dim + (1 if remainder > 0 else 0)  # 8 + 2 + 1 = 11
+            self.zx_dim = zx_dim + extra_dim                                 # 8 + 2 = 10
+            self.za_dim = za_dim + extra_dim + (1 if remainder > 1 else 0)  # 8 + 2 + 1 = 11
             self.zay_dim = None
             self.z_y_combined_dim = self.zy_dim
             self.z_a_combined_dim = self.za_dim

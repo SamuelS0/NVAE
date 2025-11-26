@@ -376,47 +376,34 @@ def generate_crmnist_dataset(spec_data, train, transform_intensity=1.5, transfor
         domain_imgs = torch.cat([yc_non_subset_imgs, non_yc_non_subset_imgs, subset_imgs])
         domain_y_labels = torch.cat([yc_non_subset_labels, non_yc_non_subset_labels, subset_labels])
         
-        rotation_value = domain_data[i]['rotation']
+        # Apply rotation transform to all images in this domain
         for j in range(len(domain_imgs)):
             domain_imgs[j] = r_transform(domain_imgs[j])
-            domain_r_labels[j] = rotation_value
-        
+            # IMPORTANT: Domain label is the domain INDEX (i), not the rotation value
+            # This ensures each domain has a unique label regardless of rotation settings
+            domain_r_labels[j] = i
+
         # Verification step to ensure label arrays match image count
         assert len(domain_c_labels) == len(domain_imgs), f"Color labels mismatch in domain {i}: {len(domain_c_labels)} vs {len(domain_imgs)}"
         assert len(domain_r_labels) == len(domain_imgs), f"Rotation labels mismatch in domain {i}: {len(domain_r_labels)} vs {len(domain_imgs)}"
-                
+
         # Initialize tensors to store indices instead of one-hot directly
         domain_c_indices = torch.full((len(domain_c_labels),), -1, dtype=torch.long)
-        domain_r_indices = torch.full((len(domain_r_labels),), -1, dtype=torch.long)
-        
+        # Domain indices are already integers 0-5, use directly
+        domain_r_indices = torch.tensor(domain_r_labels, dtype=torch.long)
+
         for idx, color in enumerate(domain_c_labels):
             if color is not None and color in class_map:
                 domain_c_indices[idx] = class_map[color]
-                
-        for idx, rotation in enumerate(domain_r_labels):
-            # All rotation values should be valid now
-            if rotation in class_map:
-                domain_r_indices[idx] = class_map[rotation]
-            else:
-                print(f"Warning: Invalid rotation value '{rotation}' - assigning domain rotation {domain_data[i]['rotation']}")
-                # Fallback to domain rotation if for some reason the value is invalid
-                domain_r_indices[idx] = class_map[domain_data[i]['rotation']]
-        
+
         # Convert valid indices to one-hot, handling -1 (no transform) cases
         valid_c_mask = domain_c_indices >= 0
-        valid_r_mask = domain_r_indices >= 0  # All rotations should be valid now
-        
+        valid_r_mask = domain_r_indices >= 0  # All domain indices are valid (0-5)
+
         # Get number of classes from the highest indices in class_map
         num_c_classes = max([v for k, v in class_map.items() if not k.isdigit()]) + 1
-        num_r_classes = max([v for k, v in class_map.items() if k.isdigit()]) + 1
-        
-        # Verify all rotation indices are valid
-        if not valid_r_mask.all():
-            invalid_count = (~valid_r_mask).sum().item()
-            print(f"Warning: {invalid_count} rotation indices in domain {i} are invalid. Fixing...")
-            domain_r_indices[~valid_r_mask] = class_map[domain_data[i]['rotation']]
-            valid_r_mask = domain_r_indices >= 0  # Update mask after fixing
-        
+        num_r_classes = len(domain_data)  # Number of domains
+
         domain_c_labels_tensor = torch.zeros(len(domain_c_labels), num_c_classes)
         domain_r_labels_tensor = torch.zeros(len(domain_r_labels), num_r_classes)
         

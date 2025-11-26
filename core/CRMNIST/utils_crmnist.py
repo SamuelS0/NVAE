@@ -476,8 +476,8 @@ def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_di
     fig, axes = plt.subplots(num_domains * 2, samples_per_domain, figsize=(20, 4 * num_domains))
     
     # Get rotation angles for titles
-    rotation_angles = ['0°', '10°', '20°', '30°', '40°', '50°']
-    
+    domain_labels = ['D0', 'D1', 'D2', 'D3', 'D4', 'D5']
+
     # Color mapping for labels
     color_map = {0: 'blue', 1: 'green', 2: 'yellow', 3: 'cyan', 4: 'magenta', 5: 'orange', 6: 'red'}
     
@@ -498,7 +498,7 @@ def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_di
         num_samples = min(samples_per_domain, len(domain_indices))
         
         # Print domain stats
-        print(f"Domain {domain} ({rotation_angles[domain]}): {len(domain_indices)} images available, using {num_samples}")
+        print(f"Domain {domain} ({domain_labels[domain]}): {len(domain_indices)} images available, using {num_samples}")
         
         # Use consecutive samples since they're already randomly selected in select_diverse_sample_batch
         for i in range(num_samples):
@@ -532,12 +532,12 @@ def visualize_reconstructions(model, epoch, batch_data, args, reconstructions_di
             axes[domain * 2, i].axis('off')
             axes[domain * 2 + 1, i].axis('off')
         
-        # Add rotation angle as y-label for the domain
-        axes[domain * 2, 0].set_ylabel(f'{rotation_angles[domain]}\nOriginal')
-        axes[domain * 2 + 1, 0].set_ylabel(f'{rotation_angles[domain]}\nRecon')
-    
+        # Add domain label as y-label for the domain
+        axes[domain * 2, 0].set_ylabel(f'{domain_labels[domain]}\nOriginal')
+        axes[domain * 2 + 1, 0].set_ylabel(f'{domain_labels[domain]}\nRecon')
+
     plt.suptitle(f'Image Reconstruction Quality Assessment - Epoch {epoch} - Model: {model_name.upper()}\n'
-                 f'Each domain (rotation angle) shows original images (top) vs. reconstructions (bottom). '
+                 f'Each domain shows original images (top) vs. reconstructions (bottom). '
                  f'Good reconstruction preserves digit identity, color, and rotation accurately.',
                  y=1.005, fontsize=13, fontweight='bold')
     plt.tight_layout()
@@ -602,9 +602,9 @@ def save_domain_samples_visualization(x, y, c, r, epoch, output_dir):
     # Add an extra row for red images
     fig, axes = plt.subplots(num_domains + 1, samples_per_domain, figsize=(20, 14))
     
-    # Get rotation angles for titles
-    rotation_angles = ['0°', '10°', '20°', '30°', '40°', '50°']
-    
+    # Get domain labels for titles
+    domain_labels = ['D0', 'D1', 'D2', 'D3', 'D4', 'D5']
+
     # First, display red images in the top row if any
     red_images_found = 0
     for i in range(len(x)):
@@ -647,11 +647,11 @@ def save_domain_samples_visualization(x, y, c, r, epoch, output_dir):
         for i in range(domain_images_found, samples_per_domain):
             axes[domain + 1, i].axis('off')
         
-        # Add rotation angle as y-label
-        axes[domain + 1, 0].set_ylabel(f'{rotation_angles[domain]}')
-    
+        # Add domain label as y-label
+        axes[domain + 1, 0].set_ylabel(f'{domain_labels[domain]}')
+
     plt.suptitle(f'Domain Sample Distribution - Epoch {epoch}\n'
-                 f'Top row shows rare red images. Following rows show samples organized by rotation domain (0°-50°). '
+                 f'Top row shows rare red images. Following rows show samples organized by domain (D0-D5). '
                  f'This visualization confirms balanced sampling across domains and color distributions.',
                  y=1.005, fontsize=12, fontweight='bold')
     plt.tight_layout()

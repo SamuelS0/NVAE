@@ -14,7 +14,7 @@
             "subset": []
         },
         "1": {
-            "rotation": "10",
+            "rotation": "15",
             "color": "green",
             "intensity": 1.5,
             "name": "domain1",
@@ -22,7 +22,7 @@
             "subset": []
         },
         "2": {
-            "rotation": "20",
+            "rotation": "30",
             "color": "yellow",
             "intensity": 1.5,
             "name": "domain2",
@@ -30,7 +30,7 @@
             "subset": []
         },
         "3": {
-            "rotation": "30",
+            "rotation": "45",
             "color": "cyan",
             "intensity": 1.5,
             "name": "domain3",
@@ -38,7 +38,7 @@
             "subset": []
         },
         "4": {
-            "rotation": "40",
+            "rotation": "60",
             "color": "magenta",
             "intensity": 1.5,
             "name": "domain4",
@@ -46,7 +46,7 @@
             "subset": []
         },
         "5": {
-            "rotation": "50",
+            "rotation": "75",
             "color": "orange",
             "intensity": 1.5,
             "name": "domain5",
@@ -63,11 +63,11 @@
         "orange": 5,
         "red": 6,
         "0": 0,
-        "10": 1,
-        "20": 2,
-        "30": 3,
-        "40": 4,
-        "50": 5
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5
     },
     "num_y_classes": 10,
     "num_r_classes": 6,
