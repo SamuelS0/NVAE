@@ -603,10 +603,11 @@ class AugmentedDANN(NModule):
         y_list, c_list, r_list = [], [], []
         
         # Initialize counters for each combination
+        # Include color 7 for grayscale images (color one-hot is all zeros)
         counts = {
             'digit': {i: 0 for i in range(10)},  # 10 digits
             'rotation': {i: 0 for i in range(6)},  # 6 rotations
-            'color': {i: 0 for i in range(7)}  # 7 colors
+            'color': {i: 0 for i in range(8)}  # 7 colors + grayscale (7)
         }
         
         # Target samples per category
@@ -645,7 +646,10 @@ class AugmentedDANN(NModule):
                     if len(y.shape) > 1:
                         y = torch.argmax(y, dim=1)
                     if len(c.shape) > 1:
-                        c = torch.argmax(c, dim=1)
+                        # Detect grayscale (all zeros in one-hot) and use index 7
+                        c_sums = c.sum(dim=1)
+                        c_indices = torch.argmax(c, dim=1)
+                        c = torch.where(c_sums == 0, torch.tensor(7, device=device), c_indices)
                     if len(r.shape) > 1:
                         r = torch.argmax(r, dim=1)
                     
@@ -764,7 +768,7 @@ class AugmentedDANN(NModule):
         
         # Define labels for legend
         rotation_angles = ['0°', '10°', '20°', '30°', '40°', '50°']
-        color_labels = ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red']
+        color_labels = ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red', 'Gray']
         
         # Create figure with 3 rows and 3 columns for DANN
         fig, axes = plt.subplots(3, 3, figsize=(18, 18))
@@ -810,10 +814,11 @@ class AugmentedDANN(NModule):
                 rgb_colors = c_labels
             else:
                 # Convert color indices to RGB
+                # Index 7 = grayscale (shown as gray)
                 rgb_colors = np.zeros((len(c_labels), 3))
                 color_mappings = {
                     0: [0, 0, 1], 1: [0, 1, 0], 2: [1, 1, 0], 3: [0, 1, 1],
-                    4: [1, 0, 1], 5: [1, 0.5, 0], 6: [1, 0, 0]
+                    4: [1, 0, 1], 5: [1, 0.5, 0], 6: [1, 0, 0], 7: [0.5, 0.5, 0.5]
                 }
                 for i, color_idx in enumerate(c_labels):
                     rgb_colors[i] = color_mappings[color_idx]
@@ -824,11 +829,11 @@ class AugmentedDANN(NModule):
                                       fontsize=10)
             axes[2, col_idx].set_xlabel('t-SNE Component 1', fontsize=9)
             axes[2, col_idx].set_ylabel('t-SNE Component 2', fontsize=9)
-            # Create custom legend for colors
+            # Create custom legend for colors (including gray for grayscale)
             color_elements = [
                 plt.Line2D([0], [0], marker='o', color='w',
                           markerfacecolor=color, label=name, markersize=10)
-                for color, name in zip(['blue', 'green', 'yellow', 'cyan', 'magenta', 'orange', 'red'],
+                for color, name in zip(['blue', 'green', 'yellow', 'cyan', 'magenta', 'orange', 'red', 'gray'],
                                      color_labels)
             ]
             axes[2, col_idx].legend(handles=color_elements, title="Colors", fontsize=8)

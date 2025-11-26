@@ -131,13 +131,13 @@ def _calculate_metrics(model, y, x, r, mode='train'):
 def sample_nvae(model, dataloader, num_samples, device):
     """
     Sample data from NVAE model and collect domain information.
-    
+
     Args:
         model: NVAE model
         dataloader: DataLoader containing (x, y, c, r) tuples
         num_samples: Maximum number of samples to collect
         device: torch device
-    
+
     Returns:
         zy_list, za_list, zay_list, zx_list: Lists of latent vectors
         y_list: List of digit labels
@@ -152,11 +152,12 @@ def sample_nvae(model, dataloader, num_samples, device):
         "color": ['Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Red'],
         'rotation': ['0°', '10°', '20°', '30°', '40°', '50°']
     }
-    
+
     # Initialize counters for each combination
+    # Include -1 for grayscale images (color=-1 when one-hot is all zeros)
     counts = {}
     for digit in range(10):
-        for color in range(7):
+        for color in range(-1, 7):  # -1 = grayscale, 0-6 = colored
             for rotation in range(6):
                 counts[(digit, color, rotation)] = 0
     
@@ -171,17 +172,20 @@ def sample_nvae(model, dataloader, num_samples, device):
             # Only check max_samples after we have enough samples for each combination
             if all_combinations_satisfied and total_collected >= num_samples:
                 break
-                
+
             x = x.to(device)
             y = y.to(device)
             c = c.to(device)
             r = r.to(device)
-            
+
             # Convert to indices if one-hot encoded
             if len(y.shape) > 1:
                 y = torch.argmax(y, dim=1)
             if len(c.shape) > 1:
-                c = torch.argmax(c, dim=1)
+                # Detect grayscale (all zeros) and use -1 for proper tracking
+                c_sums = c.sum(dim=1)
+                c_indices = torch.argmax(c, dim=1)
+                c = torch.where(c_sums == 0, torch.tensor(-1, device=device), c_indices)
             if len(r.shape) > 1:
                 r = torch.argmax(r, dim=1)
             
@@ -256,12 +260,20 @@ def sample_nvae(model, dataloader, num_samples, device):
         print(f"Digit {digit}: {count} samples")
     
     # Print distribution of samples across colors
-    color_counts = {i: 0 for i in range(7)}
+    # Use range(-1, 7) to include grayscale (-1) and colors 0-6
+    color_counts = {i: 0 for i in range(-1, 7)}
     for (_, color, _), count in counts.items():
         color_counts[color] += count
     print("\nSamples per color:")
     for color, count in color_counts.items():
-        print(f"{labels_dict['color'][color]}: {count} samples")
+        # Handle -1 (grayscale) specially since labels_dict['color'] is a list
+        if color == -1:
+            color_name = 'Grayscale'
+        elif 0 <= color < len(labels_dict['color']):
+            color_name = labels_dict['color'][color]
+        else:
+            color_name = f'Color {color}'
+        print(f"{color_name}: {count} samples")
     
     # Print distribution of samples across rotations
     rotation_counts = {i: 0 for i in range(6)}
@@ -300,17 +312,18 @@ def sample_diva(model, dataloader, num_samples, device):
     }
     
     # Initialize counters for each combination
+    # Include -1 for grayscale images (color=-1 when one-hot is all zeros)
     counts = {}
     for digit in range(10):
-        for color in range(7):
+        for color in range(-1, 7):  # -1 = grayscale, 0-6 = colored
             for rotation in range(6):
                 counts[(digit, color, rotation)] = 0
-    
+
     # Target samples per combination - ensure we get enough for visualization
     target_samples = 50  # Minimum samples per combination for good visualization
     total_collected = 0
     all_combinations_satisfied = False
-    
+
     with torch.no_grad():
         pbar = tqdm(dataloader, desc="Sampling DIVA data")
         for x, y, c, r in pbar:
@@ -327,35 +340,38 @@ def sample_diva(model, dataloader, num_samples, device):
             if len(y.shape) > 1:
                 y = torch.argmax(y, dim=1)
             if len(c.shape) > 1:
-                c = torch.argmax(c, dim=1)
+                # Detect grayscale (all zeros) and use -1 for proper tracking
+                c_sums = c.sum(dim=1)
+                c_indices = torch.argmax(c, dim=1)
+                c = torch.where(c_sums == 0, torch.tensor(-1, device=device), c_indices)
             if len(r.shape) > 1:
                 r = torch.argmax(r, dim=1)
-            
+
             # Create mask for samples we want to keep
             keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
-            
+
             # Check each sample
             for j in range(len(y)):
                 digit = y[j].item()
                 color = c[j].item()
                 rotation = r[j].item()
-                
+
                 # Check if we need more samples for this specific combination
                 combination = (digit, color, rotation)
                 should_keep = counts[combination] < target_samples
-                
+
                 if should_keep:
                     keep_mask[j] = True
                     counts[combination] += 1
                     total_collected += 1
-            
+
             # Apply mask to get only samples we want to keep
             if keep_mask.any():
                 x_batch = x[keep_mask]
                 y_batch = y[keep_mask]
                 c_batch = c[keep_mask]
                 r_batch = r[keep_mask]
-                
+
                 # Get latent representations
                 z_loc, _ = model.qz(x_batch)
                 zy = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
@@ -400,12 +416,20 @@ def sample_diva(model, dataloader, num_samples, device):
         print(f"Digit {digit}: {count} samples")
     
     # Print distribution of samples across colors
-    color_counts = {i: 0 for i in range(7)}
+    # Use range(-1, 7) to include grayscale (-1) and colors 0-6
+    color_counts = {i: 0 for i in range(-1, 7)}
     for (_, color, _), count in counts.items():
         color_counts[color] += count
     print("\nSamples per color:")
     for color, count in color_counts.items():
-        print(f"{labels_dict['color'][color]}: {count} samples")
+        # Handle -1 (grayscale) specially since labels_dict['color'] is a list
+        if color == -1:
+            color_name = 'Grayscale'
+        elif 0 <= color < len(labels_dict['color']):
+            color_name = labels_dict['color'][color]
+        else:
+            color_name = f'Color {color}'
+        print(f"{color_name}: {count} samples")
     
     # Print distribution of samples across rotations
     rotation_counts = {i: 0 for i in range(6)}
@@ -445,12 +469,13 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
     }
     
     # Initialize counters for each combination
+    # Include -1 for grayscale images (color=-1 when one-hot is all zeros)
     counts = {}
     for digit in range(10):
-        for color in range(7):
+        for color in range(-1, 7):  # -1 = grayscale, 0-6 = colored
             for rotation in range(6):
                 counts[(digit, color, rotation)] = 0
-    
+
     # Target samples per combination - ensure we get enough for visualization
     target_samples = 50  # Minimum samples per combination for good visualization
     total_collected = 0
@@ -473,28 +498,31 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
             if len(y.shape) > 1:
                 y = torch.argmax(y, dim=1)
             if len(c.shape) > 1:
-                c = torch.argmax(c, dim=1)
+                # Detect grayscale (all zeros) and use -1 for proper tracking
+                c_sums = c.sum(dim=1)
+                c_indices = torch.argmax(c, dim=1)
+                c = torch.where(c_sums == 0, torch.tensor(-1, device=device), c_indices)
             if len(r.shape) > 1:
                 r = torch.argmax(r, dim=1)
-            
+
             # Create mask for samples we want to keep
             keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
-            
+
             # Check each sample
             for j in range(len(y)):
                 digit = y[j].item()
                 color = c[j].item()
                 rotation = r[j].item()
-                
+
                 # Check if we need more samples for this specific combination
                 combination = (digit, color, rotation)
                 should_keep = counts[combination] < target_samples
-                
+
                 if should_keep:
                     keep_mask[j] = True
                     counts[combination] += 1
                     total_collected += 1
-            
+
             # Apply mask to get only samples we want to keep
             if keep_mask.any():
                 x_batch = x[keep_mask]
@@ -553,12 +581,20 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
         print(f"Digit {digit}: {count} samples")
     
     # Print distribution of samples across colors
-    color_counts = {i: 0 for i in range(7)}
+    # Use range(-1, 7) to include grayscale (-1) and colors 0-6
+    color_counts = {i: 0 for i in range(-1, 7)}
     for (_, color, _), count in counts.items():
         color_counts[color] += count
     print("\nSamples per color:")
     for color, count in color_counts.items():
-        print(f"{labels_dict['color'][color]}: {count} samples")
+        # Handle -1 (grayscale) specially since labels_dict['color'] is a list
+        if color == -1:
+            color_name = 'Grayscale'
+        elif 0 <= color < len(labels_dict['color']):
+            color_name = labels_dict['color'][color]
+        else:
+            color_name = f'Color {color}'
+        print(f"{color_name}: {count} samples")
     
     # Print distribution of samples across rotations
     rotation_counts = {i: 0 for i in range(6)}
@@ -730,9 +766,10 @@ def sample_crmnist(model, dataloader, num_samples, device):
     is_diva = hasattr(model, 'diva') and model.diva
 
     # Initialize counters for each combination
+    # Include -1 for grayscale images (color=-1 when one-hot is all zeros)
     counts = {}
     for digit in range(10):
-        for color in range(7):
+        for color in range(-1, 7):  # -1 = grayscale, 0-6 = colored
             for rotation in range(6):
                 counts[(digit, color, rotation)] = 0
 
@@ -844,12 +881,20 @@ def sample_crmnist(model, dataloader, num_samples, device):
         print(f"Digit {digit}: {count} samples")
     
     # Print distribution of samples across colors
-    color_counts = {i: 0 for i in range(7)}
+    # Use range(-1, 7) to include grayscale (-1) and colors 0-6
+    color_counts = {i: 0 for i in range(-1, 7)}
     for (_, color, _), count in counts.items():
         color_counts[color] += count
     print("\nSamples per color:")
     for color, count in color_counts.items():
-        print(f"{labels_dict['color'][color]}: {count} samples")
+        # Handle -1 (grayscale) specially since labels_dict['color'] is a list
+        if color == -1:
+            color_name = 'Grayscale'
+        elif 0 <= color < len(labels_dict['color']):
+            color_name = labels_dict['color'][color]
+        else:
+            color_name = f'Color {color}'
+        print(f"{color_name}: {count} samples")
     
     # Print distribution of samples across rotations
     rotation_counts = {i: 0 for i in range(6)}
@@ -947,9 +992,18 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
             for hospital, count in sorted(hospital_counts.items()):
                 print(f"{hospital}: {count} samples")
         else:
-            domain_counts = torch.bincount(domain_dict[domain_name])
-            for value, count in enumerate(domain_counts):
-                print(f"{labels_dict[domain_name][value]}: {count} samples")
+            # Use Counter instead of bincount to handle negative values (e.g., -1 for grayscale)
+            from collections import Counter
+            domain_counts = Counter(domain_dict[domain_name].tolist())
+            for value, count in sorted(domain_counts.items()):
+                # Handle -1 (grayscale) specially since labels_dict is a list
+                if domain_name == 'color' and value == -1:
+                    label_name = 'Grayscale'
+                elif 0 <= value < len(labels_dict[domain_name]):
+                    label_name = labels_dict[domain_name][value]
+                else:
+                    label_name = f'{domain_name.capitalize()} {value}'
+                print(f"{label_name}: {count} samples")
     
     # Convert to numpy
     zy = zy.numpy()
@@ -1274,7 +1328,10 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
                 y_idx = y.squeeze().long() if len(y.shape) > 1 else y.long()
 
             if len(c.shape) > 1 and c.shape[1] > 1:
+                # Detect grayscale (all zeros in one-hot) and use -1
+                c_sums = c.sum(dim=1)
                 c_idx = torch.argmax(c, dim=1)
+                c_idx = torch.where(c_sums == 0, torch.tensor(-1, device=device), c_idx)
             else:
                 c_idx = c.squeeze().long() if len(c.shape) > 1 else c.long()
 
@@ -1363,7 +1420,10 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
                 y_indices = y.squeeze().long() if len(y.shape) > 1 else y.long()
 
             if len(c.shape) > 1 and c.shape[1] > 1:
+                # Detect grayscale (all zeros in one-hot) and use -1
+                c_sums = c.sum(dim=1)
                 c_indices = torch.argmax(c, dim=1)
+                c_indices = torch.where(c_sums == 0, torch.tensor(-1, device=device), c_indices)
             else:
                 c_indices = c.squeeze().long() if len(c.shape) > 1 else c.long()
 
@@ -1371,7 +1431,7 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
                 r_indices = torch.argmax(r, dim=1)
             else:
                 r_indices = r.squeeze().long() if len(r.shape) > 1 else r.long()
-            
+
             # Create mask for samples we want to keep
             keep_mask = torch.zeros(len(y), dtype=torch.bool, device=device)
             
@@ -1539,7 +1599,19 @@ def _extract_features_by_model_type(model, model_type, x, y, c, r):
         features['zay'] = single_features
         features['zx'] = single_features
         features['features'] = single_features
-        
+
+    elif model_type == "dann_augmented":
+        # AugmentedDANN has three partitioned latent spaces (zy, zd, zdy)
+        if hasattr(model, 'extract_features'):
+            zy, zd, zdy = model.extract_features(x)
+            features['zy'] = zy
+            features['za'] = zd      # zd maps to za (domain latent)
+            features['zay'] = zdy    # zdy maps to zay (interaction latent)
+            features['zx'] = zd      # No separate zx in AugmentedDANN, use zd as placeholder
+            features['features'] = torch.cat([zy, zd, zdy], dim=1)
+        else:
+            raise ValueError("AugmentedDANN model missing extract_features() method")
+
     elif model_type == "irm":
         # IRM is similar to DANN
         if hasattr(model, 'get_features'):
@@ -1606,9 +1678,10 @@ def crmnist_color_aware_sampling(model, dataset, device, model_type="nvae",
     color_samples = {color: [] for color in color_idx_to_name.values()}
     
     # Track combination counts for balanced sampling
+    # Include -1 for grayscale images (color=-1 when one-hot is all zeros)
     combination_counts = {}
     for digit in range(10):
-        for color in range(7):
+        for color in range(-1, 7):  # -1 = grayscale, 0-6 = colored
             for rotation in range(6):
                 combination_counts[(digit, color, rotation)] = 0
     

@@ -188,11 +188,11 @@ if __name__ == "__main__":
     parser.add_argument('--zx_dim', type=int, default=32)
     parser.add_argument('--zay_dim', type=int, default=32)
     parser.add_argument('--za_dim', type=int, default=32)
-    parser.add_argument('--beta_1', type=float, default=1.0)
+    parser.add_argument('--beta_1', type=float, default=5.0)
     parser.add_argument('--beta_2', type=float, default=5.0)
     parser.add_argument('--beta_3', type=float, default=5.0)
-    parser.add_argument('--beta_4', type=float, default=2.0)
-    parser.add_argument('--alpha_1', type=float, default=100.0)
+    parser.add_argument('--beta_4', type=float, default=5.0)
+    parser.add_argument('--alpha_1', type=float, default=125.0)
     parser.add_argument('--alpha_2', type=float, default=100.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--dataset', type=str, default='crmnist')
@@ -208,9 +208,9 @@ if __name__ == "__main__":
     parser.add_argument('--l1_lambda_zy', type=float, default=10.0,
                        help='L1 penalty weight for zy latent (default: 10.0)')
     parser.add_argument('--l1_lambda_zx', type=float, default=10.0,
-                       help='L1 penalty weight for zx latent (default: 50.0)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=125.0,
-                       help='L1 penalty weight for zay latent (default: 125.0)')
+                       help='L1 penalty weight for zx latent (default: 10.0)')
+    parser.add_argument('--l1_lambda_zay', type=float, default=25.0,
+                       help='L1 penalty weight for zay latent (default: 25.0)')
     parser.add_argument('--l1_lambda_za', type=float, default=10.0,
                        help='L1 penalty weight for za latent (default: 10.0)')
 
@@ -234,8 +234,8 @@ if __name__ == "__main__":
                        help='Weight for adversarial loss in AugmentedDANN (default: 0.2)')
 
     # IRM-specific parameters
-    parser.add_argument('--irm_penalty_weight', type=float, default=1e3,
-                       help='Weight for IRM invariance penalty (default: 1e3)')
+    parser.add_argument('--irm_penalty_weight', type=float, default=1e2,
+                       help='Weight for IRM invariance penalty (default: 1e2)')
     parser.add_argument('--irm_anneal_iters', type=int, default=500,
                        help='Number of iterations before applying IRM penalty (default: 500)')
 
@@ -879,14 +879,22 @@ if __name__ == "__main__":
 
         try:
             from core.information_theoretic_evaluation import (
-                MinimalInformationPartitionEvaluator,
-                evaluate_model
+                MinimalInformationPartitionEvaluator
             )
             from core.visualization.plot_information_theoretic import visualize_all
 
             # Create output directory for IT analysis
             it_output_dir = os.path.join(args.out, 'information_theoretic_analysis')
             os.makedirs(it_output_dir, exist_ok=True)
+
+            # CRITICAL FIX: Create a shuffled dataloader for IT evaluation
+            # The standard val_loader has shuffle=False, and the dataset is ordered by domain.
+            # This causes balanced_sample_for_visualization to only see domain 0 in its
+            # detection phase (first 20 batches), making IT metrics meaningless since
+            # I(z;D|Y) requires samples from multiple domains to measure domain information.
+            from torch.utils.data import DataLoader as ITDataLoader
+            it_eval_loader = ITDataLoader(val_dataset, batch_size=args.batch_size, shuffle=True)
+            print(f"📊 Created shuffled dataloader for IT evaluation (ensures domain diversity)")
 
             # Evaluate each trained model
             it_results = {}
@@ -911,15 +919,67 @@ if __name__ == "__main__":
                 print(f"{'='*60}")
 
                 try:
-                    # Run IT evaluation with optimized parameters for faster computation
-                    # 50 batches (~3.2k samples) and 10 bootstrap iterations
-                    # This provides 40x speedup while maintaining statistical validity
-                    results = evaluate_model(
+                    # Use balanced sampling to ensure domain diversity
+                    # This fixes the issue where unshuffled dataloaders only see one domain
+                    from core.utils import balanced_sample_for_visualization
+                    import numpy as np
+
+                    # Map model names to model types for feature extraction
+                    model_type_map = {
+                        'nvae': 'nvae',
+                        'diva': 'diva',
+                        'dann_augmented': 'dann_augmented'  # Use dedicated type for proper 3-space extraction
+                    }
+                    model_type = model_type_map.get(model_name, 'nvae')
+
+                    print(f"  Using balanced sampling for domain-diverse IT evaluation...")
+                    features_dict, labels_dict, sampling_stats = balanced_sample_for_visualization(
                         model=model,
-                        dataloader=val_loader,
+                        dataloader=it_eval_loader,  # Use shuffled loader for domain diversity
                         device=args.device,
-                        max_batches=50,      # Reduced from 200 (4x faster)
-                        n_bootstrap=10       # Reduced from 100 (10x faster)
+                        model_type=model_type,
+                        max_samples=5000,
+                        target_samples_per_combination=50,
+                        dataset_type="crmnist"
+                    )
+
+                    # Extract latents and convert to numpy
+                    z_y = features_dict['zy'].numpy() if features_dict['zy'] is not None else None
+                    z_d = features_dict['za'].numpy() if features_dict['za'] is not None else None
+                    z_dy = features_dict['zay'].numpy() if features_dict.get('zay') is not None else None
+                    z_x = features_dict['zx'].numpy() if features_dict['zx'] is not None else None
+
+                    # Extract labels - convert one-hot to indices if needed
+                    y_labels = labels_dict['y']
+                    if len(y_labels.shape) > 1 and y_labels.shape[1] > 1:
+                        y_labels = y_labels.argmax(dim=1)
+                    y_labels = y_labels.numpy()
+
+                    d_labels = labels_dict['r']  # rotation is domain
+                    if len(d_labels.shape) > 1 and d_labels.shape[1] > 1:
+                        d_labels = d_labels.argmax(dim=1)
+                    d_labels = d_labels.numpy()
+
+                    print(f"  Collected {len(y_labels)} balanced samples across {len(np.unique(d_labels))} domains")
+                    print(f"  Domain distribution: {dict(zip(*np.unique(d_labels, return_counts=True)))}")
+
+                    # Run IT evaluation with balanced samples
+                    # For CRMNIST, set max_dims=50 to avoid PCA on 32-dim latents
+                    evaluator = MinimalInformationPartitionEvaluator(
+                        n_neighbors=7,
+                        n_bootstrap=10,
+                        max_dims=50,
+                        pca_variance=0.95
+                    )
+
+                    results = evaluator.evaluate_latent_partition(
+                        z_y=z_y,
+                        z_d=z_d,
+                        z_dy=z_dy,
+                        z_x=z_x,
+                        y_labels=y_labels,
+                        d_labels=d_labels,
+                        compute_bootstrap=True
                     )
 
                     it_results[model_name.upper()] = results
@@ -928,7 +988,7 @@ if __name__ == "__main__":
                     model_it_dir = os.path.join(it_output_dir, model_name)
                     os.makedirs(model_it_dir, exist_ok=True)
 
-                    evaluator = MinimalInformationPartitionEvaluator()
+                    # Reuse evaluator from above for saving
                     evaluator.save_results(
                         results,
                         os.path.join(model_it_dir, 'it_results.json')
@@ -1053,7 +1113,7 @@ if __name__ == "__main__":
             print(f"\n💾 Results saved to: {results_file}")
 
             # Generate OOD latent space visualizations (separate from ID visualizations)
-            if model_type in ['nvae', 'diva'] and not args.skip_training:
+            if model_type in ['nvae', 'diva', 'dann_augmented'] and not args.skip_training:
                 print(f"\n📊 Generating OOD latent space visualization for {model_name}...")
                 ood_viz_path = os.path.join(ood_viz_dir, f'{model_name}_latent_spaces_ood.png')
                 try:
@@ -1062,7 +1122,7 @@ if __name__ == "__main__":
                         model=model,
                         dataloader=ood_test_loader,
                         device=args.device,
-                        type='crmnist',
+                        type=model_type,  # Use correct model type for feature extraction
                         save_path=ood_viz_path,
                         max_samples=750
                     )
