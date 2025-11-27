@@ -37,13 +37,13 @@ def visualize_disentanglement(model, dataloader, device, save_path=None, num_var
             # Extract individual latent components
             zy_base = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
             zx_base = z_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
-            za_base = z_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+            zd_base = z_loc[:, model.zd_index_range[0]:model.zd_index_range[1]]
             
             if model.diva:
-                zay_base = None
+                zdy_base = None
                 num_latent_spaces = 3
             else:
-                zay_base = z_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
+                zdy_base = z_loc[:, model.zdy_index_range[0]:model.zdy_index_range[1]]
                 num_latent_spaces = 4
         
         # Create figure for this example
@@ -80,13 +80,13 @@ def visualize_disentanglement(model, dataloader, device, save_path=None, num_var
             ('zy', zy_base, 'Label-Specific Latent Space (zy)\n'
              'Controls: Digit identity and shape\n'
              'Expected variations: Changes in digit appearance while preserving color/rotation'),
-            ('za', za_base, 'Domain-Specific Latent Space (za)\n'
+            ('zd', zd_base, 'Domain-Specific Latent Space (zd)\n'
              'Controls: Rotation angle and domain characteristics\n'
              'Expected variations: Changes in rotation while preserving digit identity'),
         ]
 
         if not model.diva:
-            latent_spaces.append(('zay', zay_base, 'Domain-Label Interaction Space (zay)\n'
+            latent_spaces.append(('zdy', zdy_base, 'Domain-Label Interaction Space (zdy)\n'
                                  'Controls: Interaction between digit identity and domain\n'
                                  'Expected variations: Combined digit-rotation interaction effects'))
 
@@ -104,13 +104,13 @@ def visualize_disentanglement(model, dataloader, device, save_path=None, num_var
             for col, varied_latent in enumerate(variations):
                 # Reconstruct image with varied latent
                 if space_name == 'zy':
-                    img_recon = model.px(varied_latent, zx_base, zay_base, za_base)
-                elif space_name == 'za':
-                    img_recon = model.px(zy_base, zx_base, zay_base, varied_latent)
-                elif space_name == 'zay':
-                    img_recon = model.px(zy_base, zx_base, varied_latent, za_base)
+                    img_recon = model.px(varied_latent, zx_base, zdy_base, zd_base)
+                elif space_name == 'zd':
+                    img_recon = model.px(zy_base, zx_base, zdy_base, varied_latent)
+                elif space_name == 'zdy':
+                    img_recon = model.px(zy_base, zx_base, varied_latent, zd_base)
                 elif space_name == 'zx':
-                    img_recon = model.px(zy_base, varied_latent, zay_base, za_base)
+                    img_recon = model.px(zy_base, varied_latent, zdy_base, zd_base)
                 
                 # Display the reconstructed image
                 img = img_recon[0].cpu().detach().permute(1, 2, 0).numpy()
@@ -226,8 +226,8 @@ def _create_summary_visualization(model, base_examples, device, save_path, num_v
             z_loc, _ = model.qz(x_base.unsqueeze(0))
             zy_base = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
             zx_base = z_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
-            za_base = z_loc[:, model.za_index_range[0]:model.za_index_range[1]]
-            zay_base = None if model.diva else z_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
+            zd_base = z_loc[:, model.zd_index_range[0]:model.zd_index_range[1]]
+            zdy_base = None if model.diva else z_loc[:, model.zdy_index_range[0]:model.zdy_index_range[1]]
         
         # Show original
         for col in range(num_variations):
@@ -240,9 +240,9 @@ def _create_summary_visualization(model, base_examples, device, save_path, num_v
         axes[base_row, center_col].axis('off')
         
         # Generate variations for each latent space
-        latent_spaces = [('zy', zy_base), ('za', za_base)]
+        latent_spaces = [('zy', zy_base), ('zd', zd_base)]
         if not model.diva:
-            latent_spaces.append(('zay', zay_base))
+            latent_spaces.append(('zdy', zdy_base))
         latent_spaces.append(('zx', zx_base))
         
         for space_idx, (space_name, base_latent) in enumerate(latent_spaces):
@@ -251,13 +251,13 @@ def _create_summary_visualization(model, base_examples, device, save_path, num_v
             
             for col, varied_latent in enumerate(variations):
                 if space_name == 'zy':
-                    img_recon = model.px(varied_latent, zx_base, zay_base, za_base)
-                elif space_name == 'za':
-                    img_recon = model.px(zy_base, zx_base, zay_base, varied_latent)
-                elif space_name == 'zay':
-                    img_recon = model.px(zy_base, zx_base, varied_latent, za_base)
+                    img_recon = model.px(varied_latent, zx_base, zdy_base, zd_base)
+                elif space_name == 'zd':
+                    img_recon = model.px(zy_base, zx_base, zdy_base, varied_latent)
+                elif space_name == 'zdy':
+                    img_recon = model.px(zy_base, zx_base, varied_latent, zd_base)
                 elif space_name == 'zx':
-                    img_recon = model.px(zy_base, varied_latent, zay_base, za_base)
+                    img_recon = model.px(zy_base, varied_latent, zdy_base, zd_base)
                 
                 img = img_recon[0].cpu().detach().permute(1, 2, 0).numpy()
                 img = np.clip(img, 0, 1)
@@ -303,18 +303,18 @@ def visualize_latent_interpolation(model, dataloader, device, save_path=None, nu
         # Extract components
         zy1 = z1_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
         zx1 = z1_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
-        za1 = z1_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+        zd1 = z1_loc[:, model.zd_index_range[0]:model.zd_index_range[1]]
         
         zy2 = z2_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
         zx2 = z2_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
-        za2 = z2_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+        zd2 = z2_loc[:, model.zd_index_range[0]:model.zd_index_range[1]]
         
         if model.diva:
-            zay1 = zay2 = None
+            zdy1 = zdy2 = None
             num_spaces = 3
         else:
-            zay1 = z1_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
-            zay2 = z2_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
+            zdy1 = z1_loc[:, model.zdy_index_range[0]:model.zdy_index_range[1]]
+            zdy2 = z2_loc[:, model.zdy_index_range[0]:model.zdy_index_range[1]]
             num_spaces = 4
         
         # Create interpolation steps
@@ -336,12 +336,12 @@ def visualize_latent_interpolation(model, dataloader, device, save_path=None, nu
         axes[0, -1].set_title('Target', fontsize=10)
         
         # Interpolate each latent space separately
-        space_names = ['zy', 'za']
-        space_pairs = [(zy1, zy2), (za1, za2)]
+        space_names = ['zy', 'zd']
+        space_pairs = [(zy1, zy2), (zd1, zd2)]
         
         if not model.diva:
-            space_names.append('zay')
-            space_pairs.append((zay1, zay2))
+            space_names.append('zdy')
+            space_pairs.append((zdy1, zdy2))
         
         space_names.append('zx')
         space_pairs.append((zx1, zx2))
@@ -353,16 +353,16 @@ def visualize_latent_interpolation(model, dataloader, device, save_path=None, nu
                 # Interpolate this space, keep others from source
                 if space_name == 'zy':
                     zy_interp = (1 - alpha) * zy1 + alpha * zy2
-                    img_recon = model.px(zy_interp, zx1, zay1, za1)
-                elif space_name == 'za':
-                    za_interp = (1 - alpha) * za1 + alpha * za2
-                    img_recon = model.px(zy1, zx1, zay1, za_interp)
-                elif space_name == 'zay':
-                    zay_interp = (1 - alpha) * zay1 + alpha * zay2
-                    img_recon = model.px(zy1, zx1, zay_interp, za1)
+                    img_recon = model.px(zy_interp, zx1, zdy1, zd1)
+                elif space_name == 'zd':
+                    zd_interp = (1 - alpha) * zd1 + alpha * zd2
+                    img_recon = model.px(zy1, zx1, zdy1, zd_interp)
+                elif space_name == 'zdy':
+                    zdy_interp = (1 - alpha) * zdy1 + alpha * zdy2
+                    img_recon = model.px(zy1, zx1, zdy_interp, zd1)
                 elif space_name == 'zx':
                     zx_interp = (1 - alpha) * zx1 + alpha * zx2
-                    img_recon = model.px(zy1, zx_interp, zay1, za1)
+                    img_recon = model.px(zy1, zx_interp, zdy1, zd1)
                 
                 img = img_recon[0].cpu().detach().permute(1, 2, 0).numpy()
                 img = np.clip(img, 0, 1)
@@ -396,14 +396,14 @@ def visualize_factor_traversal(model, device, save_path=None, num_steps=7):
         # Sample from standard normal for all latent spaces
         zy_base = torch.randn(1, model.zy_dim).to(device)
         zx_base = torch.randn(1, model.zx_dim).to(device)
-        za_base = torch.randn(1, model.za_dim).to(device)
+        zd_base = torch.randn(1, model.zd_dim).to(device)
         
         if model.diva:
-            zay_base = None
-            latent_spaces = [('zy', zy_base), ('za', za_base), ('zx', zx_base)]
+            zdy_base = None
+            latent_spaces = [('zy', zy_base), ('zd', zd_base), ('zx', zx_base)]
         else:
-            zay_base = torch.randn(1, model.zay_dim).to(device)
-            latent_spaces = [('zy', zy_base), ('za', za_base), ('zay', zay_base), ('zx', zx_base)]
+            zdy_base = torch.randn(1, model.zdy_dim).to(device)
+            latent_spaces = [('zy', zy_base), ('zd', zd_base), ('zdy', zdy_base), ('zx', zx_base)]
         
         # For each latent space, show traversal of first few dimensions
         max_dims_per_space = 3  # Show first 3 dimensions of each space
@@ -426,13 +426,13 @@ def visualize_factor_traversal(model, device, save_path=None, num_steps=7):
                     
                     # Generate image
                     if space_name == 'zy':
-                        img_recon = model.px(modified_latent, zx_base, zay_base, za_base)
-                    elif space_name == 'za':
-                        img_recon = model.px(zy_base, zx_base, zay_base, modified_latent)
-                    elif space_name == 'zay':
-                        img_recon = model.px(zy_base, zx_base, modified_latent, za_base)
+                        img_recon = model.px(modified_latent, zx_base, zdy_base, zd_base)
+                    elif space_name == 'zd':
+                        img_recon = model.px(zy_base, zx_base, zdy_base, modified_latent)
+                    elif space_name == 'zdy':
+                        img_recon = model.px(zy_base, zx_base, modified_latent, zd_base)
                     elif space_name == 'zx':
-                        img_recon = model.px(zy_base, modified_latent, zay_base, za_base)
+                        img_recon = model.px(zy_base, modified_latent, zdy_base, zd_base)
                     
                     img = img_recon[0].cpu().detach().permute(1, 2, 0).numpy()
                     img = np.clip(img, 0, 1)

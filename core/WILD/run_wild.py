@@ -108,8 +108,8 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
                 class_map=None,
                 zy_dim=args.zy_dim,
                 zx_dim=args.zx_dim,
-                zay_dim=args.zay_dim,
-                za_dim=args.za_dim,
+                zdy_dim=args.zdy_dim,
+                zd_dim=args.zd_dim,
                 y_dim=spec_data['num_y_classes'],
                 a_dim=spec_data['num_r_classes'],
                 beta_1=args.beta_1,
@@ -129,8 +129,8 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
                 class_map=None,
                 zy_dim=args.zy_dim,
                 zx_dim=args.zx_dim,
-                zay_dim=args.zay_dim,
-                za_dim=args.za_dim,
+                zdy_dim=args.zdy_dim,
+                zd_dim=args.zd_dim,
                 y_dim=spec_data['num_y_classes'],
                 a_dim=spec_data['num_r_classes'],
                 beta_1=args.beta_1,
@@ -146,12 +146,12 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
             )
 
         elif model_name == 'dann':
-            z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
+            z_dim = args.zy_dim + args.zd_dim + args.zx_dim + args.zdy_dim
             model = DANN(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'wild')
 
         elif model_name == 'dann_augmented':
             # Redistribute dimensions for AugmentedDANN to match total of other models
-            total_dim = args.zy_dim + args.zx_dim + args.zay_dim + args.za_dim
+            total_dim = args.zy_dim + args.zx_dim + args.zdy_dim + args.zd_dim
             zy_aug = total_dim // 3 + (1 if total_dim % 3 > 0 else 0)
             zd_aug = total_dim // 3 + (1 if total_dim % 3 > 1 else 0)
             zdy_aug = total_dim // 3
@@ -172,7 +172,7 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
             )
 
         elif model_name == 'irm':
-            z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
+            z_dim = args.zy_dim + args.zd_dim + args.zx_dim + args.zdy_dim
             model = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'wild',
                        penalty_weight=1e4, penalty_anneal_iters=500)
 
@@ -258,8 +258,8 @@ def run_experiment(dataset, args):
         'recon_weight': args.recon_weight,
         'zy_dim': args.zy_dim,
         'zx_dim': args.zx_dim,
-        'zay_dim': args.zay_dim,
-        'za_dim': args.za_dim,
+        'zdy_dim': args.zdy_dim,
+        'zd_dim': args.zd_dim,
         'y_dim': num_classes,
         'a_dim': num_domains,
         'beta_1': args.beta_1,
@@ -373,8 +373,8 @@ def get_args():
     # Model-specific arguments
     parser.add_argument('--zy_dim', type=int, default=128, help='Latent dimension for zy (VAE only)')
     parser.add_argument('--zx_dim', type=int, default=128, help='Latent dimension for zx (VAE only)')
-    parser.add_argument('--zay_dim', type=int, default=128, help='Latent dimension for zay (VAE only)')
-    parser.add_argument('--za_dim', type=int, default=128, help='Latent dimension for za (VAE only)')
+    parser.add_argument('--zdy_dim', type=int, default=128, help='Latent dimension for zdy (VAE only)')
+    parser.add_argument('--zd_dim', type=int, default=128, help='Latent dimension for zd (VAE only)')
     parser.add_argument('--beta_1', type=float, default=2.0, help='Beta 1 for VAE loss')
     parser.add_argument('--beta_2', type=float, default=2.0, help='Beta 2 for VAE loss')
     parser.add_argument('--beta_3', type=float, default=2.0, help='Beta 3 for VAE loss')
@@ -401,13 +401,13 @@ def get_args():
     
     # Staged training arguments
     parser.add_argument('--staged_training', action='store_true', help='Use staged training for better disentanglement')
-    parser.add_argument('--stage1_epochs', type=int, default=None, help='Number of epochs for stage 1 (za, zy only)')
-    parser.add_argument('--stage2_epochs', type=int, default=None, help='Number of epochs for stage 2 (gradual zay)')
+    parser.add_argument('--stage1_epochs', type=int, default=None, help='Number of epochs for stage 1 (zd, zy only)')
+    parser.add_argument('--stage2_epochs', type=int, default=None, help='Number of epochs for stage 2 (gradual zdy)')
     parser.add_argument('--use_independence_penalty', action='store_true', default=True, help='Use independence penalty in stage 2')
     parser.add_argument('--no_independence_penalty', dest='use_independence_penalty', action='store_false', help='Disable independence penalty in stage 2')
     parser.add_argument('--independence_penalty', type=float, default=10.0, help='Weight for independence penalty in stage 2')
-    parser.add_argument('--use_zay_annealing', action='store_true', default=True, help='Enable zay capacity annealing in staged training (default: True)')
-    parser.add_argument('--no_zay_annealing', dest='use_zay_annealing', action='store_false', help='Disable zay capacity annealing in staged training')
+    parser.add_argument('--use_zdy_annealing', action='store_true', default=True, help='Enable zdy capacity annealing in staged training (default: True)')
+    parser.add_argument('--no_zdy_annealing', dest='use_zdy_annealing', action='store_false', help='Disable zdy capacity annealing in staged training')
     parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
 
     # L1 sparsity penalty arguments
@@ -415,10 +415,10 @@ def get_args():
                        help='L1 penalty weight for zy latent (default: 10.0)')
     parser.add_argument('--l1_lambda_zx', type=float, default=10.0,
                        help='L1 penalty weight for zx latent (default: 10.0)')
-    parser.add_argument('--l1_lambda_zay', type=float, default=50.0,
-                       help='L1 penalty weight for zay latent (default: 50.0)')
-    parser.add_argument('--l1_lambda_za', type=float, default=10.0,
-                       help='L1 penalty weight for za latent (default: 10.0)')
+    parser.add_argument('--l1_lambda_zdy', type=float, default=50.0,
+                       help='L1 penalty weight for zdy latent (default: 50.0)')
+    parser.add_argument('--l1_lambda_zd', type=float, default=10.0,
+                       help='L1 penalty weight for zd latent (default: 10.0)')
 
     # AugmentedDANN-specific parameters
     parser.add_argument('--lambda_reversal', type=float, default=1.0,
@@ -435,8 +435,8 @@ def initialize_model(args, num_classes, num_domains):
     model = VAE(class_map=None,
                 zy_dim=args.zy_dim,
                 zx_dim=args.zx_dim,
-                zay_dim=args.zay_dim,
-                za_dim=args.za_dim,
+                zdy_dim=args.zdy_dim,
+                zd_dim=args.zd_dim,
                 y_dim=num_classes,
                 a_dim=num_domains,
                 beta_1=args.beta_1,
@@ -451,8 +451,8 @@ def initialize_model(args, num_classes, num_domains):
                 model=args.model,
                 l1_lambda_zy=args.l1_lambda_zy,
                 l1_lambda_zx=args.l1_lambda_zx,
-                l1_lambda_zay=args.l1_lambda_zay,
-                l1_lambda_za=args.l1_lambda_za)
+                l1_lambda_zdy=args.l1_lambda_zdy,
+                l1_lambda_zd=args.l1_lambda_zd)
 
     return model
 
@@ -563,8 +563,8 @@ if __name__ == "__main__":
     model_params = {
         'zy_dim': args.zy_dim,
         'zx_dim': args.zx_dim,
-        'zay_dim': args.zay_dim,
-        'za_dim': args.za_dim,
+        'zdy_dim': args.zdy_dim,
+        'zd_dim': args.zd_dim,
         'beta_1': args.beta_1,
         'beta_2': args.beta_2,
         'beta_3': args.beta_3,

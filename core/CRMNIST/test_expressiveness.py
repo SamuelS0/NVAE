@@ -52,14 +52,14 @@ def load_model(model_path, config_path, model_params_path, device):
         class_map=class_map,
         zy_dim=model_params['zy_dim'],
         zx_dim=model_params['zx_dim'], 
-        zay_dim=model_params['zay_dim'],
-        za_dim=model_params['za_dim'],
+        zdy_dim=model_params['zdy_dim'],
+        zd_dim=model_params['zd_dim'],
         y_dim=num_y_classes,
         a_dim=num_r_classes,
-        beta_1=model_params['beta_1'],
-        beta_2=model_params['beta_2'],
-        beta_3=model_params['beta_3'],
-        beta_4=model_params['beta_4'],
+        beta_zy=model_params['beta_zy'],
+        beta_zx=model_params['beta_zx'],
+        beta_zdy=model_params['beta_zdy'],
+        beta_zd=model_params['beta_zd'],
         diva=model_params.get('diva', False)
     )
     
@@ -93,7 +93,7 @@ def main():
     parser.add_argument('--cuda', action='store_true', default=True,
                        help='Use CUDA if available')
     parser.add_argument('--diva', action='store_true', default=False,
-                       help='Model is a DIVA variant (no zay component)')
+                       help='Model is a DIVA variant (no zdy component)')
     
     args = parser.parse_args()
     
@@ -157,15 +157,15 @@ def main():
     print("\n📋 SUMMARY:")
     print("="*50)
     
-    if 'domain_za_alone' in results and 'domain_za_zay' in results:
-        domain_improvement_val = results['domain_za_zay']['val_acc'] - results['domain_za_alone']['val_acc']
-        domain_improvement_test = results['domain_za_zay']['test_acc'] - results['domain_za_alone']['test_acc']
+    if 'domain_zd_alone' in results and 'domain_zd_zdy' in results:
+        domain_improvement_val = results['domain_zd_zdy']['val_acc'] - results['domain_zd_alone']['val_acc']
+        domain_improvement_test = results['domain_zd_zdy']['test_acc'] - results['domain_zd_alone']['test_acc']
         print(f"Domain classification improvement (Val):  +{domain_improvement_val:.4f} ({domain_improvement_val*100:.2f}%)")
         print(f"Domain classification improvement (Test): +{domain_improvement_test:.4f} ({domain_improvement_test*100:.2f}%)")
     
-    if 'label_zy_alone' in results and 'label_zy_zay' in results:
-        label_improvement_val = results['label_zy_zay']['val_acc'] - results['label_zy_alone']['val_acc']
-        label_improvement_test = results['label_zy_zay']['test_acc'] - results['label_zy_alone']['test_acc']
+    if 'label_zy_alone' in results and 'label_zy_zdy' in results:
+        label_improvement_val = results['label_zy_zdy']['val_acc'] - results['label_zy_alone']['val_acc']
+        label_improvement_test = results['label_zy_zdy']['test_acc'] - results['label_zy_alone']['test_acc']
         print(f"Label classification improvement (Val):   +{label_improvement_val:.4f} ({label_improvement_val*100:.2f}%)")
         print(f"Label classification improvement (Test):  +{label_improvement_test:.4f} ({label_improvement_test*100:.2f}%)")
     

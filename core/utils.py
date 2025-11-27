@@ -140,13 +140,13 @@ def sample_nvae(model, dataloader, num_samples, device):
         device: torch device
 
     Returns:
-        zy_list, za_list, zay_list, zx_list: Lists of latent vectors
+        zy_list, zd_list, zdy_list, zx_list: Lists of latent vectors
         y_list: List of digit labels
         domain_dict: Dictionary of domain labels
         labels_dict: Dictionary of domain label names
     """
     model.eval()
-    zy_list, za_list, zay_list, zx_list = [], [], [], []
+    zy_list, zd_list, zdy_list, zx_list = [], [], [], []
     y_list = []
     domain_dict = {"color": [], 'domain': []}
     labels_dict = {
@@ -219,13 +219,13 @@ def sample_nvae(model, dataloader, num_samples, device):
                 z_loc, _ = model.qz(x_batch)
                 zy = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
                 zx = z_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
-                zay = z_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
-                za = z_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+                zdy = z_loc[:, model.zdy_index_range[0]:model.zdy_index_range[1]]
+                zd = z_loc[:, model.zd_index_range[0]:model.zd_index_range[1]]
                 
                 # Store latent vectors and labels
                 zy_list.append(zy.cpu())
-                za_list.append(za.cpu())
-                zay_list.append(zay.cpu())
+                zd_list.append(zd.cpu())
+                zdy_list.append(zdy.cpu())
                 zx_list.append(zx.cpu())
                 y_list.append(y_batch.cpu())
                 domain_dict["color"].append(c_batch.cpu())
@@ -284,12 +284,12 @@ def sample_nvae(model, dataloader, num_samples, device):
     for domain, count in domain_counts.items():
         print(f"{labels_dict['domain'][domain]}: {count} samples")
     
-    return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
+    return zy_list, zd_list, zdy_list, zx_list, y_list, domain_dict, labels_dict
 
 def sample_diva(model, dataloader, num_samples, device):
     """
     Sample data from DIVA model and collect domain information.
-    DIVA is similar to NVAE but doesn't have a zay latent space.
+    DIVA is similar to NVAE but doesn't have a zdy latent space.
     
     Args:
         model: DIVA model
@@ -298,13 +298,13 @@ def sample_diva(model, dataloader, num_samples, device):
         device: torch device
     
     Returns:
-        zy_list, za_list, zay_list, zx_list: Lists of latent vectors
+        zy_list, zd_list, zdy_list, zx_list: Lists of latent vectors
         y_list: List of digit labels
         domain_dict: Dictionary of domain labels
         labels_dict: Dictionary of domain label names
     """
     model.eval()
-    zy_list, za_list, zx_list = [], [], []
+    zy_list, zd_list, zx_list = [], [], []
     y_list = []
     domain_dict = {"color": [], 'domain': []}
     labels_dict = {
@@ -377,11 +377,11 @@ def sample_diva(model, dataloader, num_samples, device):
                 z_loc, _ = model.qz(x_batch)
                 zy = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
                 zx = z_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
-                za = z_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+                zd = z_loc[:, model.zd_index_range[0]:model.zd_index_range[1]]
                 
                 # Store latent vectors and labels
                 zy_list.append(zy.cpu())
-                za_list.append(za.cpu())
+                zd_list.append(zd.cpu())
                 zx_list.append(zx.cpu())
                 y_list.append(y_batch.cpu())
                 domain_dict["color"].append(c_batch.cpu())
@@ -440,8 +440,8 @@ def sample_diva(model, dataloader, num_samples, device):
     for domain, count in domain_counts.items():
         print(f"{labels_dict['domain'][domain]}: {count} samples")
     
-    # Return None for zay_list since DIVA doesn't have it
-    return zy_list, za_list, None, zx_list, y_list, domain_dict, labels_dict
+    # Return None for zdy_list since DIVA doesn't have it
+    return zy_list, zd_list, None, zx_list, y_list, domain_dict, labels_dict
 
 def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
     """
@@ -455,7 +455,7 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
         model_variant: 'dann' or 'dann_augmented' (affects progress bar description only)
 
     Returns:
-        zy_list, za_list, zay_list, zx_list: Lists of latent vectors
+        zy_list, zd_list, zdy_list, zx_list: Lists of latent vectors
         y_list: List of digit labels
         domain_dict: Dictionary of domain labels
         labels_dict: Dictionary of domain label names
@@ -605,8 +605,8 @@ def sample_dann(model, dataloader, num_samples, device, model_variant='dann'):
     for domain, count in domain_counts.items():
         print(f"{labels_dict['domain'][domain]}: {count} samples")
     
-    # Return in the expected format: zy, za, zay, zx
-    # For DANN: zy=zy, za=zd, zay=zdy, zx=zd (domain features)
+    # Return in the expected format: zy, zd, zdy, zx
+    # For DANN: zy=zy, zd=zd, zdy=zdy, zx=zd (domain features)
     return zy_list, zd_list, zdy_list, zd_list, y_list, domain_dict, labels_dict
 
 def sample_wild(model, dataloader, max_samples=750, device=None):
@@ -625,7 +625,7 @@ def sample_wild(model, dataloader, max_samples=750, device=None):
     model.eval()
     
     # Initialize lists to store latent vectors and labels
-    zy_list, za_list, zay_list, zx_list = [], [], [], []
+    zy_list, zd_list, zdy_list, zx_list = [], [], [], []
     y_list = []
     domain_dict = {"hospital": []}
     labels_dict = {"label": [], "hospital": []}  # "label" for class (Normal/Tumor), not "digit"
@@ -687,16 +687,16 @@ def sample_wild(model, dataloader, max_samples=750, device=None):
                 zy = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
                 zx = z_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
                 if model.diva:
-                    zay = None
+                    zdy = None
                 else:
-                    zay = z_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
-                za = z_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+                    zdy = z_loc[:, model.zdy_index_range[0]:model.zdy_index_range[1]]
+                zd = z_loc[:, model.zd_index_range[0]:model.zd_index_range[1]]
                 
                 # Move to CPU and store
                 zy_list.append(zy.cpu())
-                za_list.append(za.cpu())
+                zd_list.append(zd.cpu())
                 if not model.diva:
-                    zay_list.append(zay.cpu())
+                    zdy_list.append(zdy.cpu())
                 zx_list.append(zx.cpu())
                 y_list.append(y_batch.cpu())
                 
@@ -735,12 +735,12 @@ def sample_wild(model, dataloader, max_samples=750, device=None):
     else:
         print("No samples collected")
     
-    return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
+    return zy_list, zd_list, zdy_list, zx_list, y_list, domain_dict, labels_dict
 
 def sample_crmnist(model, dataloader, num_samples, device):
     """
     Sample data from CRMNIST model and collect domain information.
-    Handles both NVAE and DIVA models (DIVA doesn't have zay latent space).
+    Handles both NVAE and DIVA models (DIVA doesn't have zdy latent space).
 
     Args:
         model: CRMNIST VAE model (NVAE or DIVA)
@@ -749,13 +749,13 @@ def sample_crmnist(model, dataloader, num_samples, device):
         device: torch device
 
     Returns:
-        zy_list, za_list, zay_list, zx_list: Lists of latent vectors (zay_list is dummy for DIVA)
+        zy_list, zd_list, zdy_list, zx_list: Lists of latent vectors (zdy_list is dummy for DIVA)
         y_list: List of digit labels
         domain_dict: Dictionary of domain labels
         labels_dict: Dictionary of domain label names
     """
     model.eval()
-    zy_list, za_list, zay_list, zx_list = [], [], [], []
+    zy_list, zd_list, zdy_list, zx_list = [], [], [], []
     y_list = []
     domain_dict = {"color": [], 'domain': []}
     labels_dict = {
@@ -834,19 +834,19 @@ def sample_crmnist(model, dataloader, num_samples, device):
                 z_loc, _ = model.qz(x_batch)
                 zy = z_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
                 zx = z_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
-                za = z_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+                zd = z_loc[:, model.zd_index_range[0]:model.zd_index_range[1]]
                 
-                # Handle zay - DIVA models don't have it
+                # Handle zdy - DIVA models don't have it
                 if is_diva:
                     # For DIVA, create empty placeholder to maintain consistent return structure
-                    zay = torch.zeros(zy.shape[0], 1, device=zy.device)
+                    zdy = torch.zeros(zy.shape[0], 1, device=zy.device)
                 else:
-                    zay = z_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
+                    zdy = z_loc[:, model.zdy_index_range[0]:model.zdy_index_range[1]]
                 
                 # Store latent vectors and labels
                 zy_list.append(zy.cpu())
-                za_list.append(za.cpu())
-                zay_list.append(zay.cpu())
+                zd_list.append(zd.cpu())
+                zdy_list.append(zdy.cpu())
                 zx_list.append(zx.cpu())
                 y_list.append(y_batch.cpu())
                 domain_dict["color"].append(c_batch.cpu())
@@ -905,14 +905,14 @@ def sample_crmnist(model, dataloader, num_samples, device):
     for domain, count in domain_counts.items():
         print(f"{labels_dict['domain'][domain]}: {count} samples")
     
-    return zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict
+    return zy_list, zd_list, zdy_list, zx_list, y_list, domain_dict, labels_dict
 
 def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=None, max_samples=750, epoch=None, total_epochs=None):
     """
     Unified function to visualize latent spaces using t-SNE with balanced sampling.
 
     This function works for all model types (NVAE, DIVA, DANN, WILD, CRMNIST) and
-    automatically handles differences like DIVA not having a zay latent space.
+    automatically handles differences like DIVA not having a zdy latent space.
 
     For CRMNIST/NVAE/DIVA:
     - Uses balanced sampling to collect equal samples per (digit × color × rotation) combination
@@ -920,7 +920,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     - Automatically detects if model is in DIVA mode
 
     Args:
-        model: Model with latent spaces (zy, zx, [zay], za) - zay optional for DIVA
+        model: Model with latent spaces (zy, zx, [zdy], zd) - zdy optional for DIVA
         dataloader: DataLoader containing (x, y, *domains) tuples
         device: torch device
         type: Model type ("nvae", "diva", "dann", "wild", "crmnist")
@@ -937,23 +937,23 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     
     # Get data and domain information from helper functions
     if type == "nvae":
-        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_nvae(model, dataloader, max_samples, device)
+        zy_list, zd_list, zdy_list, zx_list, y_list, domain_dict, labels_dict = sample_nvae(model, dataloader, max_samples, device)
     elif type == "diva":
-        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_diva(model, dataloader, max_samples, device)
+        zy_list, zd_list, zdy_list, zx_list, y_list, domain_dict, labels_dict = sample_diva(model, dataloader, max_samples, device)
     elif type == "dann":
-        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_dann(model, dataloader, max_samples, device, 'dann')
+        zy_list, zd_list, zdy_list, zx_list, y_list, domain_dict, labels_dict = sample_dann(model, dataloader, max_samples, device, 'dann')
     elif type == "dann_augmented":
-        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_dann(model, dataloader, max_samples, device, 'dann_augmented')
+        zy_list, zd_list, zdy_list, zx_list, y_list, domain_dict, labels_dict = sample_dann(model, dataloader, max_samples, device, 'dann_augmented')
     elif type == "wild":
-        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_wild(model, dataloader, max_samples, device)
+        zy_list, zd_list, zdy_list, zx_list, y_list, domain_dict, labels_dict = sample_wild(model, dataloader, max_samples, device)
     elif type == "crmnist":
-        zy_list, za_list, zay_list, zx_list, y_list, domain_dict, labels_dict = sample_crmnist(model, dataloader, max_samples, device)
+        zy_list, zd_list, zdy_list, zx_list, y_list, domain_dict, labels_dict = sample_crmnist(model, dataloader, max_samples, device)
     else:  # Default to NVAE
         raise ValueError(f"Invalid model type: {type}")
     
     # Concatenate tensors
     zy = torch.cat(zy_list, dim=0)
-    za = torch.cat(za_list, dim=0)
+    zd = torch.cat(zd_list, dim=0)
     zx = torch.cat(zx_list, dim=0)
     y_labels = torch.cat(y_list, dim=0)
     
@@ -1008,7 +1008,7 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     
     # Convert to numpy
     zy = zy.numpy()
-    za = za.numpy()
+    zd = zd.numpy()
     zx = zx.numpy()
     y_labels = y_labels.numpy()
     
@@ -1049,26 +1049,26 @@ def visualize_latent_spaces(model, dataloader, device, type = "nvae", save_path=
     
     # Handle different model architectures
     if type == "dann" or type == "dann_augmented":
-        # For DANN/AugmentedDANN: zy=class-specific, za=domain-specific, zay=interaction
-        if zay_list[0] is not None:
-            zay = torch.cat(zay_list, dim=0).numpy()
-            latent_spaces.append((zay, 'Domain-Class Interaction (zdy)'))
+        # For DANN/AugmentedDANN: zy=class-specific, zd=domain-specific, zdy=interaction
+        if zdy_list[0] is not None:
+            zdy = torch.cat(zdy_list, dim=0).numpy()
+            latent_spaces.append((zdy, 'Domain-Class Interaction (zdy)'))
         latent_spaces.extend([
-            (za, 'Domain-specific (zd)'),
-            (zx, 'Combined Features (zd)')  # zx is same as za for DANN
+            (zd, 'Domain-specific (zd)'),
+            (zx, 'Combined Features (zd)')  # zx is same as zd for DANN
         ])
     elif not (hasattr(model, 'diva') and model.diva):
         # For NVAE (non-DIVA mode)
-        zay = torch.cat(zay_list, dim=0).numpy()
-        latent_spaces.append((zay, 'Domain-Label (zay)'))
+        zdy = torch.cat(zdy_list, dim=0).numpy()
+        latent_spaces.append((zdy, 'Domain-Label (zdy)'))
         latent_spaces.extend([
-            (za, 'Domain-specific (za)'),
+            (zd, 'Domain-specific (zd)'),
             (zx, 'Residual (zx)')
         ])
     else:
         # For DIVA mode
         latent_spaces.extend([
-            (za, 'Domain-specific (za)'),
+            (zd, 'Domain-specific (zd)'),
             (zx, 'Residual (zx)')
         ])
     
@@ -1225,7 +1225,7 @@ def get_model_name(args, model_type=None):
         raise ValueError("Model type must be specified")
 
     # Create parameter string
-    param_str = f"alpha1-{args.alpha_1}_alpha2-{args.alpha_2}_zy{args.zy_dim}_zx{args.zx_dim}_zay{args.zay_dim}_za{args.za_dim}_b1-{args.beta_1}_b2-{args.beta_2}_b3-{args.beta_3}_b4-{args.beta_4}_ep{args.epochs}_bs{args.batch_size}_lr{args.learning_rate}"
+    param_str = f"alpha1-{args.alpha_1}_alpha2-{args.alpha_2}_zy{args.zy_dim}_zx{args.zx_dim}_zdy{args.zdy_dim}_zd{args.zd_dim}_b1-{args.beta_1}_b2-{args.beta_2}_b3-{args.beta_3}_b4-{args.beta_4}_ep{args.epochs}_bs{args.batch_size}_lr{args.learning_rate}"
 
     # Add timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1312,7 +1312,7 @@ def balanced_sample_for_visualization(model, dataloader, device, model_type="gen
 
     # Initialize storage
     features_dict = {
-        'zy': [], 'za': [], 'zay': [], 'zx': [], 'features': []
+        'zy': [], 'zd': [], 'zdy': [], 'zx': [], 'features': []
     }
     labels_dict = {
         'y': [], 'c': [], 'r': []
@@ -1590,24 +1590,24 @@ def _extract_features_by_model_type(model, model_type, x, y, c, r):
         Dictionary with extracted features for different latent spaces
     """
     features = {
-        'zy': None, 'za': None, 'zay': None, 'zx': None, 'features': None
+        'zy': None, 'zd': None, 'zdy': None, 'zx': None, 'features': None
     }
     
     if model_type == "nvae":
         # NVAE has separate latent spaces
-        x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model.forward(y, x, r)
+        x_recon, z, qz, pzy, pzx, pzd, pzdy, y_hat, a_hat, zy, zx, zdy, zd = model.forward(y, x, r)
         features['zy'] = zy
-        features['za'] = za
-        features['zay'] = zay
+        features['zd'] = zd
+        features['zdy'] = zdy
         features['zx'] = zx
         features['features'] = z  # Full latent vector
-        
+
     elif model_type == "diva":
-        # DIVA is similar to NVAE but without zay
-        x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = model.forward(y, x, r)
+        # DIVA is similar to NVAE but without zdy
+        x_recon, z, qz, pzy, pzx, pzd, pzdy, y_hat, a_hat, zy, zx, zdy, zd = model.forward(y, x, r)
         features['zy'] = zy
-        features['za'] = za
-        features['zay'] = None  # DIVA doesn't have zay
+        features['zd'] = zd
+        features['zdy'] = None  # DIVA doesn't have zdy
         features['zx'] = zx
         features['features'] = z
         
@@ -1619,11 +1619,11 @@ def _extract_features_by_model_type(model, model_type, x, y, c, r):
             # Fallback: use forward pass and extract features
             y_logits, domain_predictions = model.forward(x, y, r)
             single_features = model.feature_extractor(x)
-        
+
         # Use the same features for all latent spaces in visualization
         features['zy'] = single_features
-        features['za'] = single_features
-        features['zay'] = single_features
+        features['zd'] = single_features
+        features['zdy'] = single_features
         features['zx'] = single_features
         features['features'] = single_features
 
@@ -1632,8 +1632,8 @@ def _extract_features_by_model_type(model, model_type, x, y, c, r):
         if hasattr(model, 'extract_features'):
             zy, zd, zdy = model.extract_features(x)
             features['zy'] = zy
-            features['za'] = zd      # zd maps to za (domain latent)
-            features['zay'] = zdy    # zdy maps to zay (interaction latent)
+            features['zd'] = zd      # Domain latent
+            features['zdy'] = zdy    # Interaction latent
             features['zx'] = zd      # No separate zx in AugmentedDANN, use zd as placeholder
             features['features'] = torch.cat([zy, zd, zdy], dim=1)
         else:
@@ -1645,10 +1645,10 @@ def _extract_features_by_model_type(model, model_type, x, y, c, r):
             single_features = model.get_features(x)
         else:
             logits, single_features = model.forward(x, y, r)
-        
+
         features['zy'] = single_features
-        features['za'] = single_features
-        features['zay'] = single_features
+        features['zd'] = single_features
+        features['zdy'] = single_features
         features['zx'] = single_features
         features['features'] = single_features
         
@@ -1694,7 +1694,7 @@ def crmnist_color_aware_sampling(model, dataset, device, model_type="nvae",
     
     # Initialize storage
     features_dict = {
-        'zy': [], 'za': [], 'zay': [], 'zx': [], 'features': []
+        'zy': [], 'zd': [], 'zdy': [], 'zx': [], 'features': []
     }
     labels_dict = {
         'y': [], 'c': [], 'r': []

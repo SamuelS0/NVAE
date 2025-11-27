@@ -96,9 +96,9 @@ class ConditionalDiscriminator(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.LeakyReLU(0.2),
+            nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.LeakyReLU(0.2),
+            nn.ReLU(),
             nn.Linear(hidden_dim, output_dim)
         )
 
@@ -129,14 +129,14 @@ class AugmentedDANN(NModule):
         stride=1,
         padding=0,
         lambda_reversal=1.0,
-        sparsity_weight=0.05,
-        sparsity_weight_other=1.0,
+        sparsity_weight_zdy=2.0,
+        sparsity_weight_zy_zd=1.0,
         alpha_y=1.0,
         alpha_d=1.0,
         beta_adv=0.15,
         image_size=28,  # Image dimensions: 28 for CRMNIST, 96 for WILD
         use_conditional_adversarial=True,  # Use conditional adversarial for I(Z_Y;D|Y)=0 and I(Z_D;Y|D)=0
-        lambda_schedule_gamma=10.0  # Controls speed of adversarial ramp-up (lower = slower). Default DANN paper: 10
+        lambda_schedule_gamma=5.0  # Controls speed of adversarial ramp-up (lower = slower). DANN paper: 10, default: 5
     ):
         super().__init__()
 
@@ -152,10 +152,10 @@ class AugmentedDANN(NModule):
         self.image_size = image_size
 
         # Training parameters
-        self.sparsity_weight_zdy_target = sparsity_weight  # Target weight for zdy sparsity (default 10.0)
+        self.sparsity_weight_zdy_target = sparsity_weight_zdy  # Target weight for zdy sparsity (default 2.0)
         self.sparsity_weight_zdy_current = 0.0  # Current sparsity weight for zdy (increases from 0 to target)
-        self.sparsity_weight_other_target = sparsity_weight_other  # Target weight for zy and zd sparsity (default 0.5)
-        self.sparsity_weight_other_current = 0.0  # Current sparsity weight for zy and zd
+        self.sparsity_weight_zy_zd_target = sparsity_weight_zy_zd  # Target weight for zy and zd sparsity (default 0.5)
+        self.sparsity_weight_zy_zd_current = 0.0  # Current sparsity weight for zy and zd
         self.alpha_y = alpha_y
         self.alpha_d = alpha_d
         self.beta_adv = beta_adv
@@ -453,29 +453,27 @@ class AugmentedDANN(NModule):
         qz = None  # DANN doesn't use probabilistic latents
         pzy = None
         pzx = None
-        pza = None
-        pzay = None
+        pzd = None
+        pzdy = None
         
         # Use main predictions as outputs
         y_hat = y_pred_main
         a_hat = d_pred_main
         
         # Return individual latent components for NVAE compatibility
-        # AugmentedDANN has 3 latent spaces (zy, zd, zdy) but NVAE interface expects 4 (zy, zx, zay, za)
+        # AugmentedDANN has 3 latent spaces (zy, zd, zdy) but NVAE interface expects 4 (zy, zx, zdy, zd)
         # Mapping strategy:
         # zy -> zy (class-specific, unchanged)
-        # zd -> za (domain-specific maps to auxiliary/attribute)
-        # zdy -> zay (interaction maps to auxiliary-label interaction)
+        # zd -> zd (domain-specific)
+        # zdy -> zdy (interaction)
         # zd -> zx (domain-specific also maps to residual for compatibility)
         #
-        # NOTE: zx and za both reference the SAME tensor (zd). This is intentional for interface
+        # NOTE: zx and zd both reference the SAME tensor (zd). This is intentional for interface
         # compatibility but means expressiveness evaluation will show identical results for both.
         # This does NOT affect model functionality, only interpretability of latent analysis.
-        zx = zd   # Domain features as residual features (DUPLICATE of za)
-        za = zd   # Domain features as auxiliary features (DUPLICATE of zx)
-        zay = zdy # Interaction features as auxiliary-label interaction
-        
-        return x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za
+        zx = zd   # Domain features as residual features (DUPLICATE of zd)
+
+        return x_recon, z, qz, pzy, pzx, pzd, pzdy, y_hat, a_hat, zy, zx, zdy, zd
     
     def dann_forward(self, x, y=None, d=None):
         """
@@ -602,7 +600,7 @@ class AugmentedDANN(NModule):
             self.alpha_d * loss_d_main +
             self.beta_adv * (loss_d_adversarial + loss_y_adversarial) +
             self.sparsity_weight_zdy_current * sparsity_loss_zdy +
-            self.sparsity_weight_other_current * (sparsity_loss_zy + sparsity_loss_zd)
+            self.sparsity_weight_zy_zd_current * (sparsity_loss_zy + sparsity_loss_zd)
         )
 
         loss_dict = {
@@ -615,7 +613,7 @@ class AugmentedDANN(NModule):
             'sparsity_loss_zy': sparsity_loss_zy.item(),
             'sparsity_loss_zd': sparsity_loss_zd.item(),
             'sparsity_weight_zdy': self.sparsity_weight_zdy_current,
-            'sparsity_weight_other': self.sparsity_weight_other_current
+            'sparsity_weight_zy_zd': self.sparsity_weight_zy_zd_current
         }
 
         return total_loss, loss_dict
@@ -654,13 +652,13 @@ class AugmentedDANN(NModule):
         λ(p) = 2/(1+exp(-γp)) - 1 where p is training progress, γ is lambda_schedule_gamma
 
         The gamma parameter controls ramp-up speed:
-        - γ = 10 (default): Standard DANN paper schedule, fast ramp-up
-        - γ = 5: Slower ramp-up, reaches ~0.5 at midpoint
+        - γ = 10: Standard DANN paper schedule, fast ramp-up
+        - γ = 5 (default): Moderate ramp-up, reaches ~0.92 at midpoint
         - γ = 2: Very gradual ramp-up, more linear
 
         Also updates sparsity weights for all latent spaces using the same schedule:
         - zdy: increases from 0 to sparsity_weight_zdy_target
-        - zy, zd: increase from 0 to sparsity_weight_other_target
+        - zy, zd: increase from 0 to sparsity_weight_zy_zd_target
         """
         # Ensure numerical stability
         if total_epochs <= 0:
@@ -684,7 +682,7 @@ class AugmentedDANN(NModule):
         # Update sparsity weights using same schedule: map [0, 1] to [0, target]
         # lambda_val ranges from 0 to ~1, so we use it directly as progress
         self.sparsity_weight_zdy_current = lambda_val * self.sparsity_weight_zdy_target
-        self.sparsity_weight_other_current = lambda_val * self.sparsity_weight_other_target
+        self.sparsity_weight_zy_zd_current = lambda_val * self.sparsity_weight_zy_zd_target
 
         return lambda_val
     

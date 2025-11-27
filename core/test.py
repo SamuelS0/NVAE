@@ -40,8 +40,8 @@ def test_nvae(model, test_loader, dataset_type, device):
                     loss=f"{loss_components['total']:.2f}",
                     recon=f"{loss_components['recon']:.1f}",
                     l1_zy=f"{loss_components['l1_zy']:.3f}",
-                    l1_za=f"{loss_components['l1_za']:.3f}",
-                    l1_zay=f"{loss_components['l1_zay']:.3f}"
+                    l1_zd=f"{loss_components['l1_zd']:.3f}",
+                    l1_zdy=f"{loss_components['l1_zdy']:.3f}"
                 )
             else:
                 test_pbar.set_postfix(loss=loss.item())
@@ -70,7 +70,7 @@ def test_dann(model, test_loader, dataset_type, device):
             output = model(x, y, r)
             if isinstance(output, tuple) and len(output) == 13:
                 # AugmentedDANN returns NVAE-style interface
-                x_recon, z, qz, pzy, pzx, pza, pzay, y_hat, a_hat, zy, zx, zay, za = output
+                x_recon, z, qz, pzy, pzx, pzd, pzdy, y_hat, a_hat, zy, zx, zdy, zd = output
                 y_predictions = y_hat
                 domain_predictions = a_hat
             else:

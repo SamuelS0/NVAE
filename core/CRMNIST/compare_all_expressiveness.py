@@ -34,14 +34,14 @@ def create_comprehensive_comparison(results, save_dir):
     for model_name, model_results in results.items():
         
         # Domain classification results
-        if 'domain_za_alone' in model_results:
+        if 'domain_zd_alone' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
                 'Task': 'Domain Classification',
-                'Method': 'Individual (za)',
-                'Validation Accuracy': model_results['domain_za_alone']['val_acc'],
-                'Test Accuracy': model_results['domain_za_alone'].get('test_acc', model_results['domain_za_alone']['val_acc']),
-                'Component': 'za'
+                'Method': 'Individual (zd)',
+                'Validation Accuracy': model_results['domain_zd_alone']['val_acc'],
+                'Test Accuracy': model_results['domain_zd_alone'].get('test_acc', model_results['domain_zd_alone']['val_acc']),
+                'Component': 'zd'
             })
 
         if 'domain_zy_alone' in model_results:
@@ -54,24 +54,24 @@ def create_comprehensive_comparison(results, save_dir):
                 'Component': 'zy'
             })
 
-        if 'domain_za_zay' in model_results:
+        if 'domain_zd_zdy' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
                 'Task': 'Domain Classification',
-                'Method': 'Combined (za+zay)',
-                'Validation Accuracy': model_results['domain_za_zay']['val_acc'],
-                'Test Accuracy': model_results['domain_za_zay'].get('test_acc', model_results['domain_za_zay']['val_acc']),
-                'Component': 'za+zay'
+                'Method': 'Combined (zd+zdy)',
+                'Validation Accuracy': model_results['domain_zd_zdy']['val_acc'],
+                'Test Accuracy': model_results['domain_zd_zdy'].get('test_acc', model_results['domain_zd_zdy']['val_acc']),
+                'Component': 'zd+zdy'
             })
 
-        if 'domain_zay_alone' in model_results:
+        if 'domain_zdy_alone' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
                 'Task': 'Domain Classification',
-                'Method': 'Individual (zay)',
-                'Validation Accuracy': model_results['domain_zay_alone']['val_acc'],
-                'Test Accuracy': model_results['domain_zay_alone'].get('test_acc', model_results['domain_zay_alone']['val_acc']),
-                'Component': 'zay'
+                'Method': 'Individual (zdy)',
+                'Validation Accuracy': model_results['domain_zdy_alone']['val_acc'],
+                'Test Accuracy': model_results['domain_zdy_alone'].get('test_acc', model_results['domain_zdy_alone']['val_acc']),
+                'Component': 'zdy'
             })
         
         # Label classification results
@@ -85,34 +85,34 @@ def create_comprehensive_comparison(results, save_dir):
                 'Component': 'zy'
             })
 
-        if 'label_za_alone' in model_results:
+        if 'label_zd_alone' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
                 'Task': 'Label Classification',
-                'Method': 'Cross-prediction (za)',
-                'Validation Accuracy': model_results['label_za_alone']['val_acc'],
-                'Test Accuracy': model_results['label_za_alone'].get('test_acc', model_results['label_za_alone']['val_acc']),
-                'Component': 'za'
+                'Method': 'Cross-prediction (zd)',
+                'Validation Accuracy': model_results['label_zd_alone']['val_acc'],
+                'Test Accuracy': model_results['label_zd_alone'].get('test_acc', model_results['label_zd_alone']['val_acc']),
+                'Component': 'zd'
             })
 
-        if 'label_zy_zay' in model_results:
+        if 'label_zy_zdy' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
                 'Task': 'Label Classification',
-                'Method': 'Combined (zy+zay)',
-                'Validation Accuracy': model_results['label_zy_zay']['val_acc'],
-                'Test Accuracy': model_results['label_zy_zay'].get('test_acc', model_results['label_zy_zay']['val_acc']),
-                'Component': 'zy+zay'
+                'Method': 'Combined (zy+zdy)',
+                'Validation Accuracy': model_results['label_zy_zdy']['val_acc'],
+                'Test Accuracy': model_results['label_zy_zdy'].get('test_acc', model_results['label_zy_zdy']['val_acc']),
+                'Component': 'zy+zdy'
             })
 
-        if 'label_zay_alone' in model_results:
+        if 'label_zdy_alone' in model_results:
             comparison_data.append({
                 'Model': model_name.upper(),
                 'Task': 'Label Classification',
-                'Method': 'Individual (zay)',
-                'Validation Accuracy': model_results['label_zay_alone']['val_acc'],
-                'Test Accuracy': model_results['label_zay_alone'].get('test_acc', model_results['label_zay_alone']['val_acc']),
-                'Component': 'zay'
+                'Method': 'Individual (zdy)',
+                'Validation Accuracy': model_results['label_zdy_alone']['val_acc'],
+                'Test Accuracy': model_results['label_zdy_alone'].get('test_acc', model_results['label_zdy_alone']['val_acc']),
+                'Component': 'zdy'
             })
     
     df = pd.DataFrame(comparison_data)
@@ -154,9 +154,9 @@ def create_comprehensive_comparison(results, save_dir):
     
     for model_name, model_results in results.items():
         # Domain improvement
-        if 'domain_za_alone' in model_results and 'domain_za_zay' in model_results:
-            domain_improvement = model_results['domain_za_zay']['val_acc'] - model_results['domain_za_alone']['val_acc']
-            domain_baseline = model_results['domain_za_alone']['val_acc']
+        if 'domain_zd_alone' in model_results and 'domain_zd_zdy' in model_results:
+            domain_improvement = model_results['domain_zd_zdy']['val_acc'] - model_results['domain_zd_alone']['val_acc']
+            domain_baseline = model_results['domain_zd_alone']['val_acc']
             improvements.append({
                 'Model': model_name.upper(),
                 'Task': 'Domain',
@@ -165,8 +165,8 @@ def create_comprehensive_comparison(results, save_dir):
             })
 
         # Label improvement
-        if 'label_zy_alone' in model_results and 'label_zy_zay' in model_results:
-            label_improvement = model_results['label_zy_zay']['val_acc'] - model_results['label_zy_alone']['val_acc']
+        if 'label_zy_alone' in model_results and 'label_zy_zdy' in model_results:
+            label_improvement = model_results['label_zy_zdy']['val_acc'] - model_results['label_zy_alone']['val_acc']
             label_baseline = model_results['label_zy_alone']['val_acc']
             improvements.append({
                 'Model': model_name.upper(),
@@ -181,7 +181,7 @@ def create_comprehensive_comparison(results, save_dir):
         # Bar plot for improvements
         improvement_pivot = improvement_df.pivot(index='Model', columns='Task', values='Improvement_Percent')
         improvement_pivot.plot(kind='bar', ax=axes[1,0], color=['#ff7f0e', '#2ca02c'])
-        axes[1,0].set_title('Improvement from Adding zay Component (%)', fontweight='bold')
+        axes[1,0].set_title('Improvement from Adding zdy Component (%)', fontweight='bold')
         axes[1,0].set_ylabel('Improvement (%)')
         axes[1,0].legend(title='Task')
         axes[1,0].tick_params(axis='x', rotation=45)
@@ -198,15 +198,15 @@ def create_comprehensive_comparison(results, save_dir):
             combined_score = 0
             count = 0
             
-            if 'domain_za_zay' in model_results:
-                combined_score += model_results['domain_za_zay']['val_acc']
+            if 'domain_zd_zdy' in model_results:
+                combined_score += model_results['domain_zd_zdy']['val_acc']
                 count += 1
-            elif 'domain_za_alone' in model_results:
-                combined_score += model_results['domain_za_alone']['val_acc']
+            elif 'domain_zd_alone' in model_results:
+                combined_score += model_results['domain_zd_alone']['val_acc']
                 count += 1
                 
-            if 'label_zy_zay' in model_results:
-                combined_score += model_results['label_zy_zay']['val_acc']
+            if 'label_zy_zdy' in model_results:
+                combined_score += model_results['label_zy_zdy']['val_acc']
                 count += 1
             elif 'label_zy_alone' in model_results:
                 combined_score += model_results['label_zy_alone']['val_acc']
@@ -263,39 +263,39 @@ def generate_summary_report(results, save_dir):
     best_label_model = None
     best_label_score = 0
     
-    zay_benefits = []
+    zdy_benefits = []
     
     for model_name, model_results in results.items():
         # Domain classification
-        if 'domain_za_zay' in model_results:
-            score = model_results['domain_za_zay']['val_acc']
+        if 'domain_zd_zdy' in model_results:
+            score = model_results['domain_zd_zdy']['val_acc']
             if score > best_domain_score:
                 best_domain_score = score
                 best_domain_model = model_name.upper()
         
         # Label classification
-        if 'label_zy_zay' in model_results:
-            score = model_results['label_zy_zay']['val_acc']
+        if 'label_zy_zdy' in model_results:
+            score = model_results['label_zy_zdy']['val_acc']
             if score > best_label_score:
                 best_label_score = score
                 best_label_model = model_name.upper()
         
-        # Calculate zay benefits
+        # Calculate zdy benefits
         domain_benefit = 0
         label_benefit = 0
         domain_baseline = 1.0  # Default to avoid division by zero
         label_baseline = 1.0   # Default to avoid division by zero
 
-        if 'domain_za_alone' in model_results and 'domain_za_zay' in model_results:
-            domain_benefit = model_results['domain_za_zay']['val_acc'] - model_results['domain_za_alone']['val_acc']
-            domain_baseline = model_results['domain_za_alone']['val_acc']
+        if 'domain_zd_alone' in model_results and 'domain_zd_zdy' in model_results:
+            domain_benefit = model_results['domain_zd_zdy']['val_acc'] - model_results['domain_zd_alone']['val_acc']
+            domain_baseline = model_results['domain_zd_alone']['val_acc']
 
-        if 'label_zy_alone' in model_results and 'label_zy_zay' in model_results:
-            label_benefit = model_results['label_zy_zay']['val_acc'] - model_results['label_zy_alone']['val_acc']
+        if 'label_zy_alone' in model_results and 'label_zy_zdy' in model_results:
+            label_benefit = model_results['label_zy_zdy']['val_acc'] - model_results['label_zy_alone']['val_acc']
             label_baseline = model_results['label_zy_alone']['val_acc']
 
         if domain_benefit > 0 or label_benefit > 0:
-            zay_benefits.append({
+            zdy_benefits.append({
                 'model': model_name.upper(),
                 'domain_benefit': domain_benefit,
                 'label_benefit': label_benefit,
@@ -312,7 +312,7 @@ def generate_summary_report(results, save_dir):
     report_lines.append("🧪 ZAY COMPONENT BENEFITS:")
     report_lines.append("-" * 50)
     
-    for benefit in zay_benefits:
+    for benefit in zdy_benefits:
         report_lines.append(f"{benefit['model']}:")
         if benefit['domain_benefit'] > 0:
             domain_pct = (benefit['domain_benefit'] / benefit['domain_baseline']) * 100
@@ -330,39 +330,39 @@ def generate_summary_report(results, save_dir):
         report_lines.append(f"\n{model_name.upper()} MODEL:")
         report_lines.append("  Domain Classification:")
 
-        if 'domain_za_alone' in model_results:
-            report_lines.append(f"    za alone:     {model_results['domain_za_alone']['val_acc']:.4f}")
+        if 'domain_zd_alone' in model_results:
+            report_lines.append(f"    zd alone:     {model_results['domain_zd_alone']['val_acc']:.4f}")
         if 'domain_zy_alone' in model_results:
             report_lines.append(f"    zy alone:     {model_results['domain_zy_alone']['val_acc']:.4f} [cross-prediction]")
-        if 'domain_za_zay' in model_results:
-            report_lines.append(f"    za+zay:       {model_results['domain_za_zay']['val_acc']:.4f}")
-        if 'domain_zay_alone' in model_results:
-            report_lines.append(f"    zay alone:    {model_results['domain_zay_alone']['val_acc']:.4f}")
+        if 'domain_zd_zdy' in model_results:
+            report_lines.append(f"    zd+zdy:       {model_results['domain_zd_zdy']['val_acc']:.4f}")
+        if 'domain_zdy_alone' in model_results:
+            report_lines.append(f"    zdy alone:    {model_results['domain_zdy_alone']['val_acc']:.4f}")
 
         report_lines.append("  Label Classification:")
         if 'label_zy_alone' in model_results:
             report_lines.append(f"    zy alone:     {model_results['label_zy_alone']['val_acc']:.4f}")
-        if 'label_za_alone' in model_results:
-            report_lines.append(f"    za alone:     {model_results['label_za_alone']['val_acc']:.4f} [cross-prediction]")
-        if 'label_zy_zay' in model_results:
-            report_lines.append(f"    zy+zay:       {model_results['label_zy_zay']['val_acc']:.4f}")
-        if 'label_zay_alone' in model_results:
-            report_lines.append(f"    zay alone:    {model_results['label_zay_alone']['val_acc']:.4f}")
+        if 'label_zd_alone' in model_results:
+            report_lines.append(f"    zd alone:     {model_results['label_zd_alone']['val_acc']:.4f} [cross-prediction]")
+        if 'label_zy_zdy' in model_results:
+            report_lines.append(f"    zy+zdy:       {model_results['label_zy_zdy']['val_acc']:.4f}")
+        if 'label_zdy_alone' in model_results:
+            report_lines.append(f"    zdy alone:    {model_results['label_zdy_alone']['val_acc']:.4f}")
     
     # Conclusions
     report_lines.append("\n🎯 KEY FINDINGS:")
     report_lines.append("-" * 50)
     
-    avg_domain_benefit = np.mean([b['domain_benefit'] for b in zay_benefits if b['domain_benefit'] > 0])
-    avg_label_benefit = np.mean([b['label_benefit'] for b in zay_benefits if b['label_benefit'] > 0])
+    avg_domain_benefit = np.mean([b['domain_benefit'] for b in zdy_benefits if b['domain_benefit'] > 0])
+    avg_label_benefit = np.mean([b['label_benefit'] for b in zdy_benefits if b['label_benefit'] > 0])
     
     if not np.isnan(avg_domain_benefit):
-        report_lines.append(f"• Adding zay improves domain classification by {avg_domain_benefit:.3f} on average")
+        report_lines.append(f"• Adding zdy improves domain classification by {avg_domain_benefit:.3f} on average")
     if not np.isnan(avg_label_benefit):
-        report_lines.append(f"• Adding zay improves label classification by {avg_label_benefit:.3f} on average")
-    
-    report_lines.append("• The zay component captures shared information useful for both tasks")
-    report_lines.append("• Combined representations (za+zay, zy+zay) are more expressive than individual components")
+        report_lines.append(f"• Adding zdy improves label classification by {avg_label_benefit:.3f} on average")
+
+    report_lines.append("• The zdy component captures shared information useful for both tasks")
+    report_lines.append("• Combined representations (zd+zdy, zy+zdy) are more expressive than individual components")
     
     # Save report
     report_text = "\n".join(report_lines)

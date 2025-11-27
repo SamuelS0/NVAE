@@ -90,7 +90,7 @@ class DANNTrainer:
                 lambda_val = self.model.update_lambda_schedule(epoch, num_epochs)
                 self.lambda_history.append(lambda_val)
                 print(f'Epoch {epoch+1}/{num_epochs}: Gradient Reversal λ = {lambda_val:.4f}')
-                print(f'  Sparsity weights: zdy={self.model.sparsity_weight_zdy_current:.4f}, other={self.model.sparsity_weight_other_current:.4f}')
+                print(f'  Sparsity weights: zdy={self.model.sparsity_weight_zdy_current:.4f}, zy_zd={self.model.sparsity_weight_zy_zd_current:.4f}')
             
             # Training phase
             train_loss, train_metrics = self._train_epoch(train_loader)
@@ -311,8 +311,8 @@ class DANNTrainer:
         # Show current sparsity weights if available
         if 'sparsity_weight_zdy' in metrics:
             print(f"{prefix}sparsity_weight_zdy: {metrics['sparsity_weight_zdy']:.4f}")
-        if 'sparsity_weight_other' in metrics:
-            print(f"{prefix}sparsity_weight_other: {metrics['sparsity_weight_other']:.4f}")
+        if 'sparsity_weight_zy_zd' in metrics:
+            print(f"{prefix}sparsity_weight_zy_zd: {metrics['sparsity_weight_zy_zd']:.4f}")
     
     def _check_early_stopping(self, val_loss: float, epoch: int, num_epochs: int, 
                              batch_metrics: Dict[str, float]) -> bool:

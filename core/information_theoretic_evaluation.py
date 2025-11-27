@@ -22,7 +22,7 @@ Compatible Models:
     This evaluation framework requires models with explicit VAE-style latent
     decomposition. Compatible models must have:
     - qz() method for extracting latent distributions
-    - index_range attributes (zy_index_range, zx_index_range, za_index_range, zay_index_range)
+    - index_range attributes (zy_index_range, zx_index_range, zd_index_range, zdy_index_range)
     - diva flag indicating model type
 
     Currently supported:
@@ -665,10 +665,10 @@ def extract_latents_from_model(
 
                 zy = qz_loc[:, model.zy_index_range[0]:model.zy_index_range[1]]
                 zx = qz_loc[:, model.zx_index_range[0]:model.zx_index_range[1]]
-                zd = qz_loc[:, model.za_index_range[0]:model.za_index_range[1]]
+                zd = qz_loc[:, model.zd_index_range[0]:model.zd_index_range[1]]
 
                 if has_zdy:
-                    zdy = qz_loc[:, model.zay_index_range[0]:model.zay_index_range[1]]
+                    zdy = qz_loc[:, model.zdy_index_range[0]:model.zdy_index_range[1]]
 
             all_zy.append(zy.cpu())
             all_zd.append(zd.cpu())

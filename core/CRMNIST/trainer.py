@@ -159,8 +159,8 @@ class CRMNISTTrainer:
                     y_ce=f"{loss_components['y_ce']:.1f}",
                     a_ce=f"{loss_components['a_ce']:.1f}",
                     l1_zy=f"{loss_components['l1_zy']:.3f}",
-                    l1_za=f"{loss_components['l1_za']:.3f}",
-                    l1_zay=f"{loss_components['l1_zay']:.3f}"
+                    l1_zd=f"{loss_components['l1_zd']:.3f}",
+                    l1_zdy=f"{loss_components['l1_zdy']:.3f}"
                 )
             else:
                 train_pbar.set_postfix(loss=loss.item())
@@ -208,8 +208,8 @@ class CRMNISTTrainer:
                         y_ce=f"{loss_components['y_ce']:.1f}",
                         a_ce=f"{loss_components['a_ce']:.1f}",
                         l1_zy=f"{loss_components['l1_zy']:.3f}",
-                        l1_za=f"{loss_components['l1_za']:.3f}",
-                        l1_zay=f"{loss_components['l1_zay']:.3f}"
+                        l1_zd=f"{loss_components['l1_zd']:.3f}",
+                        l1_zdy=f"{loss_components['l1_zdy']:.3f}"
                     )
                 else:
                     val_pbar.set_postfix(loss=loss.item())
