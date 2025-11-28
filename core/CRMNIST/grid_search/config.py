@@ -84,22 +84,55 @@ KL_PRESETS = {
 # =============================================================================
 # AUGMENTED DANN SPARSITY PRESETS (L1 penalties for latent spaces)
 # =============================================================================
+# Includes both symmetric (legacy) and asymmetric (independent) sparsity configs.
+# The model accepts: sparsity_weight_zdy, sparsity_weight_zy, sparsity_weight_zd
+# For backward compat, sparsity_weight_zy_zd sets both zy and zd to same value.
 DANN_AUG_SPARSITY_PRESETS = {
+    # --- Symmetric presets (legacy behavior: zy = zd) ---
     'none': {
-        'sparsity_weight_zdy': 0.0,     # zdy sparsity (domain-class interaction)
-        'sparsity_weight_zy_zd': 0.0,   # zy + zd sparsity combined
+        'sparsity_weight_zdy': 0.0,
+        'sparsity_weight_zy': 0.0,
+        'sparsity_weight_zd': 0.0,
     },
     'low': {
         'sparsity_weight_zdy': 1.0,
-        'sparsity_weight_zy_zd': 0.5,
+        'sparsity_weight_zy': 0.5,
+        'sparsity_weight_zd': 0.5,
     },
     'medium': {
         'sparsity_weight_zdy': 2.0,
-        'sparsity_weight_zy_zd': 1.0,
+        'sparsity_weight_zy': 1.0,
+        'sparsity_weight_zd': 1.0,
     },
     'high': {
         'sparsity_weight_zdy': 5.0,
-        'sparsity_weight_zy_zd': 2.0,
+        'sparsity_weight_zy': 2.0,
+        'sparsity_weight_zd': 2.0,
+    },
+    # --- Asymmetric presets (independent zy vs zd) ---
+    # Hypothesis: High z_d sparsity forces domain-specific features
+    'zd_high': {
+        'sparsity_weight_zdy': 1.0,
+        'sparsity_weight_zy': 0.5,     # Low - preserve class info
+        'sparsity_weight_zd': 5.0,     # HIGH - force sparse domain features
+    },
+    # Hypothesis: Very high z_d, no z_y constraint
+    'zd_extreme': {
+        'sparsity_weight_zdy': 1.0,
+        'sparsity_weight_zy': 0.0,     # None - let class be rich
+        'sparsity_weight_zd': 10.0,    # EXTREME - force very sparse domain
+    },
+    # Hypothesis: High z_y sparsity, low z_d
+    'zy_high': {
+        'sparsity_weight_zdy': 1.0,
+        'sparsity_weight_zy': 5.0,     # HIGH - force compact class
+        'sparsity_weight_zd': 0.5,     # Low
+    },
+    # Hypothesis: Domain focus - no zdy, high zd
+    'domain_focus': {
+        'sparsity_weight_zdy': 0.0,    # None - no interaction penalty
+        'sparsity_weight_zy': 0.0,     # None - let class be rich
+        'sparsity_weight_zd': 8.0,     # HIGH - force domain sparsity
     },
 }
 
@@ -149,7 +182,7 @@ FIXED_PARAMS = {
     'zdy_dim': 8,
     'zd_dim': 8,
     # Training
-    'epochs': 30,
+    'epochs': 5,
     'batch_size': 64,
     'learning_rate': 1e-3,
     'patience': 5,
@@ -159,6 +192,19 @@ FIXED_PARAMS = {
     'intensity_decay': 1.0,
     # OOD settings
     'ood_domain_idx': 5,  # withheld domain for testing
+    # Trainer parameters (needed by trainers)
+    'beta_annealing': False,  # Beta annealing for KL divergence
+    'beta_scale': 1.0,  # Scaling factor for beta weights (used by trainers)
+    # Backward compatible parameter names (some trainers/code may expect these)
+    # Alpha weights (fallbacks for new names alpha_y, alpha_d)
+    'alpha_1': 75.0,
+    'alpha_2': 75.0,
+    # Beta weights (fallbacks for new names beta_zy, beta_zx, beta_zdy, beta_zd)
+    # These will be overwritten by KL_PRESETS but provide defaults
+    'beta_1': 10.0,  # default fallback for beta_zy
+    'beta_2': 10.0,  # default fallback for beta_zx
+    'beta_3': 10.0,  # default fallback for beta_zdy
+    'beta_4': 10.0,  # default fallback for beta_zd
 }
 
 
@@ -265,11 +311,15 @@ def get_dann_aug_configs() -> Iterator[Dict[str, Any]]:
     Generate all AugmentedDANN configurations.
 
     Iterates over 3 independent dimensions:
-    - Sparsity: 4 options (none, low, medium, high)
+    - Sparsity: 8 options (none, low, medium, high + zd_high, zd_extreme, zy_high, domain_focus)
     - Adversarial: 3 options (low, medium, high)
     - Classifier: 3 options (low, medium, high)
 
-    Total: 4 × 3 × 3 = 36 configurations
+    Total: 8 × 3 × 3 = 72 configurations
+
+    Note: Sparsity presets now include both symmetric (zy=zd) and asymmetric
+    (independent zy, zd) options. The model handles both via sparsity_weight_zy
+    and sparsity_weight_zd parameters.
     """
     for sparsity_name, sparsity_params in DANN_AUG_SPARSITY_PRESETS.items():
         for adv_name, adv_params in DANN_AUG_ADVERSARIAL_PRESETS.items():
@@ -470,9 +520,10 @@ def print_config_summary():
               f"beta_zdy={params['beta_zdy']}, beta_zd={params['beta_zd']}")
 
     print("\n4. AUGMENTED DANN SPARSITY PRESETS:")
+    print("   [Symmetric presets: zy = zd | Asymmetric presets: independent zy, zd]")
     for name, params in DANN_AUG_SPARSITY_PRESETS.items():
-        print(f"   {name}: sparsity_weight_zdy={params['sparsity_weight_zdy']}, "
-              f"sparsity_weight_zy_zd={params['sparsity_weight_zy_zd']}")
+        print(f"   {name}: zdy={params['sparsity_weight_zdy']}, "
+              f"zy={params['sparsity_weight_zy']}, zd={params['sparsity_weight_zd']}")
 
     print("\n5. AUGMENTED DANN ADVERSARIAL PRESETS:")
     for name, params in DANN_AUG_ADVERSARIAL_PRESETS.items():

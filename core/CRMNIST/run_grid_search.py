@@ -3,9 +3,10 @@
 CRMNIST Hyperparameter Grid Search
 
 Main entry point for running grid search experiments across all models.
+Includes Information-Theoretic (IT) analysis of latent space partitioning.
 
 Usage:
-    # Run full grid search
+    # Run full grid search with IT analysis (default)
     python -m core.CRMNIST.run_grid_search --out results/grid_search/
 
     # Run quick screening (reduced configs)
@@ -17,11 +18,21 @@ Usage:
     # Resume interrupted search
     python -m core.CRMNIST.run_grid_search --out results/grid_search/ --resume
 
+    # Run without IT analysis (faster)
+    python -m core.CRMNIST.run_grid_search --out results/grid_search/ --no-it-analysis
+
+    # Run with IT bootstrap confidence intervals
+    python -m core.CRMNIST.run_grid_search --out results/grid_search/ --it-bootstrap 50
+
     # Analyze existing results only
     python -m core.CRMNIST.run_grid_search --out results/grid_search/ --analyze-only
 
     # List available configurations
     python -m core.CRMNIST.run_grid_search --list-configs
+
+Note: IT analysis is only computed for models with explicit latent partitioning
+(NVAE, DIVA, AugmentedDANN). DANN and IRM use monolithic representations and
+do not support IT analysis.
 """
 
 import argparse
@@ -97,8 +108,8 @@ def parse_args():
     parser.add_argument(
         '--sparsity',
         type=str,
-        choices=['none', 'low', 'medium', 'high'],
-        help='Filter by sparsity preset (NVAE/DIVA only)'
+        choices=['none', 'low', 'medium', 'high', 'zd_high', 'zd_extreme', 'zy_high', 'domain_focus'],
+        help='Filter by sparsity preset (NVAE/DIVA: none/low/medium/high, AugmentedDANN: also zd_high/zd_extreme/zy_high/domain_focus)'
     )
     parser.add_argument(
         '--classifier',
@@ -120,9 +131,28 @@ def parse_args():
         help='Skip generating visualization plots'
     )
     parser.add_argument(
-        '--verbose', '-v',
+        '--quiet',
         action='store_true',
-        help='Print detailed progress information'
+        help='Suppress detailed progress information (default: verbose)'
+    )
+
+    # Information-Theoretic analysis options
+    parser.add_argument(
+        '--no-it-analysis',
+        action='store_true',
+        help='Skip Information-Theoretic analysis after training'
+    )
+    parser.add_argument(
+        '--it-bootstrap',
+        type=int,
+        default=0,
+        help='Number of bootstrap samples for IT confidence intervals (default: 0, no bootstrap)'
+    )
+    parser.add_argument(
+        '--it-max-batches',
+        type=int,
+        default=100,
+        help='Maximum batches to use for IT analysis (default: 100)'
     )
 
     return parser.parse_args()
@@ -203,7 +233,10 @@ def main():
         output_dir=args.out,
         device=args.device,
         resume=args.resume,
-        verbose=args.verbose or True,  # Default to verbose
+        verbose=not args.quiet,  # Default to verbose, use --quiet to suppress
+        enable_it_analysis=not args.no_it_analysis,
+        it_n_bootstrap=args.it_bootstrap,
+        it_max_batches=args.it_max_batches,
     )
 
     results = runner.run_grid_search(configs=configs)

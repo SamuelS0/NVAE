@@ -15,6 +15,10 @@ import torch.optim as optim
 
 from .config import get_all_configs, get_quick_configs, FIXED_PARAMS
 
+# Models that support IT analysis (have explicit latent partitioning)
+# DANN and IRM use monolithic representations, so they don't support IT analysis
+IT_SUPPORTED_MODELS = {'nvae', 'diva', 'dann_augmented'}
+
 
 class GridSearchRunner:
     """
@@ -27,6 +31,9 @@ class GridSearchRunner:
         device: str = None,
         resume: bool = False,
         verbose: bool = True,
+        enable_it_analysis: bool = True,
+        it_n_bootstrap: int = 0,
+        it_max_batches: int = 100,
     ):
         """
         Initialize the grid search runner.
@@ -36,11 +43,17 @@ class GridSearchRunner:
             device: Device to use ('cuda' or 'cpu'). Auto-detects if None.
             resume: If True, skip already completed experiments
             verbose: If True, print detailed progress
+            enable_it_analysis: If True, run information-theoretic analysis after training
+            it_n_bootstrap: Number of bootstrap samples for IT confidence intervals (0=no bootstrap)
+            it_max_batches: Maximum batches to use for IT analysis (controls sample size)
         """
         self.output_dir = output_dir
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         self.resume = resume
         self.verbose = verbose
+        self.enable_it_analysis = enable_it_analysis
+        self.it_n_bootstrap = it_n_bootstrap
+        self.it_max_batches = it_max_batches
 
         # Create output directories
         self.experiments_dir = os.path.join(output_dir, 'experiments')
@@ -97,6 +110,11 @@ class GridSearchRunner:
         # Prepare domain data
         domain_data = {int(k): v for k, v in spec_data['domain_data'].items()}
         spec_data['domain_data'] = domain_data
+
+        # Add y_c (special digit for unique color) if not present in config
+        # Default to digit 7 which is commonly used in CRMNIST experiments
+        if 'y_c' not in spec_data:
+            spec_data['y_c'] = 7
 
         # Override rotation values based on rotation_step
         rotation_step = getattr(args, 'rotation_step', 15)
@@ -231,6 +249,11 @@ class GridSearchRunner:
             # Evaluate model on both ID and OOD test sets
             eval_metrics = self._evaluate_model(model, id_test_loader, ood_test_loader, model_type, args)
 
+            # Run Information-Theoretic analysis if enabled
+            it_metrics = None
+            if self.enable_it_analysis:
+                it_metrics = self._run_it_analysis(model, val_loader, model_type, args)
+
             # Prepare training metrics for JSON (exclude non-serializable state dict)
             save_training_metrics = {k: v for k, v in training_metrics.items() if k != 'best_model_state'}
 
@@ -242,6 +265,7 @@ class GridSearchRunner:
                 'training_time': training_time,
                 'training_metrics': save_training_metrics,
                 'eval_metrics': eval_metrics,
+                'it_metrics': it_metrics,
                 'timestamp': datetime.now().isoformat(),
                 'device': self.device,
             }
@@ -259,6 +283,8 @@ class GridSearchRunner:
                 print(f"ID Test accuracy: {eval_metrics.get('test_accuracy', 'N/A'):.4f}")
                 print(f"OOD accuracy: {eval_metrics.get('ood_accuracy', 'N/A'):.4f}")
                 print(f"Generalization gap: {eval_metrics.get('gen_gap', 'N/A'):.4f}")
+                if it_metrics and 'partition_quality' in it_metrics:
+                    print(f"IT partition quality: {it_metrics.get('partition_quality', 'N/A'):.4f}")
 
             return results
 
@@ -309,9 +335,128 @@ class GridSearchRunner:
         from core.comparison.train import train_irm
         return train_irm(args, spec_data, train_loader, val_loader, 'crmnist')
 
+    def _run_it_analysis(
+        self,
+        model,
+        data_loader,
+        model_type: str,
+        args,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Run information-theoretic analysis on a trained model.
+
+        Only runs for models that support IT analysis (NVAE, DIVA, AugmentedDANN).
+        DANN and IRM use monolithic representations without explicit latent partitioning,
+        so IT analysis is not meaningful for them.
+
+        Args:
+            model: Trained model
+            data_loader: DataLoader to use for extracting latents
+            model_type: Type of model
+            args: Experiment arguments
+
+        Returns:
+            Dictionary of IT metrics, or None if model doesn't support IT analysis
+        """
+        if model_type not in IT_SUPPORTED_MODELS:
+            if self.verbose:
+                print(f"  IT analysis skipped: {model_type} doesn't support IT analysis")
+            return None
+
+        if self.verbose:
+            print(f"\n  Running Information-Theoretic analysis...")
+
+        try:
+            from core.information_theoretic_evaluation import (
+                MinimalInformationPartitionEvaluator,
+                extract_latents_from_model,
+            )
+
+            # Extract latent representations
+            z_y, z_d, z_dy, z_x, y_labels, d_labels = extract_latents_from_model(
+                model, data_loader, args.device, max_batches=self.it_max_batches
+            )
+
+            # Create evaluator and run analysis
+            evaluator = MinimalInformationPartitionEvaluator(
+                n_neighbors=7,
+                n_bootstrap=self.it_n_bootstrap,
+                max_dims=30,
+                pca_variance=0.95
+            )
+
+            # Run evaluation (suppress verbose output for grid search)
+            import sys
+            from io import StringIO
+
+            if not self.verbose:
+                # Suppress stdout during IT analysis
+                old_stdout = sys.stdout
+                sys.stdout = StringIO()
+
+            try:
+                it_results = evaluator.evaluate_latent_partition(
+                    z_y, z_d, z_dy, z_x,
+                    y_labels, d_labels,
+                    compute_bootstrap=(self.it_n_bootstrap > 0)
+                )
+            finally:
+                if not self.verbose:
+                    sys.stdout = old_stdout
+
+            # Extract key metrics for summary
+            metrics = it_results.get('metrics', {})
+            it_summary = {
+                # Class-specific latent (z_y)
+                'I_zy_Y_given_D': metrics.get('I(z_y;Y|D)', 0.0),
+                'I_zy_D_given_Y': metrics.get('I(z_y;D|Y)', 0.0),
+                'z_y_specificity': metrics.get('z_y_specificity', 0.0),
+                # Domain-specific latent (z_d)
+                'I_zd_D_given_Y': metrics.get('I(z_d;D|Y)', 0.0),
+                'I_zd_Y_given_D': metrics.get('I(z_d;Y|D)', 0.0),
+                'z_d_specificity': metrics.get('z_d_specificity', 0.0),
+                # Interaction latent (z_dy) - only for NVAE and AugmentedDANN
+                'I_zdy_Y_D': metrics.get('I(z_dy;Y;D)', 0.0),
+                'I_zdy_joint': metrics.get('I(z_dy;Y,D)', 0.0),
+                # Overall quality
+                'partition_quality': metrics.get('partition_quality', 0.0),
+            }
+
+            if self.verbose:
+                print(f"    Partition quality: {it_summary['partition_quality']:.4f}")
+                print(f"    z_y specificity: {it_summary['z_y_specificity']:.4f}")
+                print(f"    z_d specificity: {it_summary['z_d_specificity']:.4f}")
+
+            # Save full IT results to separate file
+            it_full_path = os.path.join(args.out, 'it_analysis.json')
+            evaluator.save_results(it_results, it_full_path)
+
+            return it_summary
+
+        except Exception as e:
+            import traceback
+            if self.verbose:
+                print(f"    IT analysis failed: {e}")
+                print(traceback.format_exc())
+            return {'error': str(e)}
+
     def _compute_accuracy(self, model, data_loader, model_type: str, args) -> float:
-        """Compute accuracy on a data loader."""
+        """
+        Compute accuracy on a data loader.
+
+        Model output structures:
+        - NVAE/DIVA: forward(y, x, a) returns tuple:
+            (x_recon, z, qz, pzy, pzx, pzd, pzdy, y_hat, a_hat, zy, zx, zdy, zd)
+            y_hat is at index 7
+        - DANN: forward(x, y, r) returns (y_logits, d_logits)
+        - AugmentedDANN: dann_forward(x) returns dict with 'y_pred_main'
+        - IRM: forward(x, y, r) returns (y_logits, d_logits)
+        """
         from core.utils import process_batch
+
+        # Index of y_hat in VAE model output tuple
+        # VAE.forward() returns: (x_recon, z, qz, pzy, pzx, pzd, pzdy, y_hat, a_hat, zy, zx, zdy, zd)
+        VAE_Y_HAT_INDEX = 7
 
         model.eval()
         correct = 0
@@ -323,20 +468,26 @@ class GridSearchRunner:
 
                 # Get predictions based on model type
                 if model_type in ['nvae', 'diva']:
-                    # VAE models
+                    # VAE models: forward(y, x, a) where a is domain/rotation
                     outputs = model.forward(y, x, r)
-                    y_hat = outputs[7]  # y_hat is at index 7
+                    if len(outputs) <= VAE_Y_HAT_INDEX:
+                        raise RuntimeError(
+                            f"VAE model output has {len(outputs)} elements, "
+                            f"expected at least {VAE_Y_HAT_INDEX + 1}. "
+                            "Model output structure may have changed."
+                        )
+                    y_hat = outputs[VAE_Y_HAT_INDEX]
                     predictions = y_hat.argmax(dim=1)
                 elif model_type == 'dann':
-                    # DANN
+                    # DANN: forward(x, y, r) returns (y_logits, d_logits)
                     y_logits, _ = model.forward(x, y, r)
                     predictions = y_logits.argmax(dim=1)
                 elif model_type == 'dann_augmented':
-                    # AugmentedDANN
+                    # AugmentedDANN: dann_forward(x) returns dict with predictions
                     outputs = model.dann_forward(x)
                     predictions = outputs['y_pred_main'].argmax(dim=1)
                 elif model_type == 'irm':
-                    # IRM
+                    # IRM: forward(x, y, r) returns (y_logits, d_logits)
                     y_logits, _ = model.forward(x, y, r)
                     predictions = y_logits.argmax(dim=1)
                 else:

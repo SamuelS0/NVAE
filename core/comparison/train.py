@@ -22,39 +22,50 @@ from core.WILD.staged_trainer import StagedWILDTrainer
 def train_nvae(args, spec_data, train_loader, test_loader, dataset):
     print("Training NVAE...")
     if dataset == 'crmnist':
+        # Support both old (zay_dim, za_dim, beta_1-4, alpha_1-2) and
+        # new (zdy_dim, zd_dim, beta_zy/zx/zdy/zd, alpha_y/d) parameter names
+        zdy_dim = getattr(args, 'zdy_dim', None) or getattr(args, 'zay_dim', 8)
+        zd_dim = getattr(args, 'zd_dim', None) or getattr(args, 'za_dim', 8)
+        beta_zy = getattr(args, 'beta_zy', None) or getattr(args, 'beta_1', 1.0)
+        beta_zx = getattr(args, 'beta_zx', None) or getattr(args, 'beta_2', 1.0)
+        beta_zdy = getattr(args, 'beta_zdy', None) or getattr(args, 'beta_3', 1.0)
+        beta_zd = getattr(args, 'beta_zd', None) or getattr(args, 'beta_4', 1.0)
+        alpha_y = getattr(args, 'alpha_y', None) or getattr(args, 'alpha_1', 1.0)
+        alpha_d = getattr(args, 'alpha_d', None) or getattr(args, 'alpha_2', 1.0)
+
         nvae = crmnist_model.VAE(class_map=spec_data['class_map'],
                 zy_dim=args.zy_dim,
                 zx_dim=args.zx_dim,
-                zay_dim=args.zay_dim,
-                za_dim=args.za_dim,
+                zdy_dim=zdy_dim,
+                zd_dim=zd_dim,
                 y_dim=spec_data['num_y_classes'],
                 a_dim=spec_data['num_r_classes'],
-                beta_1=args.beta_1,
-                beta_2=args.beta_2,
-                beta_3=args.beta_3,
-                beta_4=args.beta_4,
-                alpha_1=args.alpha_1,
-                alpha_2=args.alpha_2,
+                beta_zy=beta_zy,
+                beta_zx=beta_zx,
+                beta_zdy=beta_zdy,
+                beta_zd=beta_zd,
+                alpha_y=alpha_y,
+                alpha_d=alpha_d,
                 diva=False,
                 l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
                 l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
-                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
-                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
-        
+                l1_lambda_zdy=getattr(args, 'l1_lambda_zdy', 0.0),
+                l1_lambda_zd=getattr(args, 'l1_lambda_zd', 0.0))
+
         model_params = {
             'class_map': spec_data['class_map'],
             'zy_dim': args.zy_dim,
             'zx_dim': args.zx_dim,
-            'zay_dim': args.zay_dim,
-            'za_dim': args.za_dim,
+            'zdy_dim': zdy_dim,
+            'zd_dim': zd_dim,
             'y_dim': spec_data['num_y_classes'],
             'a_dim': spec_data['num_r_classes'],
-            'beta_1': args.beta_1,
-            'beta_2': args.beta_2,
-            'beta_3': args.beta_3,
-            'beta_4': args.beta_4,
-            'alpha_1': args.alpha_1,
-            'alpha_2': args.alpha_2,
+            'beta_zy': beta_zy,
+            'beta_zx': beta_zx,
+            'beta_zdy': beta_zdy,
+            'beta_zd': beta_zd,
+            'alpha_y': alpha_y,
+            'alpha_d': alpha_d,
             'diva': False
         }
         trainer_class = CRMNISTTrainer
@@ -124,39 +135,50 @@ def train_staged_nvae(args, spec_data, train_loader, test_loader, dataset):
     print("Training NVAE with staged training...")
 
     if dataset == 'crmnist':
+        # Support both old (zay_dim, za_dim, beta_1-4, alpha_1-2) and
+        # new (zdy_dim, zd_dim, beta_zy/zx/zdy/zd, alpha_y/d) parameter names
+        zdy_dim = getattr(args, 'zdy_dim', None) or getattr(args, 'zay_dim', 8)
+        zd_dim = getattr(args, 'zd_dim', None) or getattr(args, 'za_dim', 8)
+        beta_zy = getattr(args, 'beta_zy', None) or getattr(args, 'beta_1', 1.0)
+        beta_zx = getattr(args, 'beta_zx', None) or getattr(args, 'beta_2', 1.0)
+        beta_zdy = getattr(args, 'beta_zdy', None) or getattr(args, 'beta_3', 1.0)
+        beta_zd = getattr(args, 'beta_zd', None) or getattr(args, 'beta_4', 1.0)
+        alpha_y = getattr(args, 'alpha_y', None) or getattr(args, 'alpha_1', 1.0)
+        alpha_d = getattr(args, 'alpha_d', None) or getattr(args, 'alpha_2', 1.0)
+
         nvae = crmnist_model.VAE(class_map=spec_data['class_map'],
                 zy_dim=args.zy_dim,
                 zx_dim=args.zx_dim,
-                zay_dim=args.zay_dim,
-                za_dim=args.za_dim,
+                zdy_dim=zdy_dim,
+                zd_dim=zd_dim,
                 y_dim=spec_data['num_y_classes'],
                 a_dim=spec_data['num_r_classes'],
-                beta_1=args.beta_1,
-                beta_2=args.beta_2,
-                beta_3=args.beta_3,
-                beta_4=args.beta_4,
-                alpha_1=args.alpha_1,
-                alpha_2=args.alpha_2,
+                beta_zy=beta_zy,
+                beta_zx=beta_zx,
+                beta_zdy=beta_zdy,
+                beta_zd=beta_zd,
+                alpha_y=alpha_y,
+                alpha_d=alpha_d,
                 diva=False,
                 l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
                 l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
-                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
-                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
-        
+                l1_lambda_zdy=getattr(args, 'l1_lambda_zdy', 0.0),
+                l1_lambda_zd=getattr(args, 'l1_lambda_zd', 0.0))
+
         model_params = {
             'class_map': spec_data['class_map'],
             'zy_dim': args.zy_dim,
             'zx_dim': args.zx_dim,
-            'zay_dim': args.zay_dim,
-            'za_dim': args.za_dim,
+            'zdy_dim': zdy_dim,
+            'zd_dim': zd_dim,
             'y_dim': spec_data['num_y_classes'],
             'a_dim': spec_data['num_r_classes'],
-            'beta_1': args.beta_1,
-            'beta_2': args.beta_2,
-            'beta_3': args.beta_3,
-            'beta_4': args.beta_4,
-            'alpha_1': args.alpha_1,
-            'alpha_2': args.alpha_2,
+            'beta_zy': beta_zy,
+            'beta_zx': beta_zx,
+            'beta_zdy': beta_zdy,
+            'beta_zd': beta_zd,
+            'alpha_y': alpha_y,
+            'alpha_d': alpha_d,
             'diva': False,
             'staged_training': True
         }
@@ -224,41 +246,52 @@ def train_staged_nvae(args, spec_data, train_loader, test_loader, dataset):
 def train_diva(args, spec_data, train_loader, test_loader, dataset):
     print("Training DIVA...")
     if dataset == 'crmnist':
+        # Support both old (zay_dim, za_dim, beta_1-4, alpha_1-2) and
+        # new (zdy_dim, zd_dim, beta_zy/zx/zdy/zd, alpha_y/d) parameter names
+        zdy_dim = getattr(args, 'zdy_dim', None) or getattr(args, 'zay_dim', 8)
+        zd_dim = getattr(args, 'zd_dim', None) or getattr(args, 'za_dim', 8)
+        beta_zy = getattr(args, 'beta_zy', None) or getattr(args, 'beta_1', 1.0)
+        beta_zx = getattr(args, 'beta_zx', None) or getattr(args, 'beta_2', 1.0)
+        beta_zdy = getattr(args, 'beta_zdy', None) or getattr(args, 'beta_3', 1.0)
+        beta_zd = getattr(args, 'beta_zd', None) or getattr(args, 'beta_4', 1.0)
+        alpha_y = getattr(args, 'alpha_y', None) or getattr(args, 'alpha_1', 1.0)
+        alpha_d = getattr(args, 'alpha_d', None) or getattr(args, 'alpha_2', 1.0)
+
         diva = crmnist_model.VAE(class_map=spec_data['class_map'],
                 zy_dim=args.zy_dim,
                 zx_dim=args.zx_dim,
-                zay_dim=args.zay_dim,
-                za_dim=args.za_dim,
+                zdy_dim=zdy_dim,
+                zd_dim=zd_dim,
                 y_dim=spec_data['num_y_classes'],
                 a_dim=spec_data['num_r_classes'],
-                beta_1=args.beta_1,
-                beta_2=args.beta_2,
-                beta_3=args.beta_3,
-                beta_4=args.beta_4,
-                alpha_1=args.alpha_1,
-                alpha_2=args.alpha_2,
+                beta_zy=beta_zy,
+                beta_zx=beta_zx,
+                beta_zdy=beta_zdy,
+                beta_zd=beta_zd,
+                alpha_y=alpha_y,
+                alpha_d=alpha_d,
                 diva=True,
                 l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
                 l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
-                l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
-                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
-        
+                l1_lambda_zdy=getattr(args, 'l1_lambda_zdy', 0.0),
+                l1_lambda_zd=getattr(args, 'l1_lambda_zd', 0.0))
+
         model_params = {
-        'class_map': spec_data['class_map'],
-        'zy_dim': args.zy_dim,
-        'zx_dim': args.zx_dim,
-        'zay_dim': args.zay_dim,
-        'za_dim': args.za_dim,
-        'y_dim': spec_data['num_y_classes'],
-        'a_dim': spec_data['num_r_classes'],
-        'beta_1': args.beta_1,
-        'beta_2': args.beta_2,
-        'beta_3': args.beta_3,
-        'beta_4': args.beta_4,
-        'alpha_1': args.alpha_1,
-        'alpha_2': args.alpha_2,
-        'diva': True
-    }
+            'class_map': spec_data['class_map'],
+            'zy_dim': args.zy_dim,
+            'zx_dim': args.zx_dim,
+            'zdy_dim': zdy_dim,
+            'zd_dim': zd_dim,
+            'y_dim': spec_data['num_y_classes'],
+            'a_dim': spec_data['num_r_classes'],
+            'beta_zy': beta_zy,
+            'beta_zx': beta_zx,
+            'beta_zdy': beta_zdy,
+            'beta_zd': beta_zd,
+            'alpha_y': alpha_y,
+            'alpha_d': alpha_d,
+            'diva': True
+        }
         trainer_class = CRMNISTTrainer
 
     elif dataset == 'wild':
@@ -323,8 +356,12 @@ def train_diva(args, spec_data, train_loader, test_loader, dataset):
 def train_dann(args, spec_data, train_loader, val_loader, dataset):
     print("Training DANN...")
 
+    # Support both old (zay_dim, za_dim) and new (zdy_dim, zd_dim) parameter names
+    zdy_dim = getattr(args, 'zdy_dim', None) or getattr(args, 'zay_dim', 8)
+    zd_dim = getattr(args, 'zd_dim', None) or getattr(args, 'za_dim', 8)
+
     # latent dimension is the sum of all split latent dimensions
-    z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
+    z_dim = args.zy_dim + zd_dim + args.zx_dim + zdy_dim
 
     dann = DANN(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], dataset)
     dann = dann.to(args.device)
@@ -361,8 +398,12 @@ def train_irm(args, spec_data, train_loader, val_loader, dataset, seed=None):
         if torch.cuda.is_available():
             torch.cuda.manual_seed(seed)
 
+    # Support both old (zay_dim, za_dim) and new (zdy_dim, zd_dim) parameter names
+    zdy_dim = getattr(args, 'zdy_dim', None) or getattr(args, 'zay_dim', 8)
+    zd_dim = getattr(args, 'zd_dim', None) or getattr(args, 'za_dim', 8)
+
     # latent dimension is the sum of all split latent dimensions
-    z_dim = args.zy_dim + args.za_dim + args.zx_dim + args.zay_dim
+    z_dim = args.zy_dim + zd_dim + args.zx_dim + zdy_dim
 
     # Use command-line arguments if available, otherwise use defaults
     # Note: With environment-averaged loss, penalty_weight=10 is appropriate
@@ -416,10 +457,16 @@ def train_dann_augmented(args, spec_data, train_loader, val_loader, dataset, see
     from core.CRMNIST.dann_model import AugmentedDANN
     from core.CRMNIST.dann_trainer import DANNTrainer
 
+    # Support both old (zay_dim, za_dim, alpha_1-2) and new (zdy_dim, zd_dim, alpha_y/d) parameter names
+    zdy_dim = getattr(args, 'zdy_dim', None) or getattr(args, 'zay_dim', 8)
+    zd_dim = getattr(args, 'zd_dim', None) or getattr(args, 'za_dim', 8)
+    alpha_y = getattr(args, 'alpha_y', None) or getattr(args, 'alpha_1', 1.0)
+    alpha_d = getattr(args, 'alpha_d', None) or getattr(args, 'alpha_2', 1.0)
+
     # Redistribute dimensions for fair comparison
     # AugmentedDANN uses 3 subspaces (zy, zd, zdy) while NVAE/DIVA use 4
     # To maintain fair comparison, redistribute total dimension across 3 subspaces
-    total_dim = args.zy_dim + args.zx_dim + args.zay_dim + args.za_dim
+    total_dim = args.zy_dim + args.zx_dim + zdy_dim + zd_dim
     zy_aug = total_dim // 3 + (1 if total_dim % 3 > 0 else 0)
     zd_aug = total_dim // 3 + (1 if total_dim % 3 > 1 else 0)
     zdy_aug = total_dim // 3
@@ -432,6 +479,15 @@ def train_dann_augmented(args, spec_data, train_loader, val_loader, dataset, see
     # Determine image size based on dataset
     image_size = 28 if dataset == 'crmnist' else 96
 
+    # Get sparsity weights - supports both new independent weights and legacy combined weight
+    sparsity_weight_zdy = getattr(args, 'sparsity_weight_zdy', None) or getattr(args, 'sparsity_weight', 2.0)
+    # New: Independent sparsity weights for z_y and z_d
+    sparsity_weight_zy = getattr(args, 'sparsity_weight_zy', None)
+    sparsity_weight_zd = getattr(args, 'sparsity_weight_zd', None)
+    # Legacy: Combined weight (for backward compatibility)
+    sparsity_weight_zy_zd = getattr(args, 'sparsity_weight_zy_zd', None)
+    lambda_schedule_gamma = getattr(args, 'lambda_schedule_gamma', 5.0)
+
     # Create AugmentedDANN model
     dann_aug_model = AugmentedDANN(
         class_map=spec_data.get('class_map', None),  # WILD uses None
@@ -441,11 +497,14 @@ def train_dann_augmented(args, spec_data, train_loader, val_loader, dataset, see
         y_dim=spec_data['num_y_classes'],
         d_dim=spec_data['num_r_classes'],
         lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
-        sparsity_weight=getattr(args, 'sparsity_weight', 2.0),
-        sparsity_weight_other=getattr(args, 'sparsity_weight_other', 0.5),
-        alpha_y=args.alpha_1,
-        alpha_d=args.alpha_2,
+        sparsity_weight_zdy=sparsity_weight_zdy,
+        sparsity_weight_zy_zd=sparsity_weight_zy_zd,  # Legacy (backward compat)
+        sparsity_weight_zy=sparsity_weight_zy,        # New: independent z_y weight
+        sparsity_weight_zd=sparsity_weight_zd,        # New: independent z_d weight
+        alpha_y=alpha_y,
+        alpha_d=alpha_d,
         beta_adv=getattr(args, 'beta_adv', 0.2),
+        lambda_schedule_gamma=lambda_schedule_gamma,
         image_size=image_size  # Adaptive: 28 for CRMNIST, 96 for WILD
     ).to(args.device)
 

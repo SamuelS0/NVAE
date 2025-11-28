@@ -130,7 +130,9 @@ class AugmentedDANN(NModule):
         padding=0,
         lambda_reversal=1.0,
         sparsity_weight_zdy=2.0,
-        sparsity_weight_zy_zd=1.0,
+        sparsity_weight_zy_zd=None,  # Legacy: combined weight for zy and zd (deprecated, use individual weights)
+        sparsity_weight_zy=None,     # Independent sparsity weight for z_y (class-specific)
+        sparsity_weight_zd=None,     # Independent sparsity weight for z_d (domain-specific)
         alpha_y=1.0,
         alpha_d=1.0,
         beta_adv=0.15,
@@ -151,11 +153,33 @@ class AugmentedDANN(NModule):
         self.d_dim = d_dim
         self.image_size = image_size
 
-        # Training parameters
+        # Training parameters - Independent sparsity weights for each latent space
+        # This allows testing hypotheses like "high z_d sparsity + low z_y sparsity"
         self.sparsity_weight_zdy_target = sparsity_weight_zdy  # Target weight for zdy sparsity (default 2.0)
         self.sparsity_weight_zdy_current = 0.0  # Current sparsity weight for zdy (increases from 0 to target)
-        self.sparsity_weight_zy_zd_target = sparsity_weight_zy_zd  # Target weight for zy and zd sparsity (default 0.5)
-        self.sparsity_weight_zy_zd_current = 0.0  # Current sparsity weight for zy and zd
+
+        # Handle backward compatibility: if individual weights not provided, use combined weight
+        if sparsity_weight_zy is not None:
+            self.sparsity_weight_zy_target = sparsity_weight_zy
+        elif sparsity_weight_zy_zd is not None:
+            self.sparsity_weight_zy_target = sparsity_weight_zy_zd
+        else:
+            self.sparsity_weight_zy_target = 1.0  # Default
+
+        if sparsity_weight_zd is not None:
+            self.sparsity_weight_zd_target = sparsity_weight_zd
+        elif sparsity_weight_zy_zd is not None:
+            self.sparsity_weight_zd_target = sparsity_weight_zy_zd
+        else:
+            self.sparsity_weight_zd_target = 1.0  # Default
+
+        self.sparsity_weight_zy_current = 0.0  # Current sparsity weight for z_y
+        self.sparsity_weight_zd_current = 0.0  # Current sparsity weight for z_d
+
+        # Keep legacy attribute for backward compatibility
+        self.sparsity_weight_zy_zd_target = sparsity_weight_zy_zd if sparsity_weight_zy_zd is not None else 1.0
+        self.sparsity_weight_zy_zd_current = 0.0
+
         self.alpha_y = alpha_y
         self.alpha_d = alpha_d
         self.beta_adv = beta_adv
@@ -590,17 +614,19 @@ class AugmentedDANN(NModule):
         loss_y_adversarial = F.cross_entropy(outputs['y_pred_adversarial'], y.long())
 
         # Sparsity penalties (L1 regularization) - all increase with training schedule
+        # Now with INDEPENDENT weights for z_y and z_d to allow targeted regularization
         sparsity_loss_zdy = torch.mean(torch.abs(outputs['zdy']))
         sparsity_loss_zy = torch.mean(torch.abs(outputs['zy']))
         sparsity_loss_zd = torch.mean(torch.abs(outputs['zd']))
 
-        # Total loss
+        # Total loss with independent sparsity weights
         total_loss = (
             self.alpha_y * loss_y_main +
             self.alpha_d * loss_d_main +
             self.beta_adv * (loss_d_adversarial + loss_y_adversarial) +
             self.sparsity_weight_zdy_current * sparsity_loss_zdy +
-            self.sparsity_weight_zy_zd_current * (sparsity_loss_zy + sparsity_loss_zd)
+            self.sparsity_weight_zy_current * sparsity_loss_zy +   # Independent z_y sparsity
+            self.sparsity_weight_zd_current * sparsity_loss_zd     # Independent z_d sparsity
         )
 
         loss_dict = {
@@ -613,7 +639,9 @@ class AugmentedDANN(NModule):
             'sparsity_loss_zy': sparsity_loss_zy.item(),
             'sparsity_loss_zd': sparsity_loss_zd.item(),
             'sparsity_weight_zdy': self.sparsity_weight_zdy_current,
-            'sparsity_weight_zy_zd': self.sparsity_weight_zy_zd_current
+            'sparsity_weight_zy': self.sparsity_weight_zy_current,   # Independent z_y weight
+            'sparsity_weight_zd': self.sparsity_weight_zd_current,   # Independent z_d weight
+            'sparsity_weight_zy_zd': self.sparsity_weight_zy_zd_current  # Legacy (for backward compat)
         }
 
         return total_loss, loss_dict
@@ -658,7 +686,8 @@ class AugmentedDANN(NModule):
 
         Also updates sparsity weights for all latent spaces using the same schedule:
         - zdy: increases from 0 to sparsity_weight_zdy_target
-        - zy, zd: increase from 0 to sparsity_weight_zy_zd_target
+        - zy: increases from 0 to sparsity_weight_zy_target (independent)
+        - zd: increases from 0 to sparsity_weight_zd_target (independent)
         """
         # Ensure numerical stability
         if total_epochs <= 0:
@@ -682,7 +711,9 @@ class AugmentedDANN(NModule):
         # Update sparsity weights using same schedule: map [0, 1] to [0, target]
         # lambda_val ranges from 0 to ~1, so we use it directly as progress
         self.sparsity_weight_zdy_current = lambda_val * self.sparsity_weight_zdy_target
-        self.sparsity_weight_zy_zd_current = lambda_val * self.sparsity_weight_zy_zd_target
+        self.sparsity_weight_zy_current = lambda_val * self.sparsity_weight_zy_target   # Independent z_y
+        self.sparsity_weight_zd_current = lambda_val * self.sparsity_weight_zd_target   # Independent z_d
+        self.sparsity_weight_zy_zd_current = lambda_val * self.sparsity_weight_zy_zd_target  # Legacy
 
         return lambda_val
     

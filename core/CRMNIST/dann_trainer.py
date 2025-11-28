@@ -90,7 +90,8 @@ class DANNTrainer:
                 lambda_val = self.model.update_lambda_schedule(epoch, num_epochs)
                 self.lambda_history.append(lambda_val)
                 print(f'Epoch {epoch+1}/{num_epochs}: Gradient Reversal λ = {lambda_val:.4f}')
-                print(f'  Sparsity weights: zdy={self.model.sparsity_weight_zdy_current:.4f}, zy_zd={self.model.sparsity_weight_zy_zd_current:.4f}')
+                print(f'  Sparsity weights: zdy={self.model.sparsity_weight_zdy_current:.4f}, '
+                      f'zy={self.model.sparsity_weight_zy_current:.4f}, zd={self.model.sparsity_weight_zd_current:.4f}')
             
             # Training phase
             train_loss, train_metrics = self._train_epoch(train_loader)

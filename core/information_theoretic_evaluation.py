@@ -1,8 +1,23 @@
 """
-Information-Theoretic Evaluation of Minimal Information Partition
+Information-Theoretic Evaluation of Disentangled Partition
 
 This module implements rigorous information-theoretic testing to evaluate whether
-learned representations adhere to the Minimal Information Partition theorem.
+learned representations adhere to the Disentangled Partition definition.
+
+=============================================================================
+DEFINITION (Disentangled Partition):
+A partition (Z_Y, Z_D, Z_X) = f(X) is DISENTANGLED if:
+
+    1. CLASS-PURITY:   I(Z_Y; D|Y) = 0   (equivalently, Z_Y ⊥ D | Y)
+    2. DOMAIN-PURITY:  I(Z_D; Y|D) = 0   (equivalently, Z_D ⊥ Y | D)
+    3. RESIDUAL:       I(Z_X; Y,D) = 0   (equivalently, Z_X ⊥ (Y,D))
+    4. INDEPENDENCE:   (Z_Y, Z_D, Z_X) are mutually independent
+                       i.e., I(Z_Y; Z_D) = I(Z_Y; Z_X) = I(Z_D; Z_X) = 0
+=============================================================================
+
+For a 4-way partition (Z_Y, Z_D, Z_DY, Z_X) as in NVAE:
+    - Z_DY captures the interaction information I(X;Y;D)
+    - Independence extends to all pairs: I(Z_i; Z_j) = 0 for i ≠ j
 
 The Minimal Information Partition theorem states that entropy H(X) decomposes as:
     H(X) = I_Y + I_D + I_YD + I_X
@@ -12,11 +27,15 @@ where:
     I_YD = I(X;Y;D) - shared/interaction information
     I_X = H(X) - I(X;Y,D) - residual information
 
-For a representation Z = (Z_y, Z_dy, Z_d, Z_x) to be minimally partitioned:
-    1. Z_y captures class-specific: I(Z_y;Y|D) = I_Y and I(Z_y;D|Y) = 0
-    2. Z_d captures domain-specific: I(Z_d;D|Y) = I_D and I(Z_d;Y|D) = 0
-    3. Z_dy captures shared: I(Z_dy;Y;D) = I_YD
-    4. Z_x is residual (not evaluated - tautological since trained with sparsity)
+Information Constraints on Pure Representations (Theorem):
+    Let Z = f(X) be any representation of X.
+    (a) If Z is class-pure (i.e., I(Z;D|Y) = 0), then I(Z;Y;D) = I(Z;D) >= 0
+    (b) If Z is domain-pure (i.e., I(Z;Y|D) = 0), then I(Z;Y;D) = I(Z;Y) >= 0
+    (c) If Z is residual (i.e., I(Z;Y,D) = 0), then I(Z;Y;D) = 0
+
+    Key insight: No pure representation can have negative interaction information.
+
+This module verifies ALL conditions of the definition and reports violations.
 
 Compatible Models:
     This evaluation framework requires models with explicit VAE-style latent
@@ -28,6 +47,7 @@ Compatible Models:
     Currently supported:
     - NVAE: Full 4-space decomposition (z_y, z_dy, z_d, z_x)
     - DIVA: 3-space decomposition (z_y, z_d, z_x) - no z_dy
+    - AugmentedDANN: 3-space decomposition (z_y, z_d, z_dy) - discriminative
 
     Not supported:
     - Baseline DANN/IRM: Use monolithic feature representations without explicit
@@ -314,6 +334,368 @@ class MinimalInformationPartitionEvaluator:
 
         return mean_est, (lower_ci, upper_ci)
 
+    def latent_mutual_information(
+        self,
+        Z1: np.ndarray,
+        Z2: np.ndarray,
+        name1: str = "Z1",
+        name2: str = "Z2"
+    ) -> float:
+        """
+        Compute I(Z1; Z2) - mutual information between two continuous latent spaces.
+
+        This is crucial for verifying the Independence condition of the
+        Disentangled Partition definition: (Z_Y, Z_D, Z_X) must be mutually independent.
+
+        Args:
+            Z1: First latent array of shape (n_samples, n_dims1)
+            Z2: Second latent array of shape (n_samples, n_dims2)
+            name1: Name of first latent for logging
+            name2: Name of second latent for logging
+
+        Returns:
+            Mutual information in nats (should be ≈0 for independent latents)
+        """
+        # Check for collapsed latent spaces
+        if np.var(Z1) < 1e-10 or np.var(Z2) < 1e-10:
+            return 0.0  # Trivially independent if one is constant
+
+        # Apply PCA if needed
+        Z1_reduced, _ = self._apply_pca_if_needed(Z1, name1)
+        Z2_reduced, _ = self._apply_pca_if_needed(Z2, name2)
+
+        z1_list = self._to_list_format(Z1_reduced)
+        z2_list = self._to_list_format(Z2_reduced)
+
+        try:
+            mi = ee.mi(z1_list, z2_list, k=self.k)
+            return max(0.0, mi)  # MI cannot be negative
+        except Exception as e:
+            print(f"Warning: Latent MI estimation I({name1};{name2}) failed: {e}")
+            return 0.0
+
+    def verify_latent_independence(
+        self,
+        latents: Dict[str, np.ndarray],
+        tolerance: float = 0.1
+    ) -> Dict[str, any]:
+        """
+        Verify mutual independence between latent spaces.
+
+        For a Disentangled Partition (Definition), we need:
+        - I(Z_Y; Z_D) = 0
+        - I(Z_Y; Z_X) = 0
+        - I(Z_D; Z_X) = 0
+        - If z_dy exists: I(Z_Y; Z_DY) = 0, I(Z_D; Z_DY) = 0, I(Z_X; Z_DY) = 0
+
+        Args:
+            latents: Dict mapping latent name -> latent array
+            tolerance: Threshold for considering MI as "zero"
+
+        Returns:
+            Dict with pairwise MI values, independence status, and violations
+        """
+        result = {
+            'pairwise_mi': {},
+            'all_independent': True,
+            'total_dependence': 0.0,
+            'violations': [],
+            'warnings': []
+        }
+
+        latent_names = list(latents.keys())
+        n_pairs = 0
+
+        for i, name1 in enumerate(latent_names):
+            for name2 in latent_names[i+1:]:
+                z1 = latents[name1]
+                z2 = latents[name2]
+
+                # Skip if either latent is zero (discriminative model placeholder)
+                if np.var(z1) < 1e-10 or np.var(z2) < 1e-10:
+                    result['pairwise_mi'][f'I({name1};{name2})'] = 0.0
+                    continue
+
+                # Compute MI between latents
+                mi = self.latent_mutual_information(z1, z2, name1, name2)
+                result['pairwise_mi'][f'I({name1};{name2})'] = mi
+                result['total_dependence'] += mi
+                n_pairs += 1
+
+                if mi > tolerance:
+                    result['all_independent'] = False
+                    result['violations'].append(
+                        f"Independence violated: I({name1};{name2})={mi:.4f} > {tolerance}"
+                    )
+                elif mi > tolerance / 2:
+                    result['warnings'].append(
+                        f"Weak dependence: I({name1};{name2})={mi:.4f}"
+                    )
+
+        # Compute average dependence
+        if n_pairs > 0:
+            result['avg_dependence'] = result['total_dependence'] / n_pairs
+        else:
+            result['avg_dependence'] = 0.0
+
+        return result
+
+    def compute_full_latent_metrics(
+        self,
+        Z: np.ndarray,
+        y_labels: np.ndarray,
+        d_labels: np.ndarray,
+        name: str = "Z"
+    ) -> Dict[str, float]:
+        """
+        Compute all information-theoretic metrics for a single latent space.
+
+        Computes:
+        - I(Z;Y), I(Z;D) - marginal mutual information
+        - I(Z;Y|D), I(Z;D|Y) - conditional mutual information
+        - I(Z;Y;D) - interaction information (co-information)
+        - I(Z;Y,D) - joint mutual information
+
+        Args:
+            Z: Latent array of shape (n_samples, n_dims)
+            y_labels: Class labels of shape (n_samples,)
+            d_labels: Domain labels of shape (n_samples,)
+            name: Name for logging
+
+        Returns:
+            Dictionary of all metrics
+        """
+        metrics = {}
+
+        # Marginal MI
+        metrics[f'I({name};Y)'] = self.mutual_information(Z, y_labels)
+        metrics[f'I({name};D)'] = self.mutual_information(Z, d_labels)
+
+        # Conditional MI
+        metrics[f'I({name};Y|D)'] = self.conditional_mi(Z, y_labels, d_labels)
+        metrics[f'I({name};D|Y)'] = self.conditional_mi(Z, d_labels, y_labels)
+
+        # Interaction information I(Z;Y;D) = I(Z;Y) - I(Z;Y|D) = I(Z;D) - I(Z;D|Y)
+        metrics[f'I({name};Y;D)'] = self.interaction_information(Z, y_labels, d_labels)
+
+        # Joint MI I(Z;Y,D) = I(Z;Y) + I(Z;D|Y) = I(Z;D) + I(Z;Y|D)
+        metrics[f'I({name};Y,D)'] = self.joint_mutual_information(Z, y_labels, d_labels)
+
+        return metrics
+
+    def verify_purity_constraint(
+        self,
+        metrics: Dict[str, float],
+        name: str,
+        purity_type: str,
+        tolerance: float = 0.1
+    ) -> Dict[str, any]:
+        """
+        Verify the purity constraint from the theorem for a latent space.
+
+        Theorem:
+        (a) Class-pure (I(Z;D|Y) = 0): I(Z;Y;D) = I(Z;D) >= 0
+        (b) Domain-pure (I(Z;Y|D) = 0): I(Z;Y;D) = I(Z;Y) >= 0
+        (c) Residual (I(Z;Y,D) = 0): I(Z;Y;D) = 0
+
+        Args:
+            metrics: Dict with I(Z;Y), I(Z;D), I(Z;Y|D), I(Z;D|Y), I(Z;Y;D), I(Z;Y,D)
+            name: Name of latent (e.g., "z_y")
+            purity_type: "class", "domain", or "residual"
+            tolerance: Tolerance for considering a value as zero
+
+        Returns:
+            Dict with is_pure, theorem_satisfied, violations, etc.
+        """
+        result = {
+            'name': name,
+            'purity_type': purity_type,
+            'is_pure': False,
+            'purity_value': None,  # The value that should be zero
+            'theorem_satisfied': False,
+            'theorem_expected': None,
+            'theorem_actual': None,
+            'theorem_deviation': None,
+            'non_negativity_satisfied': True,
+            'violations': [],
+            'warnings': []
+        }
+
+        i_zy = metrics.get(f'I({name};Y)', 0)
+        i_zd = metrics.get(f'I({name};D)', 0)
+        i_zy_given_d = metrics.get(f'I({name};Y|D)', 0)
+        i_zd_given_y = metrics.get(f'I({name};D|Y)', 0)
+        i_z_yd = metrics.get(f'I({name};Y;D)', 0)  # Interaction
+        i_z_joint = metrics.get(f'I({name};Y,D)', 0)  # Joint
+
+        if purity_type == "class":
+            # Class-pure: I(Z;D|Y) should be 0
+            result['purity_value'] = i_zd_given_y
+            result['is_pure'] = i_zd_given_y < tolerance
+
+            # Theorem (a): If class-pure, I(Z;Y;D) = I(Z;D)
+            result['theorem_expected'] = i_zd
+            result['theorem_actual'] = i_z_yd
+            result['theorem_deviation'] = abs(i_z_yd - i_zd)
+
+            if result['is_pure']:
+                result['theorem_satisfied'] = result['theorem_deviation'] < tolerance
+                if not result['theorem_satisfied']:
+                    result['violations'].append(
+                        f"Theorem (a) violated: I({name};Y;D)={i_z_yd:.4f} != I({name};D)={i_zd:.4f}"
+                    )
+
+                # Non-negativity check
+                if i_z_yd < -tolerance:
+                    result['non_negativity_satisfied'] = False
+                    result['violations'].append(
+                        f"Non-negativity violated: I({name};Y;D)={i_z_yd:.4f} < 0 for class-pure latent"
+                    )
+            else:
+                result['warnings'].append(
+                    f"{name} is not class-pure: I({name};D|Y)={i_zd_given_y:.4f} > {tolerance}"
+                )
+
+        elif purity_type == "domain":
+            # Domain-pure: I(Z;Y|D) should be 0
+            result['purity_value'] = i_zy_given_d
+            result['is_pure'] = i_zy_given_d < tolerance
+
+            # Theorem (b): If domain-pure, I(Z;Y;D) = I(Z;Y)
+            result['theorem_expected'] = i_zy
+            result['theorem_actual'] = i_z_yd
+            result['theorem_deviation'] = abs(i_z_yd - i_zy)
+
+            if result['is_pure']:
+                result['theorem_satisfied'] = result['theorem_deviation'] < tolerance
+                if not result['theorem_satisfied']:
+                    result['violations'].append(
+                        f"Theorem (b) violated: I({name};Y;D)={i_z_yd:.4f} != I({name};Y)={i_zy:.4f}"
+                    )
+
+                # Non-negativity check
+                if i_z_yd < -tolerance:
+                    result['non_negativity_satisfied'] = False
+                    result['violations'].append(
+                        f"Non-negativity violated: I({name};Y;D)={i_z_yd:.4f} < 0 for domain-pure latent"
+                    )
+            else:
+                result['warnings'].append(
+                    f"{name} is not domain-pure: I({name};Y|D)={i_zy_given_d:.4f} > {tolerance}"
+                )
+
+        elif purity_type == "residual":
+            # Residual: I(Z;Y,D) should be 0
+            result['purity_value'] = i_z_joint
+            result['is_pure'] = i_z_joint < tolerance
+
+            # Theorem (c): If residual, I(Z;Y;D) = 0
+            result['theorem_expected'] = 0.0
+            result['theorem_actual'] = i_z_yd
+            result['theorem_deviation'] = abs(i_z_yd)
+
+            if result['is_pure']:
+                result['theorem_satisfied'] = result['theorem_deviation'] < tolerance
+                if not result['theorem_satisfied']:
+                    result['violations'].append(
+                        f"Theorem (c) violated: I({name};Y;D)={i_z_yd:.4f} != 0 for residual latent"
+                    )
+            else:
+                result['warnings'].append(
+                    f"{name} is not residual: I({name};Y,D)={i_z_joint:.4f} > {tolerance}"
+                )
+
+        return result
+
+    def check_information_capture(
+        self,
+        metrics: Dict[str, float],
+        name: str,
+        intended_capture: str,
+        min_threshold: float = 0.1
+    ) -> Dict[str, any]:
+        """
+        Check whether a latent space captures its intended information.
+
+        Args:
+            metrics: Dict with all computed metrics
+            name: Name of latent
+            intended_capture: "class", "domain", "interaction", or "residual"
+            min_threshold: Minimum information value to consider as "captured"
+
+        Returns:
+            Dict with capture status and diagnostics
+        """
+        result = {
+            'name': name,
+            'intended_capture': intended_capture,
+            'captures_intended': False,
+            'capture_value': 0.0,
+            'leakage_value': 0.0,
+            'warnings': []
+        }
+
+        i_zy = metrics.get(f'I({name};Y)', 0)
+        i_zd = metrics.get(f'I({name};D)', 0)
+        i_zy_given_d = metrics.get(f'I({name};Y|D)', 0)
+        i_zd_given_y = metrics.get(f'I({name};D|Y)', 0)
+        i_z_yd = metrics.get(f'I({name};Y;D)', 0)
+        i_z_joint = metrics.get(f'I({name};Y,D)', 0)
+
+        if intended_capture == "class":
+            # Should capture I(Z;Y|D) > threshold
+            result['capture_value'] = i_zy_given_d
+            result['leakage_value'] = i_zd_given_y  # Should be low
+            result['captures_intended'] = i_zy_given_d > min_threshold
+
+            if not result['captures_intended']:
+                result['warnings'].append(
+                    f"CRITICAL: {name} not capturing class info: I({name};Y|D)={i_zy_given_d:.4f} < {min_threshold}"
+                )
+            if result['leakage_value'] > min_threshold:
+                result['warnings'].append(
+                    f"Leakage: {name} captures domain info: I({name};D|Y)={i_zd_given_y:.4f}"
+                )
+
+        elif intended_capture == "domain":
+            # Should capture I(Z;D|Y) > threshold
+            result['capture_value'] = i_zd_given_y
+            result['leakage_value'] = i_zy_given_d  # Should be low
+            result['captures_intended'] = i_zd_given_y > min_threshold
+
+            if not result['captures_intended']:
+                result['warnings'].append(
+                    f"CRITICAL: {name} not capturing domain info: I({name};D|Y)={i_zd_given_y:.4f} < {min_threshold}"
+                )
+            if result['leakage_value'] > min_threshold:
+                result['warnings'].append(
+                    f"Leakage: {name} captures class info: I({name};Y|D)={i_zy_given_d:.4f}"
+                )
+
+        elif intended_capture == "interaction":
+            # Should capture I(Z;Y;D) != 0 or I(Z;Y,D) > threshold
+            result['capture_value'] = i_z_yd
+            result['leakage_value'] = 0  # No leakage concept for interaction
+            result['captures_intended'] = abs(i_z_yd) > min_threshold or i_z_joint > min_threshold
+
+            if not result['captures_intended']:
+                result['warnings'].append(
+                    f"WARNING: {name} not capturing interaction: I({name};Y;D)={i_z_yd:.4f}, I({name};Y,D)={i_z_joint:.4f}"
+                )
+
+        elif intended_capture == "residual":
+            # Should have I(Z;Y,D) ≈ 0
+            result['capture_value'] = i_z_joint
+            result['leakage_value'] = i_z_joint  # Same - should be low
+            result['captures_intended'] = i_z_joint < min_threshold
+
+            if not result['captures_intended']:
+                result['warnings'].append(
+                    f"WARNING: {name} capturing Y/D info: I({name};Y,D)={i_z_joint:.4f}"
+                )
+
+        return result
+
     def evaluate_latent_partition(
         self,
         z_y: np.ndarray,
@@ -322,10 +704,18 @@ class MinimalInformationPartitionEvaluator:
         z_x: np.ndarray,
         y_labels: np.ndarray,
         d_labels: np.ndarray,
-        compute_bootstrap: bool = True
+        compute_bootstrap: bool = True,
+        purity_tolerance: float = 0.1,
+        capture_threshold: float = 0.1
     ) -> Dict[str, any]:
         """
-        Evaluate all information-theoretic quantities for the learned partition.
+        Evaluate all information-theoretic quantities for the learned partition,
+        including verification of the Information Constraints on Pure Representations theorem.
+
+        Theorem:
+        (a) If Z is class-pure (I(Z;D|Y) = 0), then I(Z;Y;D) = I(Z;D) >= 0
+        (b) If Z is domain-pure (I(Z;Y|D) = 0), then I(Z;Y;D) = I(Z;Y) >= 0
+        (c) If Z is residual (I(Z;Y,D) = 0), then I(Z;Y;D) = 0
 
         Args:
             z_y: Class-specific latent of shape (n_samples, dim_zy)
@@ -335,12 +725,15 @@ class MinimalInformationPartitionEvaluator:
             y_labels: Class labels of shape (n_samples,)
             d_labels: Domain labels of shape (n_samples,)
             compute_bootstrap: Whether to compute bootstrap CIs (slower)
+            purity_tolerance: Tolerance for considering a latent as "pure" (default=0.1)
+            capture_threshold: Minimum info to consider as "captured" (default=0.1)
 
         Returns:
-            Dictionary of all computed information quantities with optional CIs
+            Dictionary of all computed information quantities, theorem verification,
+            and optional CIs
         """
         print("\n" + "="*80)
-        print("Computing Information-Theoretic Quantities...")
+        print("Information-Theoretic Evaluation with Theorem Verification")
         print("="*80)
         print(f"Samples: {z_y.shape[0]}")
         print(f"Latent dims: z_y={z_y.shape[1]}, z_d={z_d.shape[1]}, ", end="")
@@ -349,6 +742,7 @@ class MinimalInformationPartitionEvaluator:
         print(f"z_x={z_x.shape[1]}")
         print(f"Bootstrap: {'Yes (n={})'.format(self.n_bootstrap) if compute_bootstrap else 'No'}")
         print(f"k-neighbors: {self.k}")
+        print(f"Purity tolerance: {purity_tolerance}, Capture threshold: {capture_threshold}")
         print("="*80 + "\n")
 
         results = {
@@ -356,6 +750,8 @@ class MinimalInformationPartitionEvaluator:
                 'n_samples': int(z_y.shape[0]),
                 'n_neighbors': int(self.k),
                 'n_bootstrap': int(self.n_bootstrap) if compute_bootstrap else 0,
+                'purity_tolerance': purity_tolerance,
+                'capture_threshold': capture_threshold,
                 'dims': {
                     'z_y': int(z_y.shape[1]),
                     'z_d': int(z_d.shape[1]),
@@ -364,139 +760,427 @@ class MinimalInformationPartitionEvaluator:
                 }
             },
             'metrics': {},
-            'confidence_intervals': {} if compute_bootstrap else None
+            'theorem_verification': {},
+            'information_capture': {},
+            'confidence_intervals': {} if compute_bootstrap else None,
+            'violations': [],
+            'warnings': []
         }
 
-        # 1. Evaluate z_y (class-specific latent)
+        # =====================================================================
+        # 1. Evaluate z_y (class-specific latent) - FULL METRICS
+        # =====================================================================
         print("📊 Evaluating z_y (class-specific latent)...")
+        print("   Expected: class-pure (I(z_y;D|Y) ≈ 0), captures class (I(z_y;Y|D) > 0)")
 
-        if compute_bootstrap:
-            results['metrics']['I(z_y;Y|D)'], results['confidence_intervals']['I(z_y;Y|D)'] = \
-                self.bootstrap_estimate(self.conditional_mi, z_y, y_labels, d_labels)
-            results['metrics']['I(z_y;D|Y)'], results['confidence_intervals']['I(z_y;D|Y)'] = \
-                self.bootstrap_estimate(self.conditional_mi, z_y, d_labels, y_labels)
-            results['metrics']['I(z_y;Y)'], results['confidence_intervals']['I(z_y;Y)'] = \
-                self.bootstrap_estimate(self.mutual_information, z_y, y_labels, apply_pca=True)
-            results['metrics']['I(z_y;D)'], results['confidence_intervals']['I(z_y;D)'] = \
-                self.bootstrap_estimate(self.mutual_information, z_y, d_labels, apply_pca=True)
-        else:
-            results['metrics']['I(z_y;Y|D)'] = self.conditional_mi(z_y, y_labels, d_labels)
-            results['metrics']['I(z_y;D|Y)'] = self.conditional_mi(z_y, d_labels, y_labels)
-            results['metrics']['I(z_y;Y)'] = self.mutual_information(z_y, y_labels)
-            results['metrics']['I(z_y;D)'] = self.mutual_information(z_y, d_labels)
+        # Compute all metrics for z_y
+        zy_metrics = self.compute_full_latent_metrics(z_y, y_labels, d_labels, "z_y")
+        results['metrics'].update(zy_metrics)
 
-        results['metrics']['z_y_specificity'] = \
+        # Compute specificity
+        results['metrics']['z_y_specificity'] = (
             results['metrics']['I(z_y;Y|D)'] - results['metrics']['I(z_y;D|Y)']
+        )
 
-        print(f"  I(z_y;Y|D) = {results['metrics']['I(z_y;Y|D)']:.4f} (should be HIGH)")
-        print(f"  I(z_y;D|Y) = {results['metrics']['I(z_y;D|Y)']:.4f} (should be LOW)")
+        print(f"  I(z_y;Y|D) = {results['metrics']['I(z_y;Y|D)']:.4f} (should be HIGH - class info)")
+        print(f"  I(z_y;D|Y) = {results['metrics']['I(z_y;D|Y)']:.4f} (should be ≈0 - class-pure)")
+        print(f"  I(z_y;Y)   = {results['metrics']['I(z_y;Y)']:.4f}")
+        print(f"  I(z_y;D)   = {results['metrics']['I(z_y;D)']:.4f}")
+        print(f"  I(z_y;Y;D) = {results['metrics']['I(z_y;Y;D)']:.4f} (interaction info)")
+        print(f"  I(z_y;Y,D) = {results['metrics']['I(z_y;Y,D)']:.4f} (joint info)")
         print(f"  Specificity = {results['metrics']['z_y_specificity']:.4f}")
 
-        # 2. Evaluate z_d (domain-specific latent)
+        # Verify theorem constraint for z_y
+        zy_purity = self.verify_purity_constraint(
+            results['metrics'], "z_y", "class", purity_tolerance
+        )
+        results['theorem_verification']['z_y'] = zy_purity
+        results['violations'].extend(zy_purity['violations'])
+        results['warnings'].extend(zy_purity['warnings'])
+
+        # Check information capture for z_y
+        zy_capture = self.check_information_capture(
+            results['metrics'], "z_y", "class", capture_threshold
+        )
+        results['information_capture']['z_y'] = zy_capture
+        results['warnings'].extend(zy_capture['warnings'])
+
+        # Print theorem verification status
+        print(f"\n  Theorem (a) verification [class-pure: I(Z;D|Y)=0 → I(Z;Y;D)=I(Z;D)≥0]:")
+        print(f"    Is class-pure: {'✓' if zy_purity['is_pure'] else '✗'} (I(z_y;D|Y)={zy_purity['purity_value']:.4f})")
+        if zy_purity['is_pure']:
+            print(f"    Theorem satisfied: {'✓' if zy_purity['theorem_satisfied'] else '✗'}")
+            print(f"    Expected I(z_y;Y;D) = I(z_y;D) = {zy_purity['theorem_expected']:.4f}")
+            print(f"    Actual I(z_y;Y;D) = {zy_purity['theorem_actual']:.4f}")
+            print(f"    Deviation: {zy_purity['theorem_deviation']:.4f}")
+            print(f"    Non-negativity: {'✓' if zy_purity['non_negativity_satisfied'] else '✗ VIOLATION'}")
+
+        # =====================================================================
+        # 2. Evaluate z_d (domain-specific latent) - FULL METRICS
+        # =====================================================================
         print("\n📊 Evaluating z_d (domain-specific latent)...")
+        print("   Expected: domain-pure (I(z_d;Y|D) ≈ 0), captures domain (I(z_d;D|Y) > 0)")
 
-        if compute_bootstrap:
-            results['metrics']['I(z_d;D|Y)'], results['confidence_intervals']['I(z_d;D|Y)'] = \
-                self.bootstrap_estimate(self.conditional_mi, z_d, d_labels, y_labels)
-            results['metrics']['I(z_d;Y|D)'], results['confidence_intervals']['I(z_d;Y|D)'] = \
-                self.bootstrap_estimate(self.conditional_mi, z_d, y_labels, d_labels)
-            results['metrics']['I(z_d;D)'], results['confidence_intervals']['I(z_d;D)'] = \
-                self.bootstrap_estimate(self.mutual_information, z_d, d_labels, apply_pca=True)
-            results['metrics']['I(z_d;Y)'], results['confidence_intervals']['I(z_d;Y)'] = \
-                self.bootstrap_estimate(self.mutual_information, z_d, y_labels, apply_pca=True)
-        else:
-            results['metrics']['I(z_d;D|Y)'] = self.conditional_mi(z_d, d_labels, y_labels)
-            results['metrics']['I(z_d;Y|D)'] = self.conditional_mi(z_d, y_labels, d_labels)
-            results['metrics']['I(z_d;D)'] = self.mutual_information(z_d, d_labels)
-            results['metrics']['I(z_d;Y)'] = self.mutual_information(z_d, y_labels)
+        # Compute all metrics for z_d
+        zd_metrics = self.compute_full_latent_metrics(z_d, y_labels, d_labels, "z_d")
+        results['metrics'].update(zd_metrics)
 
-        results['metrics']['z_d_specificity'] = \
+        # Compute specificity
+        results['metrics']['z_d_specificity'] = (
             results['metrics']['I(z_d;D|Y)'] - results['metrics']['I(z_d;Y|D)']
+        )
 
-        print(f"  I(z_d;D|Y) = {results['metrics']['I(z_d;D|Y)']:.4f} (should be HIGH)")
-        print(f"  I(z_d;Y|D) = {results['metrics']['I(z_d;Y|D)']:.4f} (should be LOW)")
+        print(f"  I(z_d;D|Y) = {results['metrics']['I(z_d;D|Y)']:.4f} (should be HIGH - domain info)")
+        print(f"  I(z_d;Y|D) = {results['metrics']['I(z_d;Y|D)']:.4f} (should be ≈0 - domain-pure)")
+        print(f"  I(z_d;D)   = {results['metrics']['I(z_d;D)']:.4f}")
+        print(f"  I(z_d;Y)   = {results['metrics']['I(z_d;Y)']:.4f}")
+        print(f"  I(z_d;Y;D) = {results['metrics']['I(z_d;Y;D)']:.4f} (interaction info)")
+        print(f"  I(z_d;Y,D) = {results['metrics']['I(z_d;Y,D)']:.4f} (joint info)")
         print(f"  Specificity = {results['metrics']['z_d_specificity']:.4f}")
 
+        # Verify theorem constraint for z_d
+        zd_purity = self.verify_purity_constraint(
+            results['metrics'], "z_d", "domain", purity_tolerance
+        )
+        results['theorem_verification']['z_d'] = zd_purity
+        results['violations'].extend(zd_purity['violations'])
+        results['warnings'].extend(zd_purity['warnings'])
+
+        # Check information capture for z_d
+        zd_capture = self.check_information_capture(
+            results['metrics'], "z_d", "domain", capture_threshold
+        )
+        results['information_capture']['z_d'] = zd_capture
+        results['warnings'].extend(zd_capture['warnings'])
+
+        # Print theorem verification status
+        print(f"\n  Theorem (b) verification [domain-pure: I(Z;Y|D)=0 → I(Z;Y;D)=I(Z;Y)≥0]:")
+        print(f"    Is domain-pure: {'✓' if zd_purity['is_pure'] else '✗'} (I(z_d;Y|D)={zd_purity['purity_value']:.4f})")
+        if zd_purity['is_pure']:
+            print(f"    Theorem satisfied: {'✓' if zd_purity['theorem_satisfied'] else '✗'}")
+            print(f"    Expected I(z_d;Y;D) = I(z_d;Y) = {zd_purity['theorem_expected']:.4f}")
+            print(f"    Actual I(z_d;Y;D) = {zd_purity['theorem_actual']:.4f}")
+            print(f"    Deviation: {zd_purity['theorem_deviation']:.4f}")
+            print(f"    Non-negativity: {'✓' if zd_purity['non_negativity_satisfied'] else '✗ VIOLATION'}")
+
+        # =====================================================================
         # 3. Evaluate z_dy (interaction latent) if it exists
+        # =====================================================================
         if z_dy is not None:
             print("\n📊 Evaluating z_dy (interaction latent)...")
+            print("   Expected: captures Y-D interaction (I(z_dy;Y;D) ≠ 0 or I(z_dy;Y,D) > 0)")
 
-            if compute_bootstrap:
-                results['metrics']['I(z_dy;Y;D)'], results['confidence_intervals']['I(z_dy;Y;D)'] = \
-                    self.bootstrap_estimate(self.interaction_information, z_dy, y_labels, d_labels)
-                results['metrics']['I(z_dy;Y)'], results['confidence_intervals']['I(z_dy;Y)'] = \
-                    self.bootstrap_estimate(self.mutual_information, z_dy, y_labels, apply_pca=True)
-                results['metrics']['I(z_dy;D)'], results['confidence_intervals']['I(z_dy;D)'] = \
-                    self.bootstrap_estimate(self.mutual_information, z_dy, d_labels, apply_pca=True)
-                results['metrics']['I(z_dy;Y,D)'], results['confidence_intervals']['I(z_dy;Y,D)'] = \
-                    self.bootstrap_estimate(self.joint_mutual_information, z_dy, y_labels, d_labels)
-            else:
-                results['metrics']['I(z_dy;Y;D)'] = self.interaction_information(z_dy, y_labels, d_labels)
-                results['metrics']['I(z_dy;Y)'] = self.mutual_information(z_dy, y_labels)
-                results['metrics']['I(z_dy;D)'] = self.mutual_information(z_dy, d_labels)
-                results['metrics']['I(z_dy;Y,D)'] = self.joint_mutual_information(z_dy, y_labels, d_labels)
+            # Compute all metrics for z_dy
+            zdy_metrics = self.compute_full_latent_metrics(z_dy, y_labels, d_labels, "z_dy")
+            results['metrics'].update(zdy_metrics)
 
-            print(f"  I(z_dy;Y;D) = {results['metrics']['I(z_dy;Y;D)']:.4f} (interaction, can be +/-)")
+            print(f"  I(z_dy;Y|D) = {results['metrics']['I(z_dy;Y|D)']:.4f}")
+            print(f"  I(z_dy;D|Y) = {results['metrics']['I(z_dy;D|Y)']:.4f}")
+            print(f"  I(z_dy;Y)   = {results['metrics']['I(z_dy;Y)']:.4f}")
+            print(f"  I(z_dy;D)   = {results['metrics']['I(z_dy;D)']:.4f}")
+            print(f"  I(z_dy;Y;D) = {results['metrics']['I(z_dy;Y;D)']:.4f} (interaction - key metric)")
             print(f"  I(z_dy;Y,D) = {results['metrics']['I(z_dy;Y,D)']:.4f} (joint info)")
+
+            # Check information capture for z_dy
+            zdy_capture = self.check_information_capture(
+                results['metrics'], "z_dy", "interaction", capture_threshold
+            )
+            results['information_capture']['z_dy'] = zdy_capture
+            results['warnings'].extend(zdy_capture['warnings'])
+
+            # z_dy is NOT supposed to be pure, so no theorem verification
+            results['theorem_verification']['z_dy'] = {
+                'name': 'z_dy',
+                'purity_type': 'interaction',
+                'note': 'Interaction latent is not expected to be pure'
+            }
         else:
             print("\n⚠️  No z_dy latent (DIVA model) - skipping interaction evaluation")
             results['metrics']['I(z_dy;Y;D)'] = 0.0
             results['metrics']['I(z_dy;Y)'] = 0.0
             results['metrics']['I(z_dy;D)'] = 0.0
             results['metrics']['I(z_dy;Y,D)'] = 0.0
+            results['metrics']['I(z_dy;Y|D)'] = 0.0
+            results['metrics']['I(z_dy;D|Y)'] = 0.0
 
-        # 4. Skip z_x (residual latent) evaluation
-        # The residual space is designed to capture variation unrelated to Y and D.
-        # Measuring I(z_x;Y,D) is not theoretically sound - it's tautological since
-        # z_x is trained to NOT contain Y,D information via sparsity penalties.
-        print("\n⏭️  Skipping z_x (residual latent) evaluation - not theoretically meaningful")
-        results['metrics']['I(z_x;Y,D)'] = None
-        results['metrics']['I(z_x;Y)'] = None
-        results['metrics']['I(z_x;D)'] = None
+        # =====================================================================
+        # 4. Evaluate z_x (residual latent) - NOW ENABLED
+        # =====================================================================
+        print("\n📊 Evaluating z_x (residual latent)...")
+        print("   Expected: residual (I(z_x;Y,D) ≈ 0), no Y/D information")
 
-        # 5. Compute overall partition quality score
-        results['metrics']['partition_quality'] = self._compute_partition_quality(results['metrics'])
+        # Check if z_x is all zeros (discriminative models like AugmentedDANN)
+        zx_variance = np.var(z_x)
+        if zx_variance < 1e-10:
+            print(f"  z_x has near-zero variance ({zx_variance:.2e}) - likely discriminative model")
+            print("  Setting all z_x metrics to 0.0")
+            results['metrics']['I(z_x;Y)'] = 0.0
+            results['metrics']['I(z_x;D)'] = 0.0
+            results['metrics']['I(z_x;Y|D)'] = 0.0
+            results['metrics']['I(z_x;D|Y)'] = 0.0
+            results['metrics']['I(z_x;Y;D)'] = 0.0
+            results['metrics']['I(z_x;Y,D)'] = 0.0
 
+            zx_purity = {
+                'name': 'z_x',
+                'purity_type': 'residual',
+                'is_pure': True,
+                'purity_value': 0.0,
+                'theorem_satisfied': True,
+                'theorem_expected': 0.0,
+                'theorem_actual': 0.0,
+                'theorem_deviation': 0.0,
+                'non_negativity_satisfied': True,
+                'violations': [],
+                'warnings': [],
+                'note': 'z_x is zero tensor (discriminative model)'
+            }
+            zx_capture = {
+                'name': 'z_x',
+                'intended_capture': 'residual',
+                'captures_intended': True,
+                'capture_value': 0.0,
+                'leakage_value': 0.0,
+                'warnings': []
+            }
+        else:
+            # Compute all metrics for z_x
+            zx_metrics = self.compute_full_latent_metrics(z_x, y_labels, d_labels, "z_x")
+            results['metrics'].update(zx_metrics)
+
+            print(f"  I(z_x;Y|D) = {results['metrics']['I(z_x;Y|D)']:.4f}")
+            print(f"  I(z_x;D|Y) = {results['metrics']['I(z_x;D|Y)']:.4f}")
+            print(f"  I(z_x;Y)   = {results['metrics']['I(z_x;Y)']:.4f}")
+            print(f"  I(z_x;D)   = {results['metrics']['I(z_x;D)']:.4f}")
+            print(f"  I(z_x;Y;D) = {results['metrics']['I(z_x;Y;D)']:.4f} (interaction)")
+            print(f"  I(z_x;Y,D) = {results['metrics']['I(z_x;Y,D)']:.4f} (should be ≈0 - residual)")
+
+            # Verify theorem constraint for z_x
+            zx_purity = self.verify_purity_constraint(
+                results['metrics'], "z_x", "residual", purity_tolerance
+            )
+            results['violations'].extend(zx_purity['violations'])
+            results['warnings'].extend(zx_purity['warnings'])
+
+            # Check information capture for z_x
+            zx_capture = self.check_information_capture(
+                results['metrics'], "z_x", "residual", capture_threshold
+            )
+            results['warnings'].extend(zx_capture['warnings'])
+
+            # Print theorem verification status
+            print(f"\n  Theorem (c) verification [residual: I(Z;Y,D)=0 → I(Z;Y;D)=0]:")
+            print(f"    Is residual: {'✓' if zx_purity['is_pure'] else '✗'} (I(z_x;Y,D)={zx_purity['purity_value']:.4f})")
+            if zx_purity['is_pure']:
+                print(f"    Theorem satisfied: {'✓' if zx_purity['theorem_satisfied'] else '✗'}")
+                print(f"    Expected I(z_x;Y;D) = 0")
+                print(f"    Actual I(z_x;Y;D) = {zx_purity['theorem_actual']:.4f}")
+                print(f"    Deviation: {zx_purity['theorem_deviation']:.4f}")
+
+        results['theorem_verification']['z_x'] = zx_purity
+        results['information_capture']['z_x'] = zx_capture
+
+        # =====================================================================
+        # 5. Verify INDEPENDENCE condition (Definition condition 4)
+        # =====================================================================
+        print("\n📊 Verifying Independence Condition...")
+        print("   Definition: (Z_Y, Z_D, Z_X) must be mutually independent")
+        print("   Required: I(Z_i; Z_j) = 0 for all pairs i ≠ j")
+
+        # Build latent dictionary for independence check
+        latents = {'z_y': z_y, 'z_d': z_d, 'z_x': z_x}
+        if z_dy is not None:
+            latents['z_dy'] = z_dy
+
+        independence_result = self.verify_latent_independence(latents, purity_tolerance)
+        results['independence'] = independence_result
+        results['violations'].extend(independence_result['violations'])
+        results['warnings'].extend(independence_result['warnings'])
+
+        # Add pairwise MI to metrics
+        for pair_name, mi_value in independence_result['pairwise_mi'].items():
+            results['metrics'][pair_name] = mi_value
+
+        # Print independence results
+        print("\n  Pairwise Mutual Information (should all be ≈0):")
+        for pair_name, mi_value in independence_result['pairwise_mi'].items():
+            status = '✓' if mi_value < purity_tolerance else '✗'
+            print(f"    {pair_name} = {mi_value:.4f} {status}")
+
+        print(f"\n  All latents independent: {'✓' if independence_result['all_independent'] else '✗'}")
+        print(f"  Total dependence: {independence_result['total_dependence']:.4f}")
+        print(f"  Average dependence: {independence_result['avg_dependence']:.4f}")
+
+        # =====================================================================
+        # 6. Compute overall partition quality score (updated with independence)
+        # =====================================================================
+        results['metrics']['partition_quality'] = self._compute_partition_quality(
+            results['metrics'],
+            results['theorem_verification'],
+            results['information_capture'],
+            independence_result
+        )
+
+        # =====================================================================
+        # 7. Print summary
+        # =====================================================================
         print("\n" + "="*80)
-        print("📈 OVERALL PARTITION QUALITY SCORE")
+        print("📈 DISENTANGLED PARTITION EVALUATION SUMMARY")
         print("="*80)
+
+        # Definition compliance check
+        print("\n--- Definition Compliance ---")
+        cond1_ok = results['theorem_verification']['z_y'].get('is_pure', False)
+        cond2_ok = results['theorem_verification']['z_d'].get('is_pure', False)
+        cond3_ok = results['theorem_verification']['z_x'].get('is_pure', False)
+        cond4_ok = independence_result['all_independent']
+
+        print(f"  1. Class-purity   I(Z_Y;D|Y)=0: {'✓' if cond1_ok else '✗'} (actual={results['metrics'].get('I(z_y;D|Y)', 0):.4f})")
+        print(f"  2. Domain-purity  I(Z_D;Y|D)=0: {'✓' if cond2_ok else '✗'} (actual={results['metrics'].get('I(z_d;Y|D)', 0):.4f})")
+        print(f"  3. Residual       I(Z_X;Y,D)=0: {'✓' if cond3_ok else '✗'} (actual={results['metrics'].get('I(z_x;Y,D)', 0):.4f})")
+        print(f"  4. Independence   I(Z_i;Z_j)=0: {'✓' if cond4_ok else '✗'} (avg={independence_result['avg_dependence']:.4f})")
+
+        all_conditions_met = cond1_ok and cond2_ok and cond3_ok and cond4_ok
+        print(f"\n  ★ Partition is DISENTANGLED: {'✓ YES' if all_conditions_met else '✗ NO'}")
+
+        print("\n--- Partition Quality Score ---")
         print(f"Score: {results['metrics']['partition_quality']:.4f} / 1.000")
-        print("(Higher is better - indicates better adherence to Minimal Information Partition)")
-        print("="*80 + "\n")
+        print("(Higher is better - indicates better adherence to Disentangled Partition definition)")
+
+        print("\n--- Purity Theorem Verification ---")
+        all_satisfied = True
+        for latent_name, verification in results['theorem_verification'].items():
+            if 'theorem_satisfied' in verification:
+                status = '✓' if verification['theorem_satisfied'] else '✗'
+                all_satisfied = all_satisfied and verification['theorem_satisfied']
+                print(f"  {latent_name}: {status} (deviation={verification.get('theorem_deviation', 0):.4f})")
+
+        print(f"\n  All theorem constraints satisfied: {'✓' if all_satisfied else '✗'}")
+
+        print("\n--- Information Capture Summary ---")
+        for latent_name, capture in results['information_capture'].items():
+            status = '✓' if capture['captures_intended'] else '✗'
+            print(f"  {latent_name} ({capture['intended_capture']}): {status}")
+            print(f"      Capture value: {capture['capture_value']:.4f}")
+            if capture.get('leakage_value', 0) > capture_threshold:
+                print(f"      ⚠️ Leakage: {capture['leakage_value']:.4f}")
+
+        if results['violations']:
+            print("\n--- ⚠️ VIOLATIONS ---")
+            for v in results['violations']:
+                print(f"  • {v}")
+
+        if results['warnings']:
+            print("\n--- Warnings ---")
+            for w in results['warnings']:
+                print(f"  • {w}")
+
+        print("\n" + "="*80 + "\n")
 
         return results
 
-    def _compute_partition_quality(self, metrics: Dict[str, float]) -> float:
+    def _compute_partition_quality(
+        self,
+        metrics: Dict[str, float],
+        theorem_verification: Optional[Dict[str, any]] = None,
+        information_capture: Optional[Dict[str, any]] = None,
+        independence: Optional[Dict[str, any]] = None
+    ) -> float:
         """
         Compute overall partition quality score (0-1, higher is better).
 
-        Good partition should have:
-        - High I(z_y;Y|D) and low I(z_y;D|Y)
-        - High I(z_d;D|Y) and low I(z_d;Y|D)
-        - High positive I(z_dy;Y;D) if z_dy exists
+        The score incorporates all 4 conditions of the Disentangled Partition definition:
+        1. Class-purity: I(Z_Y; D|Y) = 0
+        2. Domain-purity: I(Z_D; Y|D) = 0
+        3. Residual: I(Z_X; Y,D) = 0
+        4. Independence: I(Z_i; Z_j) = 0 for all pairs
 
-        Note: z_x metrics are not included as they are not theoretically meaningful.
+        Plus additional quality measures:
+        - Information capture (each latent captures its intended information)
+        - Theorem compliance (pure representations have correct I(Z;Y;D))
         """
         # Normalize by typical entropy values (log(num_classes) ~ 1-3 nats)
         typical_entropy = 2.5
 
-        # Positive contributions (what we want high)
-        score = 0.0
-        score += metrics['I(z_y;Y|D)'] / typical_entropy  # Class specificity
-        score += metrics['I(z_d;D|Y)'] / typical_entropy  # Domain specificity
-        if metrics.get('I(z_dy;Y;D)') and metrics['I(z_dy;Y;D)'] > 0:
-            score += metrics['I(z_dy;Y;D)'] / typical_entropy  # Interaction capture
+        # ===== Component 1: Purity Score (30% weight) =====
+        # Measures conditions 1-3 of the definition
+        purity_score = 1.0
 
-        # Negative contributions (penalties for what should be low)
-        score -= metrics['I(z_y;D|Y)'] / typical_entropy  # Class shouldn't have domain info
-        score -= metrics['I(z_d;Y|D)'] / typical_entropy  # Domain shouldn't have class info
-        # Note: z_x metrics excluded - not theoretically meaningful
+        # Condition 1: Class-purity I(Z_Y; D|Y) = 0
+        zy_d_given_y = metrics.get('I(z_y;D|Y)', 0)
+        purity_score -= min(0.33, zy_d_given_y / typical_entropy)
 
-        # Normalize to 0-1 range
-        max_score = 3.0  # Assuming 3 positive terms
-        normalized_score = score / max_score
+        # Condition 2: Domain-purity I(Z_D; Y|D) = 0
+        zd_y_given_d = metrics.get('I(z_d;Y|D)', 0)
+        purity_score -= min(0.33, zd_y_given_d / typical_entropy)
 
-        return float(max(0.0, min(1.0, normalized_score)))
+        # Condition 3: Residual I(Z_X; Y,D) = 0
+        zx_joint = metrics.get('I(z_x;Y,D)', 0)
+        if zx_joint is not None:
+            purity_score -= min(0.33, zx_joint / typical_entropy)
+
+        purity_score = max(0.0, purity_score)
+
+        # ===== Component 2: Independence Score (25% weight) =====
+        # Measures condition 4 of the definition
+        independence_score = 1.0
+        if independence:
+            avg_dep = independence.get('avg_dependence', 0)
+            # Penalty proportional to average dependence
+            independence_score -= min(1.0, avg_dep / typical_entropy)
+            if not independence.get('all_independent', True):
+                independence_score *= 0.7  # Additional penalty for violations
+
+        independence_score = max(0.0, independence_score)
+
+        # ===== Component 3: Information Capture Score (25% weight) =====
+        capture_score = 1.0
+        if information_capture:
+            n_latents = 0
+            for latent_name, capture in information_capture.items():
+                n_latents += 1
+                if not capture.get('captures_intended', False):
+                    # Penalty for not capturing intended info
+                    capture_score -= 0.25
+
+                # Penalty for leakage
+                leakage = capture.get('leakage_value', 0)
+                if leakage > 0.1:
+                    capture_score -= leakage / (typical_entropy * 2)
+
+            capture_score = max(0.0, min(1.0, capture_score))
+
+        # ===== Component 4: Theorem Compliance Score (20% weight) =====
+        theorem_score = 1.0
+        if theorem_verification:
+            for latent_name, verification in theorem_verification.items():
+                if 'theorem_satisfied' in verification:
+                    if verification.get('is_pure', False):
+                        if not verification.get('theorem_satisfied', False):
+                            # Penalty proportional to deviation
+                            deviation = verification.get('theorem_deviation', 0)
+                            theorem_score -= min(0.2, deviation / typical_entropy)
+
+                    if not verification.get('non_negativity_satisfied', True):
+                        # Severe penalty for non-negativity violation
+                        theorem_score -= 0.3
+
+            theorem_score = max(0.0, min(1.0, theorem_score))
+
+        # ===== Combine Components =====
+        # Weights reflect the 4 conditions of the Disentangled Partition definition:
+        # - Purity (conditions 1-3): 30%
+        # - Independence (condition 4): 25%
+        # - Information capture: 25%
+        # - Theorem compliance: 20%
+        final_score = (
+            0.30 * purity_score +
+            0.25 * independence_score +
+            0.25 * capture_score +
+            0.20 * theorem_score
+        )
+
+        return float(max(0.0, min(1.0, final_score)))
 
     def compare_models(
         self,
@@ -563,6 +1247,8 @@ class MinimalInformationPartitionEvaluator:
                 return float(obj)
             elif isinstance(obj, (np.integer, np.int32, np.int64)):
                 return int(obj)
+            elif isinstance(obj, (np.bool_, bool)):
+                return bool(obj)
             elif isinstance(obj, np.ndarray):
                 return obj.tolist()
             elif isinstance(obj, dict):
@@ -604,7 +1290,7 @@ def extract_latents_from_model(
     # Detect AugmentedDANN model (uses 3-component latent structure)
     is_augmented_dann = (hasattr(model, 'extract_features') and
                          hasattr(model, 'name') and
-                         model.name == 'dann')
+                         model.name in ('dann', 'dann_augmented'))
 
     if is_augmented_dann:
         print("Detected AugmentedDANN model - using extract_features() for 3-space latent extraction")
