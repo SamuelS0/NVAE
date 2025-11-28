@@ -195,6 +195,8 @@ FIXED_PARAMS = {
     # Trainer parameters (needed by trainers)
     'beta_annealing': False,  # Beta annealing for KL divergence
     'beta_scale': 1.0,  # Scaling factor for beta weights (used by trainers)
+    # Encoder architecture
+    'separate_encoders': False,  # Use separate encoders for each latent (achieves I(Z_i; Z_j) = 0)
     # Backward compatible parameter names (some trainers/code may expect these)
     # Alpha weights (fallbacks for new names alpha_y, alpha_d)
     'alpha_1': 75.0,

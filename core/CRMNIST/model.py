@@ -63,7 +63,8 @@ class VAE(NModule):
             l1_lambda_zy=0.0,
             l1_lambda_zx=0.0,
             l1_lambda_zdy=0.0,
-            l1_lambda_zd=0.0
+            l1_lambda_zd=0.0,
+            separate_encoders=False
             ):
         
         super().__init__()
@@ -123,9 +124,19 @@ class VAE(NModule):
         else:
             self.zdy_index_range = [self.zy_dim + self.zx_dim, self.zy_dim + self.zx_dim + self.zdy_dim]
             self.zd_index_range = [self.zy_dim + self.zx_dim + self.zdy_dim, self.z_total_dim]
-        
-        self.qz = qz(self.zy_dim, self.zx_dim, self.zdy_dim, self.zd_dim, self.z_total_dim,
-                     in_channels, out_channels, kernel, stride, padding, diva)
+
+        # Store separate_encoders flag for checkpoint compatibility
+        self.separate_encoders = separate_encoders
+
+        # Choose encoder: separate (for true independence) or shared (original)
+        if separate_encoders:
+            # Use separate encoders for each latent space - achieves I(Z_i; Z_j) = 0
+            self.qz = SeparateEncoders(self.zy_dim, self.zx_dim, self.zdy_dim, self.zd_dim,
+                                       in_channels, diva)
+        else:
+            # Original shared encoder (backward compatible)
+            self.qz = qz(self.zy_dim, self.zx_dim, self.zdy_dim, self.zd_dim, self.z_total_dim,
+                         in_channels, out_channels, kernel, stride, padding, diva)
         self.qy = qy(self.y_dim, self.zy_dim, self.zdy_dim, diva)
         self.qd = qd(self.a_dim, self.zd_dim, self.zdy_dim, diva)
 
@@ -520,7 +531,89 @@ class VAE(NModule):
 
 
 
-#Encoder module 
+#Encoder module for a single latent space
+class SingleLatentEncoder(nn.Module):
+    """
+    Single encoder for one latent space (used for separate encoders mode).
+    Same architecture as qz but outputs only one latent dimension.
+    """
+    def __init__(self, z_dim, in_channels=3):
+        super().__init__()
+        self.z_dim = z_dim
+
+        # Same architecture as qz encoder
+        self.encoder = nn.Sequential(
+            # Block 1
+            nn.Conv2d(in_channels=in_channels, out_channels=96, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(96),
+            nn.ReLU(),
+            # Block 2
+            nn.MaxPool2d(2, 2),
+            # Block 3
+            nn.Conv2d(96, 192, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(192),
+            nn.ReLU(),
+            # Block 4
+            nn.MaxPool2d(2, 2),
+            nn.Flatten()
+        )
+
+        # Output layers for this specific latent space
+        self.loc = nn.Linear(192 * 7 * 7, z_dim)
+        self.scale = nn.Sequential(
+            nn.Linear(192 * 7 * 7, z_dim),
+            nn.Softplus()
+        )
+
+    def forward(self, x):
+        h = self.encoder(x)
+        z_loc = self.loc(h)
+        z_scale = self.scale(h) + 1e-7
+        return z_loc, z_scale
+
+
+class SeparateEncoders(nn.Module):
+    """
+    Manages 4 independent CNN encoders for each latent space (zy, zx, zdy, zd).
+    Each encoder processes the input independently to achieve true statistical independence I(Z_i; Z_j) = 0.
+    """
+    def __init__(self, zy_dim, zx_dim, zdy_dim, zd_dim, in_channels=3, diva=False):
+        super().__init__()
+        self.diva = diva
+        self.zy_dim = zy_dim
+        self.zx_dim = zx_dim
+        self.zdy_dim = zdy_dim if not diva else 0
+        self.zd_dim = zd_dim
+
+        # Create independent encoders for each latent space
+        self.encoder_zy = SingleLatentEncoder(zy_dim, in_channels)
+        self.encoder_zx = SingleLatentEncoder(zx_dim, in_channels)
+        if not diva:
+            self.encoder_zdy = SingleLatentEncoder(zdy_dim, in_channels)
+        else:
+            self.encoder_zdy = None
+        self.encoder_zd = SingleLatentEncoder(zd_dim, in_channels)
+
+    def forward(self, x):
+        # Each encoder processes x independently - true independence!
+        mu_zy, logvar_zy = self.encoder_zy(x)
+        mu_zx, logvar_zx = self.encoder_zx(x)
+        mu_zd, logvar_zd = self.encoder_zd(x)
+
+        if not self.diva:
+            mu_zdy, logvar_zdy = self.encoder_zdy(x)
+            # Concatenate in the expected order: zy, zx, zdy, zd
+            mu = torch.cat([mu_zy, mu_zx, mu_zdy, mu_zd], dim=1)
+            logvar = torch.cat([logvar_zy, logvar_zx, logvar_zdy, logvar_zd], dim=1)
+        else:
+            # DIVA mode: no zdy
+            mu = torch.cat([mu_zy, mu_zx, mu_zd], dim=1)
+            logvar = torch.cat([logvar_zy, logvar_zx, logvar_zd], dim=1)
+
+        return mu, logvar
+
+
+#Encoder module (shared encoder - original)
 class qz(NModule):
     def __init__(self,
                  zy_dim,

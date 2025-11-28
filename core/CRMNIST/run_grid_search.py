@@ -154,6 +154,11 @@ def parse_args():
         default=100,
         help='Maximum batches to use for IT analysis (default: 100)'
     )
+    parser.add_argument(
+        '--separate-encoders',
+        action='store_true',
+        help='Use separate CNN encoders for each latent space (achieves true I(Z_i; Z_j) = 0)'
+    )
 
     return parser.parse_args()
 
@@ -223,6 +228,12 @@ def main():
     if not configs:
         print("No configurations match the specified filters!")
         return
+
+    # Apply separate_encoders flag if specified
+    if args.separate_encoders:
+        print("Using separate encoders for each latent space (I(Z_i; Z_j) = 0 architecture)")
+        for config in configs:
+            config['params']['separate_encoders'] = True
 
     print(f"Running {len(configs)} configurations...")
 

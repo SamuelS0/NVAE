@@ -138,7 +138,8 @@ class AugmentedDANN(NModule):
         beta_adv=0.15,
         image_size=28,  # Image dimensions: 28 for CRMNIST, 96 for WILD
         use_conditional_adversarial=True,  # Use conditional adversarial for I(Z_Y;D|Y)=0 and I(Z_D;Y|D)=0
-        lambda_schedule_gamma=5.0  # Controls speed of adversarial ramp-up (lower = slower). DANN paper: 10, default: 5
+        lambda_schedule_gamma=5.0,  # Controls speed of adversarial ramp-up (lower = slower). DANN paper: 10, default: 5
+        separate_encoders=False  # Use separate CNN encoders for each latent space (achieves true I(Z_i; Z_j) = 0)
     ):
         super().__init__()
 
@@ -185,10 +186,21 @@ class AugmentedDANN(NModule):
         self.beta_adv = beta_adv
         self.lambda_schedule_gamma = lambda_schedule_gamma
 
-        # Single shared encoder that outputs to combined latent space
-        # This matches the architecture pattern of NVAE/DIVA/DANN/IRM
+        # Store for encoder creation and checkpoint compatibility
+        self.separate_encoders = separate_encoders
+        self.in_channels = in_channels
         total_latent_dim = zy_dim + zd_dim + zdy_dim
-        self.shared_encoder = self._create_encoder(in_channels, total_latent_dim, image_size)
+
+        # Create encoder(s) based on mode
+        if separate_encoders:
+            # Separate CNN encoders for each latent space - achieves true I(Z_i; Z_j) = 0
+            self.encoder_zy = self._build_single_encoder(in_channels, zy_dim, image_size)
+            self.encoder_zd = self._build_single_encoder(in_channels, zd_dim, image_size)
+            self.encoder_zdy = self._build_single_encoder(in_channels, zdy_dim, image_size)
+            self.shared_encoder = None  # Not used in separate mode
+        else:
+            # Single shared encoder that outputs to combined latent space (original behavior)
+            self.shared_encoder = self._create_shared_encoder(in_channels, total_latent_dim, image_size)
         
         # System 1: Class-focused DANN components
         # Main class classifier (operates on Z_y ∪ Z_dy) - 3-layer MLP with 32 hidden units
@@ -262,20 +274,35 @@ class AugmentedDANN(NModule):
         if self.y_dim <= 0 or self.d_dim <= 0:
             raise ValueError("Output dimensions must be positive")
 
-        # Validate shared encoder output dimension
+        # Validate encoder output dimensions based on mode
         total_latent_dim = self.zy_dim + self.zd_dim + self.zdy_dim
-        # Get the final layer of the shared encoder (should be the Linear layer)
-        encoder_layers = list(self.shared_encoder.modules())
-        final_linear = None
-        for layer in reversed(encoder_layers):
-            if isinstance(layer, nn.Linear):
-                final_linear = layer
-                break
 
-        if final_linear is not None:
-            if final_linear.out_features != total_latent_dim:
-                raise ValueError(f"Shared encoder output dimension mismatch: "
-                               f"expected {total_latent_dim}, got {final_linear.out_features}")
+        if self.separate_encoders:
+            # Validate separate encoders
+            def check_encoder_output(encoder, expected_dim, name):
+                encoder_layers = list(encoder.modules())
+                for layer in reversed(encoder_layers):
+                    if isinstance(layer, nn.Linear):
+                        if layer.out_features != expected_dim:
+                            raise ValueError(f"{name} encoder output dimension mismatch: "
+                                           f"expected {expected_dim}, got {layer.out_features}")
+                        return
+            check_encoder_output(self.encoder_zy, self.zy_dim, "zy")
+            check_encoder_output(self.encoder_zd, self.zd_dim, "zd")
+            check_encoder_output(self.encoder_zdy, self.zdy_dim, "zdy")
+        else:
+            # Validate shared encoder output dimension
+            encoder_layers = list(self.shared_encoder.modules())
+            final_linear = None
+            for layer in reversed(encoder_layers):
+                if isinstance(layer, nn.Linear):
+                    final_linear = layer
+                    break
+
+            if final_linear is not None:
+                if final_linear.out_features != total_latent_dim:
+                    raise ValueError(f"Shared encoder output dimension mismatch: "
+                                   f"expected {total_latent_dim}, got {final_linear.out_features}")
 
         # Validate classifier input dimensions match expected latent dimensions
         expected_class_input = self.zy_dim + self.zdy_dim
@@ -309,7 +336,14 @@ class AugmentedDANN(NModule):
                 raise ValueError(f"Adversarial class classifier expects {self.zd_dim} features, "
                                f"got {adv_class_first.in_features}")
     
-    def _create_encoder(self, in_channels, out_dim, image_size):
+    def _build_single_encoder(self, in_channels, out_dim, image_size):
+        """
+        Build a single CNN encoder for one latent space (used in separate encoders mode).
+        Same architecture as shared encoder but outputs to a single latent dimension.
+        """
+        return self._create_shared_encoder(in_channels, out_dim, image_size)
+
+    def _create_shared_encoder(self, in_channels, out_dim, image_size):
         """
         Create a CNN encoder that outputs to combined or individual latent space.
 
@@ -385,7 +419,7 @@ class AugmentedDANN(NModule):
                     nn.init.zeros_(module.bias)
     
     def extract_features(self, x):
-        """Extract features using shared encoder and split into latent spaces"""
+        """Extract features using encoder(s) and return latent spaces"""
         # Input validation
         if not isinstance(x, torch.Tensor):
             raise TypeError("Input must be a torch.Tensor")
@@ -399,14 +433,20 @@ class AugmentedDANN(NModule):
         if x.size(2) != self.image_size or x.size(3) != self.image_size:
             raise ValueError(f"Input must be {self.image_size}x{self.image_size} images, got {x.size(2)}x{x.size(3)}")
 
-        # Single forward pass through shared encoder
-        z_combined = self.shared_encoder(x)
+        if self.separate_encoders:
+            # Separate encoders: each processes input independently - true independence!
+            zy = self.encoder_zy(x)
+            zd = self.encoder_zd(x)
+            zdy = self.encoder_zdy(x)
+        else:
+            # Shared encoder: single forward pass, then split
+            z_combined = self.shared_encoder(x)
 
-        # Split the combined latent representation into separate spaces
-        # Order: zy, zd, zdy
-        zy = z_combined[:, :self.zy_dim]
-        zd = z_combined[:, self.zy_dim:self.zy_dim + self.zd_dim]
-        zdy = z_combined[:, self.zy_dim + self.zd_dim:]
+            # Split the combined latent representation into separate spaces
+            # Order: zy, zd, zdy
+            zy = z_combined[:, :self.zy_dim]
+            zd = z_combined[:, self.zy_dim:self.zy_dim + self.zd_dim]
+            zdy = z_combined[:, self.zy_dim + self.zd_dim:]
 
         # Validate output dimensions
         if zy.size(1) != self.zy_dim:

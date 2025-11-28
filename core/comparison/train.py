@@ -50,7 +50,8 @@ def train_nvae(args, spec_data, train_loader, test_loader, dataset):
                 l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
                 l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
                 l1_lambda_zdy=getattr(args, 'l1_lambda_zdy', 0.0),
-                l1_lambda_zd=getattr(args, 'l1_lambda_zd', 0.0))
+                l1_lambda_zd=getattr(args, 'l1_lambda_zd', 0.0),
+                separate_encoders=getattr(args, 'separate_encoders', False))
 
         model_params = {
             'class_map': spec_data['class_map'],
@@ -91,7 +92,8 @@ def train_nvae(args, spec_data, train_loader, test_loader, dataset):
                 l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
                 l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
                 l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
-                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0),
+                separate_encoders=getattr(args, 'separate_encoders', False))
         
         model_params = {
             'recon_weight': args.recon_weight,
@@ -163,7 +165,8 @@ def train_staged_nvae(args, spec_data, train_loader, test_loader, dataset):
                 l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
                 l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
                 l1_lambda_zdy=getattr(args, 'l1_lambda_zdy', 0.0),
-                l1_lambda_zd=getattr(args, 'l1_lambda_zd', 0.0))
+                l1_lambda_zd=getattr(args, 'l1_lambda_zd', 0.0),
+                separate_encoders=getattr(args, 'separate_encoders', False))
 
         model_params = {
             'class_map': spec_data['class_map'],
@@ -205,7 +208,8 @@ def train_staged_nvae(args, spec_data, train_loader, test_loader, dataset):
                 l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
                 l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
                 l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
-                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0),
+                separate_encoders=getattr(args, 'separate_encoders', False))
         
         model_params = {
             'recon_weight': args.recon_weight,
@@ -274,7 +278,8 @@ def train_diva(args, spec_data, train_loader, test_loader, dataset):
                 l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
                 l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
                 l1_lambda_zdy=getattr(args, 'l1_lambda_zdy', 0.0),
-                l1_lambda_zd=getattr(args, 'l1_lambda_zd', 0.0))
+                l1_lambda_zd=getattr(args, 'l1_lambda_zd', 0.0),
+                separate_encoders=getattr(args, 'separate_encoders', False))
 
         model_params = {
             'class_map': spec_data['class_map'],
@@ -315,7 +320,8 @@ def train_diva(args, spec_data, train_loader, test_loader, dataset):
                 l1_lambda_zy=getattr(args, 'l1_lambda_zy', 0.0),
                 l1_lambda_zx=getattr(args, 'l1_lambda_zx', 0.0),
                 l1_lambda_zay=getattr(args, 'l1_lambda_zay', 0.0),
-                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0))
+                l1_lambda_za=getattr(args, 'l1_lambda_za', 0.0),
+                separate_encoders=getattr(args, 'separate_encoders', False))
         model_params = {
         'recon_weight': args.recon_weight,
         'zy_dim': args.zy_dim,
@@ -505,7 +511,8 @@ def train_dann_augmented(args, spec_data, train_loader, val_loader, dataset, see
         alpha_d=alpha_d,
         beta_adv=getattr(args, 'beta_adv', 0.2),
         lambda_schedule_gamma=lambda_schedule_gamma,
-        image_size=image_size  # Adaptive: 28 for CRMNIST, 96 for WILD
+        image_size=image_size,  # Adaptive: 28 for CRMNIST, 96 for WILD
+        separate_encoders=getattr(args, 'separate_encoders', False)
     ).to(args.device)
 
     # Create optimizer
