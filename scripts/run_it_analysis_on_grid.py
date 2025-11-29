@@ -3,7 +3,9 @@
 Run Information-Theoretic analysis on existing grid search experiments.
 
 This script loads trained models from a completed grid search and runs
-IT analysis on each model that supports it (NVAE, DIVA, AugmentedDANN).
+IT analysis on each model that supports it:
+- Decomposed models: NVAE, DIVA, AugmentedDANN (full latent partition analysis)
+- Monolithic models: DANN, IRM (unified metrics for comparison)
 """
 
 import os
@@ -20,14 +22,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.information_theoretic_evaluation import (
     MinimalInformationPartitionEvaluator,
     extract_latents_from_model,
+    extract_monolithic_features,
 )
-from core.CRMNIST.grid_search.runner import IT_SUPPORTED_MODELS
+from core.CRMNIST.grid_search.runner import (
+    IT_SUPPORTED_MODELS,
+    DECOMPOSED_IT_MODELS,
+    MONOLITHIC_IT_MODELS,
+)
 
 # Model type to class mapping
 MODEL_CLASSES = {
     'nvae': ('core.CRMNIST.model', 'VAE'),
     'diva': ('core.CRMNIST.model', 'VAE'),
     'dann_augmented': ('core.CRMNIST.dann_model', 'AugmentedDANN'),
+    'dann': ('core.comparison.dann', 'DANN'),
+    'irm': ('core.comparison.irm', 'IRM'),
 }
 
 
@@ -103,6 +112,53 @@ def load_model(model_type: str, config: dict, device: str):
             sparsity_weight_zdy=params.get('sparsity_weight_zdy', 2.0),
             sparsity_weight_zy_zd=params.get('sparsity_weight_zy_zd', 1.0),
         ).to(device)
+
+    elif model_type == 'dann':
+        from core.comparison.dann import DANN
+
+        with open('conf/crmnist.json', 'r') as f:
+            spec_data = json.load(f)
+
+        n_classes = spec_data.get('n_classes', 10)
+        n_domains = len(spec_data.get('domain_data', {}))
+
+        # Total dim = zy + zx + zdy + zd (same total capacity as decomposed models)
+        zy_dim = params.get('zy_dim', 8)
+        zx_dim = params.get('zx_dim', 8)
+        zdy_dim = params.get('zdy_dim', 8)
+        zd_dim = params.get('zd_dim', 8)
+        z_dim = zy_dim + zx_dim + zdy_dim + zd_dim
+
+        model = DANN(
+            z_dim=z_dim,
+            num_y_classes=n_classes,
+            num_r_classes=n_domains,
+            dataset='crmnist',
+        ).to(device)
+
+    elif model_type == 'irm':
+        from core.comparison.irm import IRM
+
+        with open('conf/crmnist.json', 'r') as f:
+            spec_data = json.load(f)
+
+        n_classes = spec_data.get('n_classes', 10)
+        n_domains = len(spec_data.get('domain_data', {}))
+
+        # Total dim = zy + zx + zdy + zd (same total capacity as decomposed models)
+        zy_dim = params.get('zy_dim', 8)
+        zx_dim = params.get('zx_dim', 8)
+        zdy_dim = params.get('zdy_dim', 8)
+        zd_dim = params.get('zd_dim', 8)
+        z_dim = zy_dim + zx_dim + zdy_dim + zd_dim
+
+        model = IRM(
+            z_dim=z_dim,
+            num_y_classes=n_classes,
+            num_r_classes=n_domains,
+            dataset='crmnist',
+        ).to(device)
+
     else:
         raise ValueError(f"Unsupported model type for IT analysis: {model_type}")
 
@@ -134,8 +190,10 @@ def load_data(batch_size: int = 64):
         base_split_seed=42
     )
 
+    # CRITICAL: shuffle=True ensures all domains are sampled when using max_batches
+    # Without shuffling, data is ordered by domain and we'd only see domain 0
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False
+        val_dataset, batch_size=batch_size, shuffle=True
     )
 
     return val_loader
@@ -171,17 +229,13 @@ def run_it_analysis_on_experiment(
     model.load_state_dict(state_dict)
     model.eval()
 
-    # Extract latents
-    z_y, z_d, z_dy, z_x, y_labels, d_labels = extract_latents_from_model(
-        model, val_loader, device, max_batches=max_batches
-    )
-
     # Create evaluator
     evaluator = MinimalInformationPartitionEvaluator(
         n_neighbors=7,
         n_bootstrap=n_bootstrap,
         max_dims=30,
-        pca_variance=0.95
+        pca_variance=0.99,  # Preserve more variance for CRMNIST
+        min_variance_threshold=0.01,  # Filter collapsed dimensions
     )
 
     # Run evaluation (suppress verbose output)
@@ -191,30 +245,61 @@ def run_it_analysis_on_experiment(
     sys.stdout = StringIO()
 
     try:
-        it_results = evaluator.evaluate_latent_partition(
-            z_y, z_d, z_dy, z_x,
-            y_labels, d_labels,
-            compute_bootstrap=(n_bootstrap > 0)
-        )
+        if model_type in DECOMPOSED_IT_MODELS:
+            # Decomposed models: full latent partition analysis
+            z_y, z_d, z_dy, z_x, y_labels, d_labels = extract_latents_from_model(
+                model, val_loader, device, max_batches=max_batches
+            )
+            it_results = evaluator.evaluate_latent_partition(
+                z_y, z_d, z_dy, z_x,
+                y_labels, d_labels,
+                compute_bootstrap=(n_bootstrap > 0)
+            )
+        else:
+            # Monolithic models (DANN, IRM): single representation analysis
+            Z, y_labels, d_labels = extract_monolithic_features(
+                model, val_loader, device, max_batches=max_batches
+            )
+            it_results = evaluator.evaluate_monolithic_representation(
+                Z, y_labels, d_labels,
+                compute_bootstrap=(n_bootstrap > 0)
+            )
     finally:
         sys.stdout = old_stdout
 
     # Save full IT results
     evaluator.save_results(it_results, it_path)
 
-    # Extract summary metrics
+    # Extract summary metrics (different structure for decomposed vs monolithic)
     metrics = it_results.get('metrics', {})
-    it_summary = {
-        'I_zy_Y_given_D': metrics.get('I(z_y;Y|D)', 0.0),
-        'I_zy_D_given_Y': metrics.get('I(z_y;D|Y)', 0.0),
-        'z_y_specificity': metrics.get('z_y_specificity', 0.0),
-        'I_zd_D_given_Y': metrics.get('I(z_d;D|Y)', 0.0),
-        'I_zd_Y_given_D': metrics.get('I(z_d;Y|D)', 0.0),
-        'z_d_specificity': metrics.get('z_d_specificity', 0.0),
-        'I_zdy_Y_D': metrics.get('I(z_dy;Y;D)', 0.0),
-        'I_zdy_joint': metrics.get('I(z_dy;Y,D)', 0.0),
-        'partition_quality': metrics.get('partition_quality', 0.0),
-    }
+    unified = it_results.get('unified_metrics', {})
+
+    if model_type in DECOMPOSED_IT_MODELS:
+        it_summary = {
+            'I_zy_Y_given_D': metrics.get('I(z_y;Y|D)', 0.0),
+            'I_zy_D_given_Y': metrics.get('I(z_y;D|Y)', 0.0),
+            'z_y_specificity': metrics.get('z_y_specificity', 0.0),
+            'I_zd_D_given_Y': metrics.get('I(z_d;D|Y)', 0.0),
+            'I_zd_Y_given_D': metrics.get('I(z_d;Y|D)', 0.0),
+            'z_d_specificity': metrics.get('z_d_specificity', 0.0),
+            'I_zdy_Y_D': metrics.get('I(z_dy;Y;D)', 0.0),
+            'I_zdy_joint': metrics.get('I(z_dy;Y,D)', 0.0),
+            'partition_quality': metrics.get('partition_quality', 0.0),
+            # Unified metrics for cross-model comparison
+            'domain_leakage': unified.get('domain_leakage', 0.0),
+            'domain_invariance_score': unified.get('domain_invariance_score', 0.0),
+        }
+    else:
+        # Monolithic models
+        it_summary = {
+            'I_Z_Y': metrics.get('I(Z;Y)', 0.0),
+            'I_Z_D': metrics.get('I(Z;D)', 0.0),
+            'I_Z_Y_given_D': metrics.get('I(Z;Y|D)', 0.0),
+            'I_Z_D_given_Y': metrics.get('I(Z;D|Y)', 0.0),
+            'domain_invariance_score': metrics.get('domain_invariance_score', 0.0),
+            # Unified metrics for cross-model comparison
+            'domain_leakage': unified.get('domain_leakage', 0.0),
+        }
 
     # Update metrics.json with IT metrics
     metrics_path = os.path.join(exp_dir, 'metrics.json')
@@ -241,7 +326,7 @@ def main():
     parser.add_argument('--force', action='store_true',
                         help='Force re-run even if IT analysis exists')
     parser.add_argument('--models', nargs='+', type=str, default=None,
-                        choices=['nvae', 'diva', 'dann_augmented'],
+                        choices=['nvae', 'diva', 'dann_augmented', 'dann', 'irm'],
                         help='Model types to analyze (default: all supported)')
     args = parser.parse_args()
 
@@ -296,7 +381,9 @@ def main():
             )
             if result is not None:
                 success_count += 1
-                tqdm.write(f"  {exp_name}: partition_quality={result['partition_quality']:.4f}")
+                # Use domain_invariance_score for unified comparison
+                score = result.get('domain_invariance_score', result.get('partition_quality', 0.0))
+                tqdm.write(f"  {exp_name}: domain_invariance={score:.4f}")
             else:
                 skip_count += 1
         except Exception as e:

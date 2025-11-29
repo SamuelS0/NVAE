@@ -215,11 +215,17 @@ class AddColor:
         
         return colored_img
 
-def choose_label_subset(spec_data, seed=None):
-    """Generates y_c and subsets of five labels to be colored in each domain
+def choose_label_subset(spec_data, seed=None, force_random=False):
+    """Generates y_c and subsets of five labels to be colored in each domain.
+
+    If y_c and non-empty subsets are already defined in spec_data, they are
+    preserved unless force_random=True. This allows synergy configs to define
+    specific y_c and subset values.
+
     Args:
         spec_data: dict containing domain_data and other configuration
         seed: Optional random seed for reproducibility. If None, uses current random state.
+        force_random: If True, always generate random values even if config has values.
 
     Returns:
         y_c (int): The chosen label for special coloring
@@ -231,6 +237,20 @@ def choose_label_subset(spec_data, seed=None):
         raise ValueError("spec_data must contain 'domain_data' key")
 
     domain_data = spec_data['domain_data']
+
+    # Check if config already has y_c and non-empty subsets defined
+    config_has_yc = 'y_c' in spec_data and spec_data['y_c'] is not None
+    config_has_subsets = all(
+        'subset' in domain_data[i] and len(domain_data[i]['subset']) > 0
+        for i in domain_data
+    )
+
+    # Use existing config values if present (unless force_random)
+    if config_has_yc and config_has_subsets and not force_random:
+        y_c = spec_data['y_c']
+        subsets = {i: domain_data[i]['subset'] for i in domain_data}
+        print(f"Using y_c and subsets from config (y_c={y_c})")
+        return y_c, subsets
 
     # Set seed for reproducibility if provided
     if seed is not None:
@@ -249,6 +269,7 @@ def choose_label_subset(spec_data, seed=None):
         subsets[i] = random.sample(all_labels, 5)
         domain_data[i]['subset'] = subsets[i]
 
+    print(f"Generated random y_c={y_c} and subsets")
     return y_c, subsets
 
 def make_transform(domain_data, domain_number, style, transform_intensity = 1.5, transform_decay = 1):

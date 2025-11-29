@@ -48,11 +48,17 @@ Compatible Models:
     - NVAE: Full 4-space decomposition (z_y, z_dy, z_d, z_x)
     - DIVA: 3-space decomposition (z_y, z_d, z_x) - no z_dy
     - AugmentedDANN: 3-space decomposition (z_y, z_d, z_dy) - discriminative
+    - DANN: Monolithic representation - evaluated via evaluate_monolithic_representation()
+    - IRM: Monolithic representation - evaluated via evaluate_monolithic_representation()
 
-    Not supported:
-    - Baseline DANN/IRM: Use monolithic feature representations without explicit
-      latent partitioning, making them incompatible with information partition
-      evaluation.
+    For monolithic models (DANN/IRM), we compute:
+    - I(Z;Y), I(Z;D), I(Z;Y|D), I(Z;D|Y), I(Z;Y;D), I(Z;Y,D)
+    - domain_invariance_score = 1 / (1 + I(Z;D|Y))
+
+    This allows comparing domain invariance across all model types using
+    the unified metric I(Z_total; D|Y) where:
+    - For decomposed models: Z_total = concat(z_y, z_dy) [only Y-predictive latents]
+    - For monolithic models: Z_total = Z [single feature representation]
 """
 
 import numpy as np
@@ -81,6 +87,7 @@ class MinimalInformationPartitionEvaluator:
         n_bootstrap: int = 100,
         max_dims: int = 30,
         pca_variance: float = 0.99,
+        min_variance_threshold: float = 0.01,
         random_state: int = 42
     ):
         """
@@ -89,12 +96,14 @@ class MinimalInformationPartitionEvaluator:
             n_bootstrap: Number of bootstrap samples for confidence intervals (default=100)
             max_dims: Maximum dimensions before applying PCA (default=30)
             pca_variance: Variance to preserve when applying PCA (default=0.99)
+            min_variance_threshold: Minimum per-dimension variance to be considered "active" (default=0.01)
             random_state: Random seed for reproducibility
         """
         self.k = n_neighbors
         self.n_bootstrap = n_bootstrap
         self.max_dims = max_dims
         self.pca_variance = pca_variance
+        self.min_variance_threshold = min_variance_threshold
         self.random_state = random_state
         np.random.seed(random_state)
 
@@ -106,12 +115,164 @@ class MinimalInformationPartitionEvaluator:
             arr = arr.reshape(-1, 1)
         return arr.tolist()
 
+    def _filter_active_dimensions(
+        self,
+        Z: np.ndarray,
+        name: str = "Z"
+    ) -> Tuple[np.ndarray, np.ndarray, int]:
+        """
+        Filter out collapsed dimensions (near-zero variance) before MI estimation.
+
+        KNN-based MI estimation fails when dimensions are collapsed because:
+        1. All points appear equidistant in collapsed dimensions
+        2. K-nearest neighbors become arbitrary in those dimensions
+        3. This causes MI to be underestimated or return 0
+
+        Args:
+            Z: Latent array of shape (n_samples, n_dims)
+            name: Name for logging
+
+        Returns:
+            Tuple of:
+                - Z_filtered: Array with only active dimensions (n_samples, n_active)
+                - active_mask: Boolean mask of which dimensions are active
+                - n_active: Number of active dimensions
+        """
+        # Handle NaN/Inf
+        if np.any(np.isnan(Z)) or np.any(np.isinf(Z)):
+            print(f"  ⚠️  {name}: Contains NaN/Inf, replacing with noise")
+            Z = np.nan_to_num(Z, nan=0.0, posinf=0.0, neginf=0.0)
+            Z = Z + np.random.normal(0, 1e-6, Z.shape)
+
+        # Compute per-dimension variance
+        per_dim_var = np.var(Z, axis=0)
+        active_mask = per_dim_var >= self.min_variance_threshold
+        n_active = int(np.sum(active_mask))
+        n_total = Z.shape[1]
+
+        if n_active == 0:
+            # ALL dimensions collapsed - this is a degenerate latent space
+            # Return single dimension of noise; MI will correctly be ~0
+            print(f"  ⚠️  {name}: ALL {n_total} dims collapsed (var < {self.min_variance_threshold})! "
+                  f"Max var: {per_dim_var.max():.2e}. Returning noise.")
+            Z_noise = np.random.normal(0, 1e-6, (Z.shape[0], 1))
+            return Z_noise, np.array([False] * n_total), 0
+
+        if n_active < n_total:
+            # Some dimensions inactive (expected with sparsity regularization)
+            # Filter them out for accurate MI estimation
+            print(f"  {name}: Using {n_active}/{n_total} active dims for MI estimation")
+
+        Z_filtered = Z[:, active_mask]
+        return Z_filtered, active_mask, n_active
+
+    def _preprocess_latent(
+        self,
+        Z: np.ndarray,
+        name: str = "Z"
+    ) -> np.ndarray:
+        """
+        Preprocess latent for MI estimation: filter collapsed dims, standardize, then apply PCA if needed.
+
+        This is the main preprocessing pipeline that should be called before any MI computation.
+
+        Pipeline:
+        1. Filter out collapsed dimensions (variance < threshold)
+        2. Standardize (z-score normalize) - critical for KNN-based MI estimation
+        3. Apply PCA if remaining dims > max_dims
+        4. Add small noise to prevent numerical issues
+
+        Args:
+            Z: Latent array of shape (n_samples, n_dims)
+            name: Name for logging
+
+        Returns:
+            Preprocessed Z ready for MI estimation
+        """
+        # Step 1: Filter collapsed dimensions
+        Z_filtered, active_mask, n_active = self._filter_active_dimensions(Z, name)
+
+        if n_active == 0:
+            # Already handled in _filter_active_dimensions - returns noise
+            return Z_filtered
+
+        # Step 2: Standardize (z-score normalize) each dimension
+        # Critical for KNN-based MI: features must be on comparable scales
+        Z_mean = np.mean(Z_filtered, axis=0)
+        Z_std = np.std(Z_filtered, axis=0)
+        Z_std = np.where(Z_std < 1e-8, 1.0, Z_std)  # Avoid division by zero
+        Z_normalized = (Z_filtered - Z_mean) / Z_std
+
+        # Step 3: Apply PCA if still high-dimensional
+        if Z_normalized.shape[1] > self.max_dims:
+            print(f"  {name}: {Z_normalized.shape[1]} active dims > {self.max_dims}, applying PCA...")
+            pca = PCA(n_components=self.pca_variance, random_state=self.random_state)
+            # Add small noise before PCA to prevent numerical issues
+            Z_safe = Z_normalized + np.random.normal(0, 1e-10, Z_normalized.shape)
+            Z_reduced = pca.fit_transform(Z_safe)
+            explained_var = np.sum(pca.explained_variance_ratio_)
+            print(f"    Reduced to {Z_reduced.shape[1]} dims (explained variance: {explained_var:.2%})")
+            return Z_reduced
+
+        # Step 4: Add tiny noise to prevent exact duplicates causing KNN issues
+        Z_final = Z_normalized + np.random.normal(0, 1e-10, Z_normalized.shape)
+        return Z_final
+
+    def compute_effective_dimensionality(
+        self,
+        Z: np.ndarray,
+        name: str = "Z"
+    ) -> Dict[str, any]:
+        """
+        Compute effective dimensionality statistics for a latent space.
+
+        This helps diagnose sparsity-induced collapse where most dimensions
+        have near-zero variance and are not carrying information.
+
+        Args:
+            Z: Latent array of shape (n_samples, n_dims)
+            name: Name for logging
+
+        Returns:
+            Dict with:
+                - nominal_dims: Original number of dimensions
+                - active_dims: Number of dimensions with variance >= threshold
+                - collapsed_dims: Number of collapsed dimensions
+                - utilization: Fraction of dimensions being used (active/nominal)
+                - per_dim_variance: Variance of each dimension
+                - active_mask: Boolean mask of active dimensions
+        """
+        if torch.is_tensor(Z):
+            Z = Z.cpu().numpy()
+
+        per_dim_var = np.var(Z, axis=0)
+        active_mask = per_dim_var >= self.min_variance_threshold
+        n_active = int(np.sum(active_mask))
+        n_total = Z.shape[1]
+
+        return {
+            'nominal_dims': n_total,
+            'active_dims': n_active,
+            'collapsed_dims': n_total - n_active,
+            'utilization': n_active / n_total if n_total > 0 else 0.0,
+            'per_dim_variance': per_dim_var.tolist(),
+            'variance_threshold': self.min_variance_threshold,
+            'active_mask': active_mask.tolist(),
+            'total_variance': float(np.sum(per_dim_var)),
+            'mean_active_variance': float(np.mean(per_dim_var[active_mask])) if n_active > 0 else 0.0
+        }
+
     def _apply_pca_if_needed(
         self,
         Z: np.ndarray,
         name: str = "Z"
     ) -> Tuple[np.ndarray, Optional[PCA]]:
         """
+        DEPRECATED: Use _preprocess_latent instead.
+
+        This method is kept for backward compatibility but now uses the new
+        preprocessing pipeline internally.
+
         Apply PCA dimensionality reduction if Z has more than max_dims dimensions.
 
         Args:
@@ -121,27 +282,9 @@ class MinimalInformationPartitionEvaluator:
         Returns:
             Tuple of (potentially reduced Z, PCA object or None)
         """
-        if Z.shape[1] <= self.max_dims:
-            return Z, None
-
-        # Check for collapsed latent space (zero variance)
-        Z_var = np.var(Z)
-        if Z_var < 1e-10 or np.any(np.isnan(Z)) or np.any(np.isinf(Z)):
-            print(f"  ⚠️  Warning: {name} has collapsed (variance={Z_var:.2e}). Skipping PCA.")
-            # Return with small noise added to prevent MI calculation failures
-            Z_safe = Z + np.random.normal(0, 1e-8, Z.shape)
-            return Z_safe, None
-
-        print(f"  {name} has {Z.shape[1]} dims > {self.max_dims}, applying PCA...")
-        pca = PCA(n_components=self.pca_variance, random_state=self.random_state)
-
-        # Add small noise to prevent numerical issues in PCA
-        Z_safe = Z + np.random.normal(0, 1e-10, Z.shape)
-        Z_reduced = pca.fit_transform(Z_safe)
-        explained_var = np.sum(pca.explained_variance_ratio_)
-        print(f"    Reduced to {Z_reduced.shape[1]} dims (explained variance: {explained_var:.2%})")
-
-        return Z_reduced, pca
+        # Use new preprocessing pipeline
+        Z_processed = self._preprocess_latent(Z, name)
+        return Z_processed, None
 
     def mutual_information(
         self,
@@ -740,7 +883,26 @@ class MinimalInformationPartitionEvaluator:
         if z_dy is not None:
             print(f"z_dy={z_dy.shape[1]}, ", end="")
         print(f"z_x={z_x.shape[1]}")
-        print(f"Bootstrap: {'Yes (n={})'.format(self.n_bootstrap) if compute_bootstrap else 'No'}")
+
+        # Compute effective dimensionality for each latent (diagnose sparsity collapse)
+        print(f"\nEffective dimensionality (variance >= {self.min_variance_threshold}):")
+        eff_dim_zy = self.compute_effective_dimensionality(z_y, "z_y")
+        eff_dim_zd = self.compute_effective_dimensionality(z_d, "z_d")
+        eff_dim_zdy = self.compute_effective_dimensionality(z_dy, "z_dy") if z_dy is not None else None
+        eff_dim_zx = self.compute_effective_dimensionality(z_x, "z_x")
+
+        print(f"  z_y: {eff_dim_zy['active_dims']}/{eff_dim_zy['nominal_dims']} active "
+              f"({eff_dim_zy['utilization']:.0%} utilization)")
+        print(f"  z_d: {eff_dim_zd['active_dims']}/{eff_dim_zd['nominal_dims']} active "
+              f"({eff_dim_zd['utilization']:.0%} utilization)")
+        if eff_dim_zdy is not None:
+            print(f"  z_dy: {eff_dim_zdy['active_dims']}/{eff_dim_zdy['nominal_dims']} active "
+                  f"({eff_dim_zdy['utilization']:.0%} utilization)")
+        print(f"  z_x: {eff_dim_zx['active_dims']}/{eff_dim_zx['nominal_dims']} active "
+              f"({eff_dim_zx['utilization']:.0%} utilization)")
+
+
+        print(f"\nBootstrap: {'Yes (n={})'.format(self.n_bootstrap) if compute_bootstrap else 'No'}")
         print(f"k-neighbors: {self.k}")
         print(f"Purity tolerance: {purity_tolerance}, Capture threshold: {capture_threshold}")
         print("="*80 + "\n")
@@ -752,12 +914,19 @@ class MinimalInformationPartitionEvaluator:
                 'n_bootstrap': int(self.n_bootstrap) if compute_bootstrap else 0,
                 'purity_tolerance': purity_tolerance,
                 'capture_threshold': capture_threshold,
+                'min_variance_threshold': self.min_variance_threshold,
                 'dims': {
                     'z_y': int(z_y.shape[1]),
                     'z_d': int(z_d.shape[1]),
                     'z_dy': int(z_dy.shape[1]) if z_dy is not None else 0,
                     'z_x': int(z_x.shape[1])
                 }
+            },
+            'effective_dimensionality': {
+                'z_y': eff_dim_zy,
+                'z_d': eff_dim_zd,
+                'z_dy': eff_dim_zdy,
+                'z_x': eff_dim_zx
             },
             'metrics': {},
             'theorem_verification': {},
@@ -766,6 +935,7 @@ class MinimalInformationPartitionEvaluator:
             'violations': [],
             'warnings': []
         }
+
 
         # =====================================================================
         # 1. Evaluate z_y (class-specific latent) - FULL METRICS
@@ -1182,6 +1352,138 @@ class MinimalInformationPartitionEvaluator:
 
         return float(max(0.0, min(1.0, final_score)))
 
+    def evaluate_monolithic_representation(
+        self,
+        Z: np.ndarray,
+        y_labels: np.ndarray,
+        d_labels: np.ndarray,
+        compute_bootstrap: bool = False
+    ) -> Dict[str, any]:
+        """
+        Evaluate IT quantities for a single monolithic representation.
+
+        For DANN/IRM models that don't partition their latent space but still
+        need comparable domain invariance metrics.
+
+        The key metric is I(Z;D|Y) - domain leakage given class labels.
+        Lower values indicate better domain invariance.
+
+        Args:
+            Z: Monolithic latent array of shape (n_samples, n_dims)
+            y_labels: Class labels of shape (n_samples,)
+            d_labels: Domain labels of shape (n_samples,)
+            compute_bootstrap: Whether to compute bootstrap confidence intervals
+
+        Returns:
+            Dictionary with:
+            - model_type: 'monolithic'
+            - metrics: All IT metrics for Z
+            - unified_metrics: Metrics comparable to decomposed models
+            - effective_dimensionality: Latent space utilization stats
+            - theorem_verification: None (no partition to verify)
+        """
+        print("\n" + "="*80)
+        print("INFORMATION-THEORETIC EVALUATION FOR MONOLITHIC REPRESENTATION")
+        print("="*80)
+        print(f"Samples: {Z.shape[0]}, Latent dims: {Z.shape[1]}")
+        print(f"Unique classes: {len(np.unique(y_labels))}, Unique domains: {len(np.unique(d_labels))}")
+
+        # Convert torch tensors if needed
+        if torch.is_tensor(Z):
+            Z = Z.cpu().numpy()
+        if torch.is_tensor(y_labels):
+            y_labels = y_labels.cpu().numpy()
+        if torch.is_tensor(d_labels):
+            d_labels = d_labels.cpu().numpy()
+
+        # Flatten labels if one-hot encoded
+        if len(y_labels.shape) > 1 and y_labels.shape[1] > 1:
+            y_labels = y_labels.argmax(axis=1)
+        if len(d_labels.shape) > 1 and d_labels.shape[1] > 1:
+            d_labels = d_labels.argmax(axis=1)
+
+        # Compute effective dimensionality
+        eff_dim = self.compute_effective_dimensionality(Z, "Z")
+        print(f"  Z: {eff_dim['active_dims']}/{eff_dim['nominal_dims']} active dims "
+              f"(utilization: {eff_dim['utilization']:.1%})")
+
+        # Preprocess Z for MI estimation (filter collapsed dims, apply PCA if needed)
+        Z_processed = self._preprocess_latent(Z, "Z")
+
+        # Compute all metrics
+        print("\nComputing information-theoretic metrics...")
+
+        metrics = {}
+
+        # Marginal mutual information
+        print("  Computing I(Z;Y)...")
+        metrics['I(Z;Y)'] = self.mutual_information(Z_processed, y_labels, apply_pca=False)
+        print("  Computing I(Z;D)...")
+        metrics['I(Z;D)'] = self.mutual_information(Z_processed, d_labels, apply_pca=False)
+
+        # Conditional mutual information
+        print("  Computing I(Z;Y|D)...")
+        metrics['I(Z;Y|D)'] = self.conditional_mi(Z_processed, y_labels, d_labels, apply_pca=False)
+        print("  Computing I(Z;D|Y)...")
+        metrics['I(Z;D|Y)'] = self.conditional_mi(Z_processed, d_labels, y_labels, apply_pca=False)
+
+        # Interaction information
+        print("  Computing I(Z;Y;D)...")
+        metrics['I(Z;Y;D)'] = self.interaction_information(Z_processed, y_labels, d_labels, apply_pca=False)
+
+        # Joint mutual information
+        print("  Computing I(Z;Y,D)...")
+        metrics['I(Z;Y,D)'] = self.joint_mutual_information(Z_processed, y_labels, d_labels, apply_pca=False)
+
+        # Domain invariance score (higher = better domain invariance)
+        # Score = 1 / (1 + I(Z;D|Y)) - ranges from 0 to 1
+        i_z_d_given_y = metrics['I(Z;D|Y)']
+        metrics['domain_invariance_score'] = 1.0 / (1.0 + i_z_d_given_y)
+
+        # Build unified metrics for cross-model comparison
+        unified_metrics = {
+            'total_class_info': metrics['I(Z;Y)'],
+            'domain_leakage': metrics['I(Z;D|Y)'],
+            'domain_invariance_score': metrics['domain_invariance_score'],
+            'class_info_conditional': metrics['I(Z;Y|D)'],
+            'interaction_info': metrics['I(Z;Y;D)'],
+        }
+
+        # Build results dictionary
+        results = {
+            'model_type': 'monolithic',
+            'config': {
+                'n_samples': int(Z.shape[0]),
+                'n_dims': int(Z.shape[1]),
+                'n_neighbors': self.k,
+                'n_classes': int(len(np.unique(y_labels))),
+                'n_domains': int(len(np.unique(d_labels))),
+            },
+            'effective_dimensionality': eff_dim,
+            'metrics': metrics,
+            'unified_metrics': unified_metrics,
+            'theorem_verification': None,  # No partition to verify for monolithic
+            'information_capture': None,
+            'violations': [],
+            'warnings': []
+        }
+
+        # Print summary
+        print("\n" + "="*80)
+        print("MONOLITHIC REPRESENTATION EVALUATION SUMMARY")
+        print("="*80)
+        print(f"\n  I(Z;Y)   = {metrics['I(Z;Y)']:.4f} nats  (class information)")
+        print(f"  I(Z;D)   = {metrics['I(Z;D)']:.4f} nats  (domain information)")
+        print(f"  I(Z;Y|D) = {metrics['I(Z;Y|D)']:.4f} nats  (class info given domain)")
+        print(f"  I(Z;D|Y) = {metrics['I(Z;D|Y)']:.4f} nats  (domain leakage - LOWER IS BETTER)")
+        print(f"  I(Z;Y;D) = {metrics['I(Z;Y;D)']:.4f} nats  (interaction)")
+        print(f"  I(Z;Y,D) = {metrics['I(Z;Y,D)']:.4f} nats  (joint)")
+        print(f"\n  Domain Invariance Score: {metrics['domain_invariance_score']:.4f}")
+        print("  (1.0 = perfectly domain-invariant, lower = more domain info leaks)")
+        print("="*80 + "\n")
+
+        return results
+
     def compare_models(
         self,
         model_results: Dict[str, Dict[str, any]]
@@ -1234,6 +1536,88 @@ class MinimalInformationPartitionEvaluator:
                 if results.get('confidence_intervals') and metric in results['confidence_intervals']:
                     ci = results['confidence_intervals'][metric]
                     comparison['metric_comparison'][metric][f'{model_name}_CI'] = ci
+
+        return comparison
+
+    def compare_unified_metrics(
+        self,
+        all_results: Dict[str, Dict[str, any]]
+    ) -> Dict[str, any]:
+        """
+        Compare models using unified metrics that work for both
+        decomposed (NVAE/DIVA/AugmentedDANN) and monolithic (DANN/IRM) models.
+
+        The key unified metric is domain_invariance_score which is
+        computed from I(Z_total; D|Y) for all model types.
+
+        Args:
+            all_results: Dict mapping model_name -> evaluation results
+                         (from evaluate_latent_partition or evaluate_monolithic_representation)
+
+        Returns:
+            Comparison with unified rankings based on domain invariance
+        """
+        comparison = {
+            'unified_scores': {},
+            'unified_rankings': {},
+            'metric_comparison': {},
+        }
+
+        # Define metrics to compare across all models
+        unified_metrics_to_compare = [
+            'domain_invariance_score',
+            'domain_leakage',
+            'total_class_info',
+            'class_info_conditional',
+        ]
+
+        # Extract unified metrics from each model's results
+        for model_name, results in all_results.items():
+            # Check if results have unified_metrics (both decomposed and monolithic should have this)
+            if 'unified_metrics' in results:
+                unified = results['unified_metrics']
+            else:
+                # Fallback: try to construct from decomposed metrics
+                metrics = results.get('metrics', {})
+                unified = {
+                    'domain_invariance_score': metrics.get('partition_quality', 0.0),
+                    'domain_leakage': metrics.get('I(z_y;D|Y)', 0.0),
+                    'total_class_info': metrics.get('I(z_y;Y)', 0.0),
+                    'class_info_conditional': metrics.get('I(z_y;Y|D)', 0.0),
+                }
+
+            # Store the domain invariance score for ranking
+            comparison['unified_scores'][model_name] = unified.get('domain_invariance_score', 0.0)
+
+            # Store individual metric comparisons
+            for metric in unified_metrics_to_compare:
+                if metric not in comparison['metric_comparison']:
+                    comparison['metric_comparison'][metric] = {}
+                comparison['metric_comparison'][metric][model_name] = unified.get(metric, 0.0)
+
+        # Rank models by domain invariance (higher is better)
+        sorted_models = sorted(
+            comparison['unified_scores'].items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        comparison['unified_rankings'] = {
+            model: rank + 1
+            for rank, (model, score) in enumerate(sorted_models)
+        }
+
+        # Print summary
+        print("\n" + "="*80)
+        print("UNIFIED MODEL COMPARISON - DOMAIN INVARIANCE RANKING")
+        print("="*80)
+        print(f"\n{'Rank':<6} {'Model':<20} {'Domain Invariance':<20} {'Domain Leakage':<15}")
+        print("-" * 70)
+
+        for rank, (model, score) in enumerate(sorted_models, 1):
+            leakage = comparison['metric_comparison'].get('domain_leakage', {}).get(model, 0.0)
+            print(f"{rank:<6} {model:<20} {score:<20.4f} {leakage:<15.4f}")
+
+        print("="*80 + "\n")
 
         return comparison
 
@@ -1378,6 +1762,85 @@ def extract_latents_from_model(
         print(f"  z_dy: {z_dy.shape}")
 
     return z_y, z_d, z_dy, z_x, y_labels, d_labels
+
+
+def extract_monolithic_features(
+    model,
+    dataloader,
+    device,
+    max_batches: int = 200
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Extract monolithic features from DANN or IRM models.
+
+    These models don't have explicit latent partitioning - they produce
+    a single feature representation that's used for classification.
+
+    Args:
+        model: Trained DANN or IRM model with get_features() method
+        dataloader: DataLoader with (x, y, c, r) tuples (CRMNIST format)
+        device: torch device
+        max_batches: Maximum number of batches to process
+
+    Returns:
+        Tuple of (Z, y_labels, d_labels) as numpy arrays where:
+        - Z: Monolithic feature representation (n_samples, feature_dim)
+        - y_labels: Class labels (n_samples,)
+        - d_labels: Domain labels (n_samples,)
+    """
+    model.eval()
+
+    all_Z = []
+    all_y = []
+    all_d = []
+
+    print(f"Extracting monolithic features (max {max_batches} batches)...")
+
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(tqdm(dataloader, total=max_batches)):
+            if batch_idx >= max_batches:
+                break
+
+            x = batch[0].to(device)
+            y = batch[1]
+
+            # Extract domain labels (CRMNIST: batch[3] is rotation/domain)
+            if len(batch) == 4:
+                r = batch[3]
+                if len(r.shape) > 1 and r.shape[1] > 1:
+                    d = r.argmax(dim=1)
+                else:
+                    d = r
+            elif len(batch) > 2:
+                # WILD or other dataset
+                if hasattr(batch[2], 'shape') and len(batch[2].shape) > 1:
+                    d = batch[2][:, 0]
+                else:
+                    d = batch[2]
+            else:
+                d = torch.zeros_like(y)
+
+            # Extract features using model's get_features method
+            Z = model.get_features(x)
+
+            all_Z.append(Z.cpu())
+            all_y.append(y.cpu() if torch.is_tensor(y) else torch.tensor(y))
+            all_d.append(d.cpu() if torch.is_tensor(d) else torch.tensor(d))
+
+    # Concatenate all batches
+    Z = torch.cat(all_Z, dim=0).numpy()
+    y_labels = torch.cat(all_y, dim=0).numpy()
+    d_labels = torch.cat(all_d, dim=0).numpy()
+
+    # Convert one-hot to indices if needed
+    if len(y_labels.shape) > 1 and y_labels.shape[1] > 1:
+        y_labels = y_labels.argmax(axis=1)
+    if len(d_labels.shape) > 1 and d_labels.shape[1] > 1:
+        d_labels = d_labels.argmax(axis=1)
+
+    print(f"Extracted {Z.shape[0]} samples, feature dim: {Z.shape[1]}")
+
+    return Z, y_labels, d_labels
 
 
 def evaluate_model(

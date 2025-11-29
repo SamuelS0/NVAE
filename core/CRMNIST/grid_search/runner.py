@@ -15,9 +15,12 @@ import torch.optim as optim
 
 from .config import get_all_configs, get_quick_configs, FIXED_PARAMS
 
-# Models that support IT analysis (have explicit latent partitioning)
-# DANN and IRM use monolithic representations, so they don't support IT analysis
-IT_SUPPORTED_MODELS = {'nvae', 'diva', 'dann_augmented'}
+# Models that support IT analysis
+# Decomposed models: have explicit latent partitions (z_y, z_d, z_dy, z_x)
+# Monolithic models: single feature representation (evaluated with domain invariance metrics)
+DECOMPOSED_IT_MODELS = {'nvae', 'diva', 'dann_augmented'}
+MONOLITHIC_IT_MODELS = {'dann', 'irm'}
+IT_SUPPORTED_MODELS = DECOMPOSED_IT_MODELS | MONOLITHIC_IT_MODELS
 
 
 class GridSearchRunner:
@@ -34,6 +37,7 @@ class GridSearchRunner:
         enable_it_analysis: bool = True,
         it_n_bootstrap: int = 0,
         it_max_batches: int = 100,
+        config_path: str = 'conf/crmnist.json',
     ):
         """
         Initialize the grid search runner.
@@ -46,8 +50,10 @@ class GridSearchRunner:
             enable_it_analysis: If True, run information-theoretic analysis after training
             it_n_bootstrap: Number of bootstrap samples for IT confidence intervals (0=no bootstrap)
             it_max_batches: Maximum batches to use for IT analysis (controls sample size)
+            config_path: Path to CRMNIST config JSON file (default: conf/crmnist.json)
         """
         self.output_dir = output_dir
+        self.config_path = config_path
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         self.resume = resume
         self.verbose = verbose
@@ -101,25 +107,32 @@ class GridSearchRunner:
         """Load CRMNIST dataset with proper train/val/ID-test/OOD-test splits."""
         from core.CRMNIST.data_generation import generate_crmnist_dataset
         from core.data_utils import create_ood_split
+        import core.CRMNIST.utils_crmnist as utils_crmnist
 
         # Load spec_data from config file
-        config_path = 'conf/crmnist.json'
-        with open(config_path, 'r') as f:
+        with open(self.config_path, 'r') as f:
             spec_data = json.load(f)
+
+        if self.verbose:
+            print(f"Loading config from: {self.config_path}")
 
         # Prepare domain data
         domain_data = {int(k): v for k, v in spec_data['domain_data'].items()}
         spec_data['domain_data'] = domain_data
 
-        # Add y_c (special digit for unique color) if not present in config
-        # Default to digit 7 which is commonly used in CRMNIST experiments
-        if 'y_c' not in spec_data:
-            spec_data['y_c'] = 7
+        # Handle y_c and subsets using choose_label_subset
+        # This respects existing values in config or generates random ones if empty
+        spec_data['y_c'], subsets = utils_crmnist.choose_label_subset(spec_data)
+        for i, subset in subsets.items():
+            if i in domain_data:
+                domain_data[i]['subset'] = subset
 
-        # Override rotation values based on rotation_step
+        # Override rotation values based on rotation_step (unless config specifies custom rotations)
         rotation_step = getattr(args, 'rotation_step', 15)
-        for domain_idx in domain_data:
-            domain_data[domain_idx]['rotation'] = domain_idx * rotation_step
+        use_config_rotations = getattr(args, 'use_config_rotations', False)
+        if not use_config_rotations:
+            for domain_idx in domain_data:
+                domain_data[domain_idx]['rotation'] = domain_idx * rotation_step
 
         # OOD domain (always domain 5)
         ood_domain = getattr(args, 'ood_domain_idx', 5)
@@ -370,19 +383,27 @@ class GridSearchRunner:
             from core.information_theoretic_evaluation import (
                 MinimalInformationPartitionEvaluator,
                 extract_latents_from_model,
+                extract_monolithic_features,
             )
 
-            # Extract latent representations
-            z_y, z_d, z_dy, z_x, y_labels, d_labels = extract_latents_from_model(
-                model, data_loader, args.device, max_batches=self.it_max_batches
+            # CRITICAL: Create a shuffled data loader for IT analysis
+            # The dataset is organized sequentially by domain, so without shuffling
+            # we'd only sample from the first domain(s) when using max_batches < total
+            # This would cause I(z;D) to be ~0 regardless of actual domain information
+            shuffled_loader = torch.utils.data.DataLoader(
+                data_loader.dataset,
+                batch_size=data_loader.batch_size,
+                shuffle=True,  # Essential for proper domain sampling
+                num_workers=0
             )
 
-            # Create evaluator and run analysis
+            # Create evaluator
             evaluator = MinimalInformationPartitionEvaluator(
                 n_neighbors=7,
                 n_bootstrap=self.it_n_bootstrap,
                 max_dims=30,
-                pca_variance=0.95
+                pca_variance=0.99,  # Preserve more variance for CRMNIST
+                min_variance_threshold=0.01,  # Filter collapsed dimensions
             )
 
             # Run evaluation (suppress verbose output for grid search)
@@ -395,37 +416,76 @@ class GridSearchRunner:
                 sys.stdout = StringIO()
 
             try:
-                it_results = evaluator.evaluate_latent_partition(
-                    z_y, z_d, z_dy, z_x,
-                    y_labels, d_labels,
-                    compute_bootstrap=(self.it_n_bootstrap > 0)
-                )
+                if model_type in DECOMPOSED_IT_MODELS:
+                    # Decomposed models: use full latent partition evaluation
+                    z_y, z_d, z_dy, z_x, y_labels, d_labels = extract_latents_from_model(
+                        model, shuffled_loader, args.device, max_batches=self.it_max_batches
+                    )
+
+                    it_results = evaluator.evaluate_latent_partition(
+                        z_y, z_d, z_dy, z_x,
+                        y_labels, d_labels,
+                        compute_bootstrap=(self.it_n_bootstrap > 0)
+                    )
+
+                    # Extract key metrics for summary
+                    metrics = it_results.get('metrics', {})
+                    it_summary = {
+                        # Class-specific latent (z_y)
+                        'I_zy_Y_given_D': metrics.get('I(z_y;Y|D)', 0.0),
+                        'I_zy_D_given_Y': metrics.get('I(z_y;D|Y)', 0.0),
+                        'z_y_specificity': metrics.get('z_y_specificity', 0.0),
+                        # Domain-specific latent (z_d)
+                        'I_zd_D_given_Y': metrics.get('I(z_d;D|Y)', 0.0),
+                        'I_zd_Y_given_D': metrics.get('I(z_d;Y|D)', 0.0),
+                        'z_d_specificity': metrics.get('z_d_specificity', 0.0),
+                        # Interaction latent (z_dy) - only for NVAE and AugmentedDANN
+                        'I_zdy_Y_D': metrics.get('I(z_dy;Y;D)', 0.0),
+                        'I_zdy_joint': metrics.get('I(z_dy;Y,D)', 0.0),
+                        # Overall quality
+                        'partition_quality': metrics.get('partition_quality', 0.0),
+                        # Model type marker
+                        'model_type': 'decomposed',
+                    }
+
+                else:
+                    # Monolithic models (DANN, IRM): use single representation evaluation
+                    Z, y_labels, d_labels = extract_monolithic_features(
+                        model, shuffled_loader, args.device, max_batches=self.it_max_batches
+                    )
+
+                    it_results = evaluator.evaluate_monolithic_representation(
+                        Z, y_labels, d_labels,
+                        compute_bootstrap=(self.it_n_bootstrap > 0)
+                    )
+
+                    # Extract key metrics for monolithic summary
+                    metrics = it_results.get('metrics', {})
+                    it_summary = {
+                        # Monolithic representation metrics
+                        'I_Z_Y': metrics.get('I(Z;Y)', 0.0),
+                        'I_Z_D': metrics.get('I(Z;D)', 0.0),
+                        'I_Z_Y_given_D': metrics.get('I(Z;Y|D)', 0.0),
+                        'I_Z_D_given_Y': metrics.get('I(Z;D|Y)', 0.0),
+                        'domain_invariance_score': metrics.get('domain_invariance_score', 0.0),
+                        # Use domain_invariance_score as comparable quality metric
+                        'partition_quality': metrics.get('domain_invariance_score', 0.0),
+                        # Model type marker
+                        'model_type': 'monolithic',
+                    }
+
             finally:
                 if not self.verbose:
                     sys.stdout = old_stdout
 
-            # Extract key metrics for summary
-            metrics = it_results.get('metrics', {})
-            it_summary = {
-                # Class-specific latent (z_y)
-                'I_zy_Y_given_D': metrics.get('I(z_y;Y|D)', 0.0),
-                'I_zy_D_given_Y': metrics.get('I(z_y;D|Y)', 0.0),
-                'z_y_specificity': metrics.get('z_y_specificity', 0.0),
-                # Domain-specific latent (z_d)
-                'I_zd_D_given_Y': metrics.get('I(z_d;D|Y)', 0.0),
-                'I_zd_Y_given_D': metrics.get('I(z_d;Y|D)', 0.0),
-                'z_d_specificity': metrics.get('z_d_specificity', 0.0),
-                # Interaction latent (z_dy) - only for NVAE and AugmentedDANN
-                'I_zdy_Y_D': metrics.get('I(z_dy;Y;D)', 0.0),
-                'I_zdy_joint': metrics.get('I(z_dy;Y,D)', 0.0),
-                # Overall quality
-                'partition_quality': metrics.get('partition_quality', 0.0),
-            }
-
             if self.verbose:
-                print(f"    Partition quality: {it_summary['partition_quality']:.4f}")
-                print(f"    z_y specificity: {it_summary['z_y_specificity']:.4f}")
-                print(f"    z_d specificity: {it_summary['z_d_specificity']:.4f}")
+                if it_summary.get('model_type') == 'decomposed':
+                    print(f"    Partition quality: {it_summary['partition_quality']:.4f}")
+                    print(f"    z_y specificity: {it_summary.get('z_y_specificity', 0):.4f}")
+                    print(f"    z_d specificity: {it_summary.get('z_d_specificity', 0):.4f}")
+                else:
+                    print(f"    Domain invariance: {it_summary['domain_invariance_score']:.4f}")
+                    print(f"    I(Z;D|Y): {it_summary.get('I_Z_D_given_Y', 0):.4f}")
 
             # Save full IT results to separate file
             it_full_path = os.path.join(args.out, 'it_analysis.json')

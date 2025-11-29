@@ -19,9 +19,17 @@ SPARSITY_PRESETS = {
         'l1_lambda_zdy': 0.0,
         'l1_lambda_zd': 0.0,
     },
+    # Recommended default: light L1 on z_dy reduces I(z_y;z_dy) entanglement
+    # 20-epoch IT analysis showed NVAE had I(z_y;z_dy)=1.98 with no L1
+    'zdy_light': {
+        'l1_lambda_zy': 0.0,
+        'l1_lambda_zx': 0.0,
+        'l1_lambda_zdy': 5.0,  # Light penalty to encourage z_dy selectivity
+        'l1_lambda_zd': 0.0,
+    },
     'low': {
         'l1_lambda_zy': 5.0,
-        'l1_lambda_zx': 2.0,
+        'l1_lambda_zx': 2.5,
         'l1_lambda_zdy': 10.0,
         'l1_lambda_zd': 5.0,
     },
@@ -31,11 +39,26 @@ SPARSITY_PRESETS = {
         'l1_lambda_zdy': 25.0,
         'l1_lambda_zd': 15.0,
     },
+    # Interpolation between medium and high - added based on grid search analysis
+    'medium_high': {
+        'l1_lambda_zy': 20.0,
+        'l1_lambda_zx': 7.5,
+        'l1_lambda_zdy': 32.5,
+        'l1_lambda_zd': 20.0,
+    },
     'high': {
         'l1_lambda_zy': 25.0,
         'l1_lambda_zx': 10.0,
         'l1_lambda_zdy': 40.0,
         'l1_lambda_zd': 25.0,
+    },
+    # Higher than 'high' - safe for NVAE (0% collapse in grid search)
+    # ~40% increase from 'high' preset
+    'very_high': {
+        'l1_lambda_zy': 35.0,
+        'l1_lambda_zx': 15.0,
+        'l1_lambda_zdy': 57.5,
+        'l1_lambda_zd': 35.0,
     },
 }
 
@@ -66,6 +89,14 @@ KL_PRESETS = {
         'beta_zx': 1.0,   # zx KL weight (residual)
         'beta_zdy': 1.0,  # zdy KL weight (domain-class interaction)
         'beta_zd': 1.0,   # zd KL weight (domain-specific)
+    },
+    # Interpolation between low and medium - grid search showed medium was optimal
+    # This explores the transition region
+    'medium_low': {
+        'beta_zy': 5.0,
+        'beta_zx': 5.0,
+        'beta_zdy': 5.0,
+        'beta_zd': 5.0,
     },
     'medium': {
         'beta_zy': 10.0,
@@ -104,6 +135,12 @@ DANN_AUG_SPARSITY_PRESETS = {
         'sparsity_weight_zy': 1.0,
         'sparsity_weight_zd': 1.0,
     },
+    # Interpolation between medium and high - safe based on grid search
+    'medium_high': {
+        'sparsity_weight_zdy': 3.5,
+        'sparsity_weight_zy': 1.5,
+        'sparsity_weight_zd': 1.5,
+    },
     'high': {
         'sparsity_weight_zdy': 5.0,
         'sparsity_weight_zy': 2.0,
@@ -116,24 +153,34 @@ DANN_AUG_SPARSITY_PRESETS = {
         'sparsity_weight_zy': 0.5,     # Low - preserve class info
         'sparsity_weight_zd': 5.0,     # HIGH - force sparse domain features
     },
-    # Hypothesis: Very high z_d, no z_y constraint
-    'zd_extreme': {
-        'sparsity_weight_zdy': 1.0,
-        'sparsity_weight_zy': 0.0,     # None - let class be rich
-        'sparsity_weight_zd': 10.0,    # EXTREME - force very sparse domain
+    # Balanced preset based on 20-epoch IT analysis - prevents dimension collapse
+    # while still encouraging clean latent separation
+    'balanced': {
+        'sparsity_weight_zdy': 1.5,    # Moderate - prevents z_dy from becoming catch-all
+        'sparsity_weight_zy': 0.5,     # Light - preserve rich class representation
+        'sparsity_weight_zd': 2.5,     # Moderate - enough to encourage compactness without collapse
     },
-    # Hypothesis: High z_y sparsity, low z_d
-    'zy_high': {
-        'sparsity_weight_zdy': 1.0,
-        'sparsity_weight_zy': 5.0,     # HIGH - force compact class
-        'sparsity_weight_zd': 0.5,     # Low
+    # Focus on z_dy sparsity with conservative zy/zd - based on grid search analysis
+    # High zdy encourages selectivity in interaction latent without collapsing main latents
+    'zdy_focus': {
+        'sparsity_weight_zdy': 7.5,    # High - force z_dy selectivity
+        'sparsity_weight_zy': 0.75,    # Between low and medium - preserve class
+        'sparsity_weight_zd': 1.0,     # Same as medium - safe for domain
     },
-    # Hypothesis: Domain focus - no zdy, high zd
-    'domain_focus': {
-        'sparsity_weight_zdy': 0.0,    # None - no interaction penalty
-        'sparsity_weight_zy': 0.0,     # None - let class be rich
-        'sparsity_weight_zd': 8.0,     # HIGH - force domain sparsity
-    },
+    # ==========================================================================
+    # REMOVED PRESETS - These caused total latent collapse in grid search:
+    # ==========================================================================
+    # 'zd_extreme' - REMOVED: Caused total collapse (DQS < 0.01) with high adversarial
+    #   - adv=high + cls=high + zd_extreme: capture_y=0.0, capture_d=0.0002, DQS=0.0002
+    #   - adv=high + cls=low + zd_extreme: capture_y=0.18, capture_d=0.0, DQS=0.15
+    #
+    # 'zy_high' - REMOVED: Caused z_y collapse (DQS < 0.01) with high adversarial
+    #   - adv=high + cls=medium + zy_high: capture_y=0.0, capture_d=0.001, DQS=0.001
+    #
+    # 'domain_focus' - REMOVED: Caused z_d collapse (100% of models) + some total collapse
+    #   - All domain_focus configs had capture_d < 0.01
+    #   - adv=low + cls=high/low + domain_focus: total collapse (DQS < 0.25)
+    # ==========================================================================
 }
 
 # =============================================================================
@@ -147,6 +194,12 @@ DANN_AUG_ADVERSARIAL_PRESETS = {
     'medium': {
         'beta_adv': 0.5,
         'lambda_schedule_gamma': 5.0,
+    },
+    # Same strength as medium but faster ramp-up schedule
+    # Based on grid search: medium adversarial worked best with high sparsity
+    'medium_fast': {
+        'beta_adv': 0.5,               # Same as medium
+        'lambda_schedule_gamma': 7.5,  # Between medium (5.0) and high (10.0)
     },
     'high': {
         'beta_adv': 1.0,
@@ -175,6 +228,10 @@ IRM_PRESETS = {
 # =============================================================================
 # FIXED PARAMETERS (not varied in grid search)
 # =============================================================================
+# NOTE: Default values are based on grid search results from IT analysis.
+# Best configurations identified:
+#   - NVAE/DIVA: classifier-high, kl-low, sparsity-none (PQ ~0.51)
+#   - AugmentedDANN: adversarial-high, classifier-high, sparsity-domain_focus (PQ ~0.83)
 FIXED_PARAMS = {
     # Latent dimensions
     'zy_dim': 8,
@@ -182,7 +239,7 @@ FIXED_PARAMS = {
     'zdy_dim': 8,
     'zd_dim': 8,
     # Training
-    'epochs': 5,
+    'epochs': 10,
     'batch_size': 64,
     'learning_rate': 1e-3,
     'patience': 5,
@@ -198,15 +255,14 @@ FIXED_PARAMS = {
     # Encoder architecture
     'separate_encoders': False,  # Use separate encoders for each latent (achieves I(Z_i; Z_j) = 0)
     # Backward compatible parameter names (some trainers/code may expect these)
-    # Alpha weights (fallbacks for new names alpha_y, alpha_d)
-    'alpha_1': 75.0,
-    'alpha_2': 75.0,
-    # Beta weights (fallbacks for new names beta_zy, beta_zx, beta_zdy, beta_zd)
-    # These will be overwritten by KL_PRESETS but provide defaults
-    'beta_1': 10.0,  # default fallback for beta_zy
-    'beta_2': 10.0,  # default fallback for beta_zx
-    'beta_3': 10.0,  # default fallback for beta_zdy
-    'beta_4': 10.0,  # default fallback for beta_zd
+    # Alpha weights - DEFAULT: high (150.0) based on grid search showing classifier-high best
+    'alpha_1': 150.0,
+    'alpha_2': 150.0,
+    # Beta weights - DEFAULT: low (1.0) based on grid search showing kl-low best for VAEs
+    'beta_1': 1.0,  # default fallback for beta_zy
+    'beta_2': 1.0,  # default fallback for beta_zx
+    'beta_3': 1.0,  # default fallback for beta_zdy
+    'beta_4': 1.0,  # default fallback for beta_zd
 }
 
 
@@ -313,15 +369,16 @@ def get_dann_aug_configs() -> Iterator[Dict[str, Any]]:
     Generate all AugmentedDANN configurations.
 
     Iterates over 3 independent dimensions:
-    - Sparsity: 8 options (none, low, medium, high + zd_high, zd_extreme, zy_high, domain_focus)
-    - Adversarial: 3 options (low, medium, high)
+    - Sparsity: 8 options (none, low, medium, medium_high, high, zd_high, balanced, zdy_focus)
+    - Adversarial: 4 options (low, medium, medium_fast, high)
     - Classifier: 3 options (low, medium, high)
 
-    Total: 8 × 3 × 3 = 72 configurations
+    Total: 8 × 4 × 3 = 96 configurations
 
-    Note: Sparsity presets now include both symmetric (zy=zd) and asymmetric
-    (independent zy, zd) options. The model handles both via sparsity_weight_zy
-    and sparsity_weight_zd parameters.
+    Note: Removed 3 presets that caused total latent collapse in grid search:
+    - zd_extreme: caused both z_y and z_d collapse with high adversarial
+    - zy_high: caused z_y collapse with high adversarial
+    - domain_focus: caused 100% z_d collapse across all configs
     """
     for sparsity_name, sparsity_params in DANN_AUG_SPARSITY_PRESETS.items():
         for adv_name, adv_params in DANN_AUG_ADVERSARIAL_PRESETS.items():

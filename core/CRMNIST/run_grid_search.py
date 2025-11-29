@@ -108,19 +108,21 @@ def parse_args():
     parser.add_argument(
         '--sparsity',
         type=str,
-        choices=['none', 'low', 'medium', 'high', 'zd_high', 'zd_extreme', 'zy_high', 'domain_focus'],
-        help='Filter by sparsity preset (NVAE/DIVA: none/low/medium/high, AugmentedDANN: also zd_high/zd_extreme/zy_high/domain_focus)'
+        choices=['none', 'zdy_light', 'low', 'medium', 'medium_high', 'high', 'very_high',
+                 'zd_high', 'balanced', 'zdy_focus'],
+        help='Filter by sparsity preset (NVAE/DIVA: none/zdy_light/low/medium/medium_high/high/very_high, '
+             'AugmentedDANN: also zd_high/balanced/zdy_focus)'
     )
     parser.add_argument(
         '--classifier',
         type=str,
         choices=['low', 'medium', 'high'],
-        help='Filter by classifier preset (NVAE/DIVA only)'
+        help='Filter by classifier preset'
     )
     parser.add_argument(
         '--kl',
         type=str,
-        choices=['low', 'medium', 'high'],
+        choices=['low', 'medium_low', 'medium', 'high'],
         help='Filter by KL preset (NVAE/DIVA only)'
     )
 

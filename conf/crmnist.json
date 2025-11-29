@@ -4,6 +4,7 @@
     "valid": "C",
     "test": ["P"],
     "unique_color": ["red"],
+    "y_c": 7,
     "domain_data": {
         "0": {
             "rotation": "0",
@@ -11,7 +12,7 @@
             "intensity": 1.5,
             "name": "domain0",
             "number": 0,
-            "subset": []
+            "subset": [0, 1, 2, 3, 4]
         },
         "1": {
             "rotation": "15",
@@ -19,7 +20,7 @@
             "intensity": 1.5,
             "name": "domain1",
             "number": 1,
-            "subset": []
+            "subset": [2, 3, 4, 5, 6]
         },
         "2": {
             "rotation": "30",
@@ -27,7 +28,7 @@
             "intensity": 1.5,
             "name": "domain2",
             "number": 2,
-            "subset": []
+            "subset": [4, 5, 6, 7, 8]
         },
         "3": {
             "rotation": "45",
@@ -35,7 +36,7 @@
             "intensity": 1.5,
             "name": "domain3",
             "number": 3,
-            "subset": []
+            "subset": [6, 7, 8, 9, 0]
         },
         "4": {
             "rotation": "60",
@@ -43,7 +44,7 @@
             "intensity": 1.5,
             "name": "domain4",
             "number": 4,
-            "subset": []
+            "subset": [8, 9, 0, 1, 2]
         },
         "5": {
             "rotation": "75",
@@ -51,7 +52,7 @@
             "intensity": 1.5,
             "name": "domain5",
             "number": 5,
-            "subset": []
+            "subset": [0, 2, 4, 6, 8]
         }
     },
     "class_map": {
@@ -71,5 +72,6 @@
     },
     "num_y_classes": 10,
     "num_r_classes": 6,
-    "num_c_classes": 7
+    "num_c_classes": 7,
+    "n_classes": 10
 }

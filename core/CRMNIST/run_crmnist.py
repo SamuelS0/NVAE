@@ -192,12 +192,14 @@ if __name__ == "__main__":
     parser.add_argument('--zx_dim', type=int, default=8)
     parser.add_argument('--zdy_dim', type=int, default=8)
     parser.add_argument('--zd_dim', type=int, default=8)
-    parser.add_argument('--beta_zy', type=float, default=10.0)
-    parser.add_argument('--beta_zx', type=float, default=10.0)
-    parser.add_argument('--beta_zdy', type=float, default=10.0)
-    parser.add_argument('--beta_zd', type=float, default=10.0)
-    parser.add_argument('--alpha_y', type=float, default=75.0)
-    parser.add_argument('--alpha_d', type=float, default=75.0)
+    # KL weights - DEFAULT: low (1.0) based on grid search showing kl-low best for VAEs
+    parser.add_argument('--beta_zy', type=float, default=1.0)
+    parser.add_argument('--beta_zx', type=float, default=1.0)
+    parser.add_argument('--beta_zdy', type=float, default=1.0)
+    parser.add_argument('--beta_zd', type=float, default=1.0)
+    # Classifier weights - DEFAULT: high (150.0) based on grid search showing classifier-high best
+    parser.add_argument('--alpha_y', type=float, default=150.0)
+    parser.add_argument('--alpha_d', type=float, default=150.0)
     parser.add_argument('--cuda', action='store_true', default=True, help='enables CUDA training')
     parser.add_argument('--dataset', type=str, default='crmnist')
     parser.add_argument('--use_cache', action='store_true', default=True, 
@@ -208,15 +210,17 @@ if __name__ == "__main__":
     parser.add_argument('--beta_annealing', action='store_true', help='Enable beta annealing for KL divergence')
     parser.add_argument('--beta_scale', type=float, default=1.0)
 
-    # L1 sparsity penalty arguments
-    parser.add_argument('--l1_lambda_zy', type=float, default=15.0,
-                       help='L1 penalty weight for zy latent (default: 15.0)')
-    parser.add_argument('--l1_lambda_zx', type=float, default=5.0,
-                       help='L1 penalty weight for zx latent (default: 5.0)')
-    parser.add_argument('--l1_lambda_zdy', type=float, default=25.0,
-                       help='L1 penalty weight for zdy latent (default: 25.0)')
-    parser.add_argument('--l1_lambda_zd', type=float, default=15.0,
-                       help='L1 penalty weight for zd latent (default: 15.0)')
+    # L1 sparsity penalty arguments for VAE models (NVAE/DIVA)
+    # Based on 20-epoch IT analysis: light L1 on z_dy reduces I(z_y;z_dy) entanglement
+    # NVAE showed I(z_y;z_dy)=1.98 with zero L1 - z_dy was duplicating class info
+    parser.add_argument('--l1_lambda_zy', type=float, default=0.0,
+                       help='L1 penalty weight for zy latent (default: 0.0)')
+    parser.add_argument('--l1_lambda_zx', type=float, default=0.0,
+                       help='L1 penalty weight for zx latent (default: 0.0)')
+    parser.add_argument('--l1_lambda_zdy', type=float, default=5.0,
+                       help='L1 penalty weight for zdy latent (default: 5.0, reduces z_y/z_dy entanglement)')
+    parser.add_argument('--l1_lambda_zd', type=float, default=0.0,
+                       help='L1 penalty weight for zd latent (default: 0.0)')
 
     # Model selection arguments
     parser.add_argument('--models', type=str, nargs='+', default=['nvae', 'diva', 'dann', 'dann_augmented', 'irm'],
@@ -228,21 +232,26 @@ if __name__ == "__main__":
                        help='Experimental setting name for organizing outputs (default: standard)')
 
     # AugmentedDANN-specific parameters
+    # DEFAULT values based on 20-epoch IT analysis: balanced sparsity to prevent dimension collapse
+    # The domain_focus preset (zd=8.0, others=0) caused z_d to collapse to 1 dimension!
+    # New balanced preset: moderate z_d sparsity with light constraints on z_y and z_dy
     parser.add_argument('--lambda_reversal', type=float, default=1.0,
                        help='Lambda parameter for gradient reversal in AugmentedDANN (default: 1.0)')
-    parser.add_argument('--sparsity_weight', type=float, default=2.0,
-                       help='Target weight for sparsity penalty on zdy in AugmentedDANN, increases from 0 with DANN schedule (default: 2.0)')
-    parser.add_argument('--sparsity_weight_other', type=float, default=1.5,
-                       help='Target weight for sparsity penalty on zy and zd in AugmentedDANN (default: 1.5)')
-    parser.add_argument('--beta_adv', type=float, default=0.5,
-                       help='Weight for adversarial loss in AugmentedDANN (default: 0.5)')
+    parser.add_argument('--sparsity_weight', type=float, default=1.5,
+                       help='Target weight for sparsity penalty on zdy in AugmentedDANN (default: 1.5, balanced preset)')
+    parser.add_argument('--sparsity_weight_other', type=float, default=0.5,
+                       help='Target weight for sparsity penalty on zy in AugmentedDANN (default: 0.5, balanced preset)')
+    parser.add_argument('--sparsity_weight_zd', type=float, default=2.5,
+                       help='Target weight for sparsity penalty on zd in AugmentedDANN (default: 2.5, balanced preset)')
+    parser.add_argument('--beta_adv', type=float, default=1.0,
+                       help='Weight for adversarial loss in AugmentedDANN (default: 1.0, high preset)')
     parser.add_argument('--use_conditional_adversarial', action='store_true', default=True,
                        help='Use conditional adversarial for I(Z_Y;D|Y)=0 and I(Z_D;Y|D)=0 (default: True)')
     parser.add_argument('--no_conditional_adversarial', dest='use_conditional_adversarial',
                        action='store_false',
                        help='Disable conditional adversarial (use unconditional)')
-    parser.add_argument('--lambda_schedule_gamma', type=float, default=5.0,
-                       help='Controls adversarial ramp-up speed: 10=fast (DANN paper), 5=moderate, 2=slow (default: 5.0)')
+    parser.add_argument('--lambda_schedule_gamma', type=float, default=10.0,
+                       help='Controls adversarial ramp-up speed: 10=fast (high preset), 5=moderate, 2=slow (default: 10.0)')
 
     # IRM-specific parameters
     # Note: With environment-averaged loss (fixed), penalty_weight=5 is appropriate
@@ -743,6 +752,8 @@ if __name__ == "__main__":
         if not args.skip_training:
 
             # Create AugmentedDANN model
+            # Default parameters based on 20-epoch IT analysis: balanced sparsity preset
+            # Prevents dimension collapse seen with domain_focus (zd=8.0)
             dann_aug_model = AugmentedDANN(
                 class_map=spec_data['class_map'],
                 zy_dim=zy_aug,
@@ -751,14 +762,15 @@ if __name__ == "__main__":
                 y_dim=spec_data['num_y_classes'],
                 d_dim=spec_data['num_r_classes'],
                 lambda_reversal=getattr(args, 'lambda_reversal', 1.0),
-                sparsity_weight_zdy=getattr(args, 'sparsity_weight_zdy', 2.0),
-                sparsity_weight_zy_zd=getattr(args, 'sparsity_weight_zy_zd', 0.5),
+                sparsity_weight_zdy=getattr(args, 'sparsity_weight', 1.5),  # balanced: 1.5
+                sparsity_weight_zy=getattr(args, 'sparsity_weight_other', 0.5),  # balanced: 0.5
+                sparsity_weight_zd=getattr(args, 'sparsity_weight_zd', 2.5),  # balanced: 2.5
                 alpha_y=args.alpha_y,
                 alpha_d=args.alpha_d,
-                beta_adv=getattr(args, 'beta_adv', 0.2),
+                beta_adv=getattr(args, 'beta_adv', 1.0),  # high: 1.0
                 image_size=28,
                 use_conditional_adversarial=getattr(args, 'use_conditional_adversarial', True),
-                lambda_schedule_gamma=getattr(args, 'lambda_schedule_gamma', 5.0)
+                lambda_schedule_gamma=getattr(args, 'lambda_schedule_gamma', 10.0)  # high: 10.0
             ).to(args.device)
 
             # Create optimizer and LR scheduler
@@ -945,19 +957,22 @@ if __name__ == "__main__":
             # Evaluate each trained model
             it_results = {}
 
-            # Only evaluate models with explicit latent decomposition
-            # NVAE and DIVA use qz() with VAE-style latent spaces
-            # AugmentedDANN uses extract_features() with 3-component latent spaces
-            # Note: baseline DANN (key='dann') is excluded; only AugmentedDANN (key='dann_augmented') is supported
-            LATENT_DECOMPOSITION_MODELS = ['nvae', 'diva', 'dann_augmented']
+            # Model categories for IT evaluation
+            # Decomposed models: have explicit latent partitions (z_y, z_d, z_dy, z_x)
+            DECOMPOSED_MODELS = ['nvae', 'diva', 'dann_augmented']
+            # Monolithic models: single feature representation (evaluated with different metrics)
+            MONOLITHIC_MODELS = ['dann', 'irm']
+            # All IT-compatible models
+            IT_COMPATIBLE_MODELS = DECOMPOSED_MODELS + MONOLITHIC_MODELS
+
+            # Import monolithic feature extraction
+            from core.information_theoretic_evaluation import extract_monolithic_features
 
             for model_name, model in trained_models.items():
-                # Filter to only models with latent decomposition
-                if model_name not in LATENT_DECOMPOSITION_MODELS:
-                    print(f"\n⚠️  Skipping {model_name} - IT evaluation requires latent decomposition")
-                    print(f"    Information-theoretic evaluation only supports models with explicit")
-                    print(f"    partitioned latent spaces.")
-                    print(f"    Compatible models: {', '.join(LATENT_DECOMPOSITION_MODELS)}")
+                # Filter to IT-compatible models
+                if model_name not in IT_COMPATIBLE_MODELS:
+                    print(f"\n⚠️  Skipping {model_name} - IT evaluation not supported")
+                    print(f"    Compatible models: {', '.join(IT_COMPATIBLE_MODELS)}")
                     continue
 
                 print(f"\n{'='*60}")
@@ -965,70 +980,112 @@ if __name__ == "__main__":
                 print(f"{'='*60}")
 
                 try:
-                    # Use balanced sampling to ensure domain diversity
-                    # This fixes the issue where unshuffled dataloaders only see one domain
-                    from core.utils import balanced_sample_for_visualization
                     import numpy as np
 
-                    # Map model names to model types for feature extraction
-                    model_type_map = {
-                        'nvae': 'nvae',
-                        'diva': 'diva',
-                        'dann_augmented': 'dann_augmented'  # Use dedicated type for proper 3-space extraction
-                    }
-                    model_type = model_type_map.get(model_name, 'nvae')
-
-                    print(f"  Using balanced sampling for domain-diverse IT evaluation...")
-                    features_dict, labels_dict, sampling_stats = balanced_sample_for_visualization(
-                        model=model,
-                        dataloader=it_eval_loader,  # Use shuffled loader for domain diversity
-                        device=args.device,
-                        model_type=model_type,
-                        max_samples=10000,  # Increased from 5000 for better MI estimation
-                        target_samples_per_combination=100,  # Increased proportionally
-                        dataset_type="crmnist",
-                        use_color_in_combination=False  # Use (digit, domain) for IT evaluation, not (digit, color, domain)
-                    )
-
-                    # Extract latents and convert to numpy
-                    z_y = features_dict['zy'].numpy() if features_dict['zy'] is not None else None
-                    z_d = features_dict['zd'].numpy() if features_dict['zd'] is not None else None
-                    z_dy = features_dict['zdy'].numpy() if features_dict.get('zdy') is not None else None
-                    z_x = features_dict['zx'].numpy() if features_dict['zx'] is not None else None
-
-                    # Extract labels - convert one-hot to indices if needed
-                    y_labels = labels_dict['y']
-                    if len(y_labels.shape) > 1 and y_labels.shape[1] > 1:
-                        y_labels = y_labels.argmax(dim=1)
-                    y_labels = y_labels.numpy()
-
-                    d_labels = labels_dict['r']  # rotation is domain
-                    if len(d_labels.shape) > 1 and d_labels.shape[1] > 1:
-                        d_labels = d_labels.argmax(dim=1)
-                    d_labels = d_labels.numpy()
-
-                    print(f"  Collected {len(y_labels)} balanced samples across {len(np.unique(d_labels))} domains")
-                    print(f"  Domain distribution: {dict(zip(*np.unique(d_labels, return_counts=True)))}")
-
-                    # Run IT evaluation with balanced samples
-                    # For CRMNIST, set max_dims=50 (each latent space is 8-dim by default)
-                    # k=10 is optimal for N=10000 samples (k ≈ √N/10)
+                    # Create evaluator (shared between decomposed and monolithic)
                     evaluator = MinimalInformationPartitionEvaluator(
-                        n_neighbors=10,  # Increased from 7 for better accuracy with more samples
+                        n_neighbors=10,
                         n_bootstrap=10,
                         max_dims=50,
                         pca_variance=0.95
                     )
 
-                    results = evaluator.evaluate_latent_partition(
-                        z_y=z_y,
-                        z_d=z_d,
-                        z_dy=z_dy,
-                        z_x=z_x,
-                        y_labels=y_labels,
-                        d_labels=d_labels,
-                        compute_bootstrap=True
-                    )
+                    if model_name in DECOMPOSED_MODELS:
+                        # =====================================================
+                        # DECOMPOSED MODELS (NVAE, DIVA, AugmentedDANN)
+                        # =====================================================
+                        from core.utils import balanced_sample_for_visualization
+
+                        # Map model names to model types for feature extraction
+                        model_type_map = {
+                            'nvae': 'nvae',
+                            'diva': 'diva',
+                            'dann_augmented': 'dann_augmented'
+                        }
+                        model_type = model_type_map.get(model_name, 'nvae')
+
+                        print(f"  Using balanced sampling for domain-diverse IT evaluation...")
+                        features_dict, labels_dict, sampling_stats = balanced_sample_for_visualization(
+                            model=model,
+                            dataloader=it_eval_loader,
+                            device=args.device,
+                            model_type=model_type,
+                            max_samples=10000,
+                            target_samples_per_combination=100,
+                            dataset_type="crmnist",
+                            use_color_in_combination=False
+                        )
+
+                        # Extract latents and convert to numpy
+                        z_y = features_dict['zy'].numpy() if features_dict['zy'] is not None else None
+                        z_d = features_dict['zd'].numpy() if features_dict['zd'] is not None else None
+                        z_dy = features_dict['zdy'].numpy() if features_dict.get('zdy') is not None else None
+                        z_x = features_dict['zx'].numpy() if features_dict['zx'] is not None else None
+
+                        # Extract labels - convert one-hot to indices if needed
+                        y_labels = labels_dict['y']
+                        if len(y_labels.shape) > 1 and y_labels.shape[1] > 1:
+                            y_labels = y_labels.argmax(dim=1)
+                        y_labels = y_labels.numpy()
+
+                        d_labels = labels_dict['r']  # rotation is domain
+                        if len(d_labels.shape) > 1 and d_labels.shape[1] > 1:
+                            d_labels = d_labels.argmax(dim=1)
+                        d_labels = d_labels.numpy()
+
+                        print(f"  Collected {len(y_labels)} balanced samples across {len(np.unique(d_labels))} domains")
+                        print(f"  Domain distribution: {dict(zip(*np.unique(d_labels, return_counts=True)))}")
+
+                        # Run partition evaluation
+                        results = evaluator.evaluate_latent_partition(
+                            z_y=z_y,
+                            z_d=z_d,
+                            z_dy=z_dy,
+                            z_x=z_x,
+                            y_labels=y_labels,
+                            d_labels=d_labels,
+                            compute_bootstrap=True
+                        )
+
+                        # Add unified metrics for cross-model comparison
+                        # Z_total = z_y + z_dy (only Y-predictive latents per user choice)
+                        z_total_components = [z_y]
+                        if z_dy is not None and np.var(z_dy) > 1e-10:
+                            z_total_components.append(z_dy)
+                        z_total = np.concatenate(z_total_components, axis=1)
+
+                        domain_leakage = evaluator.conditional_mi(z_total, d_labels, y_labels, apply_pca=True)
+                        results['unified_metrics'] = {
+                            'domain_leakage': domain_leakage,
+                            'domain_invariance_score': 1.0 / (1.0 + domain_leakage),
+                            'total_class_info': evaluator.mutual_information(z_total, y_labels, apply_pca=True),
+                            'class_info_conditional': evaluator.conditional_mi(z_total, y_labels, d_labels, apply_pca=True),
+                        }
+
+                    else:
+                        # =====================================================
+                        # MONOLITHIC MODELS (DANN, IRM)
+                        # =====================================================
+                        print(f"  Extracting monolithic features for {model_name}...")
+
+                        # Extract features using the monolithic extractor
+                        Z, y_labels, d_labels = extract_monolithic_features(
+                            model=model,
+                            dataloader=it_eval_loader,
+                            device=args.device,
+                            max_batches=200
+                        )
+
+                        print(f"  Collected {len(y_labels)} samples across {len(np.unique(d_labels))} domains")
+                        print(f"  Domain distribution: {dict(zip(*np.unique(d_labels, return_counts=True)))}")
+
+                        # Run monolithic evaluation
+                        results = evaluator.evaluate_monolithic_representation(
+                            Z=Z,
+                            y_labels=y_labels,
+                            d_labels=d_labels,
+                            compute_bootstrap=False
+                        )
 
                     it_results[model_name.upper()] = results
 
@@ -1054,30 +1111,46 @@ if __name__ == "__main__":
                 print("="*60)
 
                 evaluator = MinimalInformationPartitionEvaluator()
-                comparison = evaluator.compare_models(it_results)
 
-                # Save comparison results
+                # Separate decomposed and monolithic models for appropriate comparison
+                decomposed_results = {k: v for k, v in it_results.items()
+                                      if v.get('model_type') != 'monolithic'}
+                monolithic_results = {k: v for k, v in it_results.items()
+                                      if v.get('model_type') == 'monolithic'}
+
+                # Standard partition comparison for decomposed models only
+                if len(decomposed_results) > 1:
+                    comparison = evaluator.compare_models(decomposed_results)
+                    evaluator.save_results(
+                        comparison,
+                        os.path.join(it_output_dir, 'decomposed_model_comparison.json')
+                    )
+                    # Generate visualizations for decomposed models
+                    visualize_all(comparison, it_output_dir)
+
+                # Unified comparison across ALL models (decomposed + monolithic)
+                # This uses domain_invariance_score which is comparable across all model types
+                unified_comparison = evaluator.compare_unified_metrics(it_results)
                 evaluator.save_results(
-                    comparison,
-                    os.path.join(it_output_dir, 'model_comparison.json')
+                    unified_comparison,
+                    os.path.join(it_output_dir, 'unified_model_comparison.json')
                 )
 
-                # Generate all visualizations
-                visualize_all(comparison, it_output_dir)
-
-                # Print final rankings
+                # Print unified rankings (all models)
                 print("\n" + "="*60)
-                print("🏆 FINAL RANKINGS - Minimal Information Partition Adherence")
+                print("🏆 UNIFIED RANKINGS - Domain Invariance (All Models)")
                 print("="*60)
+                print("  (Higher = better domain invariance, lower I(Z;D|Y))")
 
                 sorted_models = sorted(
-                    comparison['model_scores'].items(),
+                    unified_comparison['unified_scores'].items(),
                     key=lambda x: x[1],
                     reverse=True
                 )
 
                 for rank, (model, score) in enumerate(sorted_models, 1):
-                    print(f"{rank}. {model:<20} Partition Quality: {score:.4f}")
+                    model_type = "decomposed" if model in [k.upper() for k in DECOMPOSED_MODELS] else "monolithic"
+                    print(f"{rank}. {model:<20} Domain Invariance: {score:.4f}  ({model_type})")
 
                 print("\n✅ Information-theoretic evaluation complete!")
                 print(f"   Results saved to: {it_output_dir}")
