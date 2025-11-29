@@ -124,8 +124,13 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
             )
             
         elif model_name == 'dann':
-            z_dim = args.zy_dim + args.zd_dim + args.zx_dim + args.zdy_dim
-            model = DANN(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'crmnist')
+            # Use z_dim=16 to match NVAE/DIVA classification space (z_y + z_dy = 8 + 8 = 16)
+            z_dim = 16
+            model = DANN(
+                z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'crmnist',
+                domain_weight=getattr(args, 'dann_domain_weight', 1.0),
+                lambda_gamma=getattr(args, 'dann_lambda_gamma', 10.0)
+            )
 
         elif model_name == 'dann_augmented':
             # Redistribute dimensions for AugmentedDANN to match total of other models
@@ -153,7 +158,8 @@ def load_model_checkpoint(models_dir, model_name, spec_data, args):
             )
 
         elif model_name == 'irm':
-            z_dim = args.zy_dim + args.zd_dim + args.zx_dim + args.zdy_dim
+            # Use z_dim=16 to match NVAE/DIVA classification space (z_y + z_dy = 8 + 8 = 16)
+            z_dim = 16
             model = IRM(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], 'crmnist',
                        penalty_weight=args.irm_penalty_weight, penalty_anneal_iters=args.irm_anneal_iters)
         
@@ -680,7 +686,7 @@ if __name__ == "__main__":
         print("="*60)
 
         dann_params = {
-            'z_dim': args.zy_dim,  # DANN uses single latent representation
+            'z_dim': 16,  # Fixed z_dim=16 to match NVAE/DIVA classification space (z_y + z_dy)
             'num_y_classes': num_y_classes,
             'num_r_classes': num_r_classes,
             **base_training_config,
@@ -825,7 +831,7 @@ if __name__ == "__main__":
         print("="*60)
 
         irm_params = {
-            'z_dim': args.zy_dim,  # IRM uses single latent representation
+            'z_dim': 16,  # Fixed z_dim=16 to match NVAE/DIVA classification space (z_y + z_dy)
             'num_y_classes': num_y_classes,
             'num_r_classes': num_r_classes,
 

@@ -362,14 +362,16 @@ def train_diva(args, spec_data, train_loader, test_loader, dataset):
 def train_dann(args, spec_data, train_loader, val_loader, dataset):
     print("Training DANN...")
 
-    # Support both old (zay_dim, za_dim) and new (zdy_dim, zd_dim) parameter names
-    zdy_dim = getattr(args, 'zdy_dim', None) or getattr(args, 'zay_dim', 8)
-    zd_dim = getattr(args, 'zd_dim', None) or getattr(args, 'za_dim', 8)
+    # Use z_dim=16 to match NVAE/DIVA classification space (z_y + z_dy = 8 + 8 = 16)
+    # This ensures fair comparison across all models
+    z_dim = 16
 
-    # latent dimension is the sum of all split latent dimensions
-    z_dim = args.zy_dim + zd_dim + args.zx_dim + zdy_dim
+    # Get hyperparameters from args (for grid search)
+    domain_weight = getattr(args, 'dann_domain_weight', 1.0)
+    lambda_gamma = getattr(args, 'dann_lambda_gamma', 10.0)
 
-    dann = DANN(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], dataset)
+    dann = DANN(z_dim, spec_data['num_y_classes'], spec_data['num_r_classes'], dataset,
+                domain_weight=domain_weight, lambda_gamma=lambda_gamma)
     dann = dann.to(args.device)
     optimizer = optim.Adam(dann.parameters(), lr=args.learning_rate)
     patience = args.patience
@@ -404,15 +406,11 @@ def train_irm(args, spec_data, train_loader, val_loader, dataset, seed=None):
         if torch.cuda.is_available():
             torch.cuda.manual_seed(seed)
 
-    # Support both old (zay_dim, za_dim) and new (zdy_dim, zd_dim) parameter names
-    zdy_dim = getattr(args, 'zdy_dim', None) or getattr(args, 'zay_dim', 8)
-    zd_dim = getattr(args, 'zd_dim', None) or getattr(args, 'za_dim', 8)
-
-    # latent dimension is the sum of all split latent dimensions
-    z_dim = args.zy_dim + zd_dim + args.zx_dim + zdy_dim
+    # Use z_dim=16 to match NVAE/DIVA classification space (z_y + z_dy = 8 + 8 = 16)
+    # This ensures fair comparison across all models
+    z_dim = 16
 
     # Use command-line arguments if available, otherwise use defaults
-    # Note: With environment-averaged loss, penalty_weight=10 is appropriate
     penalty_weight = getattr(args, 'irm_penalty_weight', 10.0)
     anneal_iters = getattr(args, 'irm_anneal_iters', 1000)
 

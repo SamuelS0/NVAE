@@ -12,6 +12,10 @@ import copy
 # =============================================================================
 # SPARSITY PRESETS (L1 penalties for NVAE/DIVA)
 # =============================================================================
+# Rationalized intervals:
+#   zy/zd: step=10 (0, 10, 20, 30, 40)
+#   zx: step=5, ratio=0.5×zy (0, 5, 10, 15, 20)
+#   zdy: step=20, ratio=2×zy (0, 20, 40, 60, 80)
 SPARSITY_PRESETS = {
     'none': {
         'l1_lambda_zy': 0.0,
@@ -19,70 +23,67 @@ SPARSITY_PRESETS = {
         'l1_lambda_zdy': 0.0,
         'l1_lambda_zd': 0.0,
     },
-    # Recommended default: light L1 on z_dy reduces I(z_y;z_dy) entanglement
-    # 20-epoch IT analysis showed NVAE had I(z_y;z_dy)=1.98 with no L1
+    # Only z_dy penalty - encourages z_dy selectivity without affecting main latents
     'zdy_light': {
         'l1_lambda_zy': 0.0,
         'l1_lambda_zx': 0.0,
-        'l1_lambda_zdy': 5.0,  # Light penalty to encourage z_dy selectivity
+        'l1_lambda_zdy': 20.0,
         'l1_lambda_zd': 0.0,
     },
     'low': {
-        'l1_lambda_zy': 5.0,
-        'l1_lambda_zx': 2.5,
-        'l1_lambda_zdy': 10.0,
-        'l1_lambda_zd': 5.0,
+        'l1_lambda_zy': 10.0,
+        'l1_lambda_zx': 5.0,
+        'l1_lambda_zdy': 20.0,
+        'l1_lambda_zd': 10.0,
     },
     'medium': {
-        'l1_lambda_zy': 15.0,
-        'l1_lambda_zx': 5.0,
-        'l1_lambda_zdy': 25.0,
-        'l1_lambda_zd': 15.0,
-    },
-    # Interpolation between medium and high - added based on grid search analysis
-    'medium_high': {
         'l1_lambda_zy': 20.0,
-        'l1_lambda_zx': 7.5,
-        'l1_lambda_zdy': 32.5,
+        'l1_lambda_zx': 10.0,
+        'l1_lambda_zdy': 40.0,
         'l1_lambda_zd': 20.0,
     },
     'high': {
-        'l1_lambda_zy': 25.0,
-        'l1_lambda_zx': 10.0,
-        'l1_lambda_zdy': 40.0,
-        'l1_lambda_zd': 25.0,
-    },
-    # Higher than 'high' - safe for NVAE (0% collapse in grid search)
-    # ~40% increase from 'high' preset
-    'very_high': {
-        'l1_lambda_zy': 35.0,
+        'l1_lambda_zy': 30.0,
         'l1_lambda_zx': 15.0,
-        'l1_lambda_zdy': 57.5,
-        'l1_lambda_zd': 35.0,
+        'l1_lambda_zdy': 60.0,
+        'l1_lambda_zd': 30.0,
+    },
+    'very_high': {
+        'l1_lambda_zy': 40.0,
+        'l1_lambda_zx': 20.0,
+        'l1_lambda_zdy': 80.0,
+        'l1_lambda_zd': 40.0,
     },
 }
 
 # =============================================================================
 # CLASSIFIER PRESETS (Alpha weights for auxiliary classifiers)
 # =============================================================================
+# Rationalized intervals: geometric ~×2.5 progression (10, 25, 50, 100)
+# Grid search showed classifier=low (25) achieved best DQS
 CLASSIFIER_PRESETS = {
+    'very_low': {
+        'alpha_y': 10.0,  # class prediction weight
+        'alpha_d': 10.0,  # domain prediction weight
+    },
     'low': {
-        'alpha_y': 25.0,  # class prediction weight
-        'alpha_d': 25.0,  # domain prediction weight
+        'alpha_y': 25.0,
+        'alpha_d': 25.0,
     },
     'medium': {
-        'alpha_y': 75.0,
-        'alpha_d': 75.0,
+        'alpha_y': 50.0,
+        'alpha_d': 50.0,
     },
     'high': {
-        'alpha_y': 150.0,
-        'alpha_d': 150.0,
+        'alpha_y': 100.0,
+        'alpha_d': 100.0,
     },
 }
 
 # =============================================================================
 # KL DIVERGENCE PRESETS (Beta weights for VAE regularization)
 # =============================================================================
+# Rationalized intervals: 1, 5, 10
 KL_PRESETS = {
     'low': {
         'beta_zy': 1.0,   # zy KL weight (class-specific)
@@ -90,36 +91,27 @@ KL_PRESETS = {
         'beta_zdy': 1.0,  # zdy KL weight (domain-class interaction)
         'beta_zd': 1.0,   # zd KL weight (domain-specific)
     },
-    # Interpolation between low and medium - grid search showed medium was optimal
-    # This explores the transition region
-    'medium_low': {
+    'medium': {
         'beta_zy': 5.0,
         'beta_zx': 5.0,
         'beta_zdy': 5.0,
         'beta_zd': 5.0,
     },
-    'medium': {
+    'high': {
         'beta_zy': 10.0,
         'beta_zx': 10.0,
         'beta_zdy': 10.0,
         'beta_zd': 10.0,
-    },
-    'high': {
-        'beta_zy': 50.0,
-        'beta_zx': 50.0,
-        'beta_zdy': 50.0,
-        'beta_zd': 50.0,
     },
 }
 
 # =============================================================================
 # AUGMENTED DANN SPARSITY PRESETS (L1 penalties for latent spaces)
 # =============================================================================
-# Includes both symmetric (legacy) and asymmetric (independent) sparsity configs.
-# The model accepts: sparsity_weight_zdy, sparsity_weight_zy, sparsity_weight_zd
-# For backward compat, sparsity_weight_zy_zd sets both zy and zd to same value.
+# 6 presets: 4 symmetric (none/low/medium/high) + 2 asymmetric (balanced/zdy_focus)
+# Rationale: symmetric range covers sparsity strength, asymmetric tests which latent to penalize
 DANN_AUG_SPARSITY_PRESETS = {
-    # --- Symmetric presets (legacy behavior: zy = zd) ---
+    # --- Symmetric presets (zy = zd) ---
     'none': {
         'sparsity_weight_zdy': 0.0,
         'sparsity_weight_zy': 0.0,
@@ -135,71 +127,40 @@ DANN_AUG_SPARSITY_PRESETS = {
         'sparsity_weight_zy': 1.0,
         'sparsity_weight_zd': 1.0,
     },
-    # Interpolation between medium and high - safe based on grid search
-    'medium_high': {
-        'sparsity_weight_zdy': 3.5,
-        'sparsity_weight_zy': 1.5,
-        'sparsity_weight_zd': 1.5,
-    },
     'high': {
-        'sparsity_weight_zdy': 5.0,
+        'sparsity_weight_zdy': 4.0,
         'sparsity_weight_zy': 2.0,
         'sparsity_weight_zd': 2.0,
     },
-    # --- Asymmetric presets (independent zy vs zd) ---
-    # Hypothesis: High z_d sparsity forces domain-specific features
-    'zd_high': {
-        'sparsity_weight_zdy': 1.0,
-        'sparsity_weight_zy': 0.5,     # Low - preserve class info
-        'sparsity_weight_zd': 5.0,     # HIGH - force sparse domain features
+    # --- Asymmetric presets ---
+    'balanced': {  # Higher z_d sparsity (domain should be sparser)
+        'sparsity_weight_zdy': 1.5,
+        'sparsity_weight_zy': 0.5,
+        'sparsity_weight_zd': 2.5,
     },
-    # Balanced preset based on 20-epoch IT analysis - prevents dimension collapse
-    # while still encouraging clean latent separation
-    'balanced': {
-        'sparsity_weight_zdy': 1.5,    # Moderate - prevents z_dy from becoming catch-all
-        'sparsity_weight_zy': 0.5,     # Light - preserve rich class representation
-        'sparsity_weight_zd': 2.5,     # Moderate - enough to encourage compactness without collapse
+    'zdy_focus': {  # Focus sparsity on interaction latent
+        'sparsity_weight_zdy': 8.0,
+        'sparsity_weight_zy': 0.5,
+        'sparsity_weight_zd': 1.0,
     },
-    # Focus on z_dy sparsity with conservative zy/zd - based on grid search analysis
-    # High zdy encourages selectivity in interaction latent without collapsing main latents
-    'zdy_focus': {
-        'sparsity_weight_zdy': 7.5,    # High - force z_dy selectivity
-        'sparsity_weight_zy': 0.75,    # Between low and medium - preserve class
-        'sparsity_weight_zd': 1.0,     # Same as medium - safe for domain
-    },
-    # ==========================================================================
-    # REMOVED PRESETS - These caused total latent collapse in grid search:
-    # ==========================================================================
-    # 'zd_extreme' - REMOVED: Caused total collapse (DQS < 0.01) with high adversarial
-    #   - adv=high + cls=high + zd_extreme: capture_y=0.0, capture_d=0.0002, DQS=0.0002
-    #   - adv=high + cls=low + zd_extreme: capture_y=0.18, capture_d=0.0, DQS=0.15
-    #
-    # 'zy_high' - REMOVED: Caused z_y collapse (DQS < 0.01) with high adversarial
-    #   - adv=high + cls=medium + zy_high: capture_y=0.0, capture_d=0.001, DQS=0.001
-    #
-    # 'domain_focus' - REMOVED: Caused z_d collapse (100% of models) + some total collapse
-    #   - All domain_focus configs had capture_d < 0.01
-    #   - adv=low + cls=high/low + domain_focus: total collapse (DQS < 0.25)
-    # ==========================================================================
 }
 
 # =============================================================================
 # AUGMENTED DANN ADVERSARIAL PRESETS (adversarial training dynamics)
 # =============================================================================
+# Rationalized intervals: beta_adv step=0.25, gamma step=2.5
 DANN_AUG_ADVERSARIAL_PRESETS = {
     'low': {
-        'beta_adv': 0.2,               # adversarial loss weight
-        'lambda_schedule_gamma': 3.0,  # ramp-up speed
+        'beta_adv': 0.25,              # adversarial loss weight
+        'lambda_schedule_gamma': 2.5,  # ramp-up speed
     },
     'medium': {
         'beta_adv': 0.5,
         'lambda_schedule_gamma': 5.0,
     },
-    # Same strength as medium but faster ramp-up schedule
-    # Based on grid search: medium adversarial worked best with high sparsity
     'medium_fast': {
-        'beta_adv': 0.5,               # Same as medium
-        'lambda_schedule_gamma': 7.5,  # Between medium (5.0) and high (10.0)
+        'beta_adv': 0.5,
+        'lambda_schedule_gamma': 7.5,
     },
     'high': {
         'beta_adv': 1.0,
@@ -210,18 +171,55 @@ DANN_AUG_ADVERSARIAL_PRESETS = {
 # =============================================================================
 # IRM PRESETS (invariance penalty settings)
 # =============================================================================
+# Tests penalty weight and annealing schedule
+# Parallel structure to DANN: baseline + 2 penalty variants + 2 anneal variants
 IRM_PRESETS = {
-    'low': {
-        'irm_penalty_weight': 1.0,
+    'baseline': {
+        'irm_penalty_weight': 10.0,     # Standard penalty
+        'irm_anneal_iters': 500,        # Standard annealing
+    },
+    'weak_penalty': {
+        'irm_penalty_weight': 1.0,      # Weaker invariance enforcement
         'irm_anneal_iters': 500,
     },
-    'medium': {
-        'irm_penalty_weight': 5.0,
-        'irm_anneal_iters': 1000,
+    'strong_penalty': {
+        'irm_penalty_weight': 50.0,     # Stronger invariance enforcement
+        'irm_anneal_iters': 500,
     },
-    'high': {
-        'irm_penalty_weight': 20.0,
-        'irm_anneal_iters': 2000,
+    'early_anneal': {
+        'irm_penalty_weight': 10.0,
+        'irm_anneal_iters': 250,        # Earlier penalty activation
+    },
+    'late_anneal': {
+        'irm_penalty_weight': 10.0,
+        'irm_anneal_iters': 1000,       # Later penalty activation
+    },
+}
+
+# =============================================================================
+# DANN PRESETS (adversarial domain adaptation)
+# =============================================================================
+# Tests domain loss weight and lambda schedule speed
+DANN_PRESETS = {
+    'baseline': {
+        'dann_domain_weight': 1.0,      # Standard equal weighting
+        'dann_lambda_gamma': 10.0,      # Standard DANN paper schedule
+    },
+    'weak_adversarial': {
+        'dann_domain_weight': 0.5,      # Weaker domain confusion
+        'dann_lambda_gamma': 10.0,
+    },
+    'strong_adversarial': {
+        'dann_domain_weight': 2.0,      # Stronger domain confusion
+        'dann_lambda_gamma': 10.0,
+    },
+    'slow_schedule': {
+        'dann_domain_weight': 1.0,
+        'dann_lambda_gamma': 5.0,       # Slower λ ramp-up
+    },
+    'fast_schedule': {
+        'dann_domain_weight': 1.0,
+        'dann_lambda_gamma': 15.0,      # Faster λ ramp-up
     },
 }
 
@@ -350,18 +348,28 @@ def get_diva_configs() -> Iterator[Dict[str, Any]]:
                 }
 
 
-def get_dann_config() -> Dict[str, Any]:
+def get_dann_configs() -> Iterator[Dict[str, Any]]:
     """
-    Get DANN baseline configuration (single config, no hyperparameter variations).
-    """
-    params = copy.deepcopy(FIXED_PARAMS)
+    Generate all DANN configurations.
 
-    return {
-        'name': 'dann_baseline',
-        'model_type': 'dann',
-        'preset_names': {'config': 'baseline'},
-        'params': params,
-    }
+    Tests:
+    - Domain loss weight: 0.5 (weak), 1.0 (baseline), 2.0 (strong)
+    - Lambda schedule gamma: 5 (slow), 10 (baseline), 15 (fast)
+
+    Total: 5 configurations
+    """
+    for preset_name, preset_params in DANN_PRESETS.items():
+        params = merge_configs(
+            copy.deepcopy(FIXED_PARAMS),
+            preset_params,
+        )
+
+        yield {
+            'name': get_config_name('dann', {'config': preset_name}),
+            'model_type': 'dann',
+            'preset_names': {'config': preset_name},
+            'params': params,
+        }
 
 
 def get_dann_aug_configs() -> Iterator[Dict[str, Any]]:
@@ -369,16 +377,11 @@ def get_dann_aug_configs() -> Iterator[Dict[str, Any]]:
     Generate all AugmentedDANN configurations.
 
     Iterates over 3 independent dimensions:
-    - Sparsity: 8 options (none, low, medium, medium_high, high, zd_high, balanced, zdy_focus)
+    - Sparsity: 6 options (none, low, medium, high, balanced, zdy_focus)
     - Adversarial: 4 options (low, medium, medium_fast, high)
-    - Classifier: 3 options (low, medium, high)
+    - Classifier: 4 options (very_low, low, medium, high)
 
-    Total: 8 × 4 × 3 = 96 configurations
-
-    Note: Removed 3 presets that caused total latent collapse in grid search:
-    - zd_extreme: caused both z_y and z_d collapse with high adversarial
-    - zy_high: caused z_y collapse with high adversarial
-    - domain_focus: caused 100% z_d collapse across all configs
+    Total: 6 × 4 × 4 = 96 configurations
     """
     for sparsity_name, sparsity_params in DANN_AUG_SPARSITY_PRESETS.items():
         for adv_name, adv_params in DANN_AUG_ADVERSARIAL_PRESETS.items():
@@ -445,7 +448,7 @@ def get_all_configs(models: List[str] = None) -> List[Dict[str, Any]]:
         configs.extend(list(get_diva_configs()))
 
     if 'dann' in models:
-        configs.append(get_dann_config())
+        configs.extend(list(get_dann_configs()))
 
     if 'dann_augmented' in models:
         configs.extend(list(get_dann_aug_configs()))
@@ -518,7 +521,17 @@ def get_quick_configs(models: List[str] = None) -> List[Dict[str, Any]]:
             })
 
     if 'dann' in models:
-        configs.append(get_dann_config())
+        # Just test baseline config for quick screening
+        params = merge_configs(
+            copy.deepcopy(FIXED_PARAMS),
+            DANN_PRESETS['baseline'],
+        )
+        configs.append({
+            'name': get_config_name('dann', {'config': 'baseline'}),
+            'model_type': 'dann',
+            'preset_names': {'config': 'baseline'},
+            'params': params,
+        })
 
     if 'dann_augmented' in models:
         # Test 2 sparsity levels × medium adversarial × medium classifier = 2 configs
@@ -542,16 +555,16 @@ def get_quick_configs(models: List[str] = None) -> List[Dict[str, Any]]:
             })
 
     if 'irm' in models:
-        # Just test medium penalty
-        preset_params = IRM_PRESETS['medium']
+        # Just test baseline config for quick screening
+        preset_params = IRM_PRESETS['baseline']
         params = merge_configs(
             copy.deepcopy(FIXED_PARAMS),
             preset_params,
         )
         configs.append({
-            'name': get_config_name('irm', {'penalty': 'medium'}),
+            'name': get_config_name('irm', {'penalty': 'baseline'}),
             'model_type': 'irm',
-            'preset_names': {'penalty': 'medium'},
+            'preset_names': {'penalty': 'baseline'},
             'params': params,
         })
 
@@ -589,7 +602,12 @@ def print_config_summary():
         print(f"   {name}: beta_adv={params['beta_adv']}, "
               f"lambda_schedule_gamma={params['lambda_schedule_gamma']}")
 
-    print("\n6. IRM PRESETS:")
+    print("\n6. DANN PRESETS:")
+    for name, params in DANN_PRESETS.items():
+        print(f"   {name}: domain_weight={params['dann_domain_weight']}, "
+              f"lambda_gamma={params['dann_lambda_gamma']}")
+
+    print("\n7. IRM PRESETS:")
     for name, params in IRM_PRESETS.items():
         print(f"   {name}: penalty={params['irm_penalty_weight']}, "
               f"anneal={params['irm_anneal_iters']}")
@@ -598,7 +616,7 @@ def print_config_summary():
     print("Configuration counts:")
     print(f"  NVAE:           {len(list(get_nvae_configs()))} configs")
     print(f"  DIVA:           {len(list(get_diva_configs()))} configs")
-    print(f"  DANN:           1 config (baseline)")
+    print(f"  DANN:           {len(list(get_dann_configs()))} configs")
     print(f"  AugmentedDANN:  {len(list(get_dann_aug_configs()))} configs")
     print(f"  IRM:            {len(list(get_irm_configs()))} configs")
     print(f"  TOTAL:          {len(get_all_configs())} configs")

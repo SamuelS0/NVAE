@@ -69,13 +69,13 @@ class IRM(nn.Module):
                 nn.Linear(512 * 6 * 6, self.z_dim)  # Project to z_dim
             )
 
-        # 3-layer MLP with 32 hidden units
+        # 3-layer MLP with 64 hidden units (matching NVAE/DIVA classifiers)
         self.classifier = nn.Sequential(
-            nn.Linear(self.z_dim, 32),
+            nn.Linear(self.z_dim, 64),
             nn.ReLU(),
-            nn.Linear(32, 32),
+            nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(32, self.num_y_classes)
+            nn.Linear(64, self.num_y_classes)
         )
 
         # Initialize classifier weights

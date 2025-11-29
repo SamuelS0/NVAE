@@ -39,13 +39,16 @@ class DomainDiscriminator(nn.Module):
 
 
 class DANN(nn.Module):
-    def __init__(self, z_dim, num_y_classes, num_r_classes, dataset):
+    def __init__(self, z_dim, num_y_classes, num_r_classes, dataset,
+                 domain_weight=1.0, lambda_gamma=10.0):
         super(DANN, self).__init__()
         self.num_y_classes = num_y_classes
         self.num_r_classes = num_r_classes
         self.z_dim = z_dim
         self.name = 'dann'
         self.dataset = dataset
+        self.domain_weight = domain_weight  # Weight for domain loss
+        self.lambda_gamma = lambda_gamma    # Controls λ schedule steepness
         
         if self.dataset == 'crmnist':
             # Feature extractor matching our VAE encoder architecture
@@ -97,15 +100,15 @@ class DANN(nn.Module):
         else:
             raise ValueError(f"Dataset {self.dataset} not supported")
 
-        self.domain_discriminator = DomainDiscriminator(self.z_dim, self.num_r_classes)
+        self.domain_discriminator = DomainDiscriminator(self.z_dim, self.num_r_classes, hidden_dim=64)
 
-        # 3-layer MLP with 32 hidden units
+        # 3-layer MLP with 64 hidden units (matching NVAE/DIVA classifiers)
         self.classifier = nn.Sequential(
-            nn.Linear(self.z_dim, 32),
+            nn.Linear(self.z_dim, 64),
             nn.ReLU(),
-            nn.Linear(32, 32),
+            nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(32, self.num_y_classes)
+            nn.Linear(64, self.num_y_classes)
         )
 
         # Initialize classifier weights
@@ -151,10 +154,10 @@ class DANN(nn.Module):
         # Domain loss (rotation prediction)
         domain_loss = F.cross_entropy(domain_predictions, r)
 
-        # Total loss: minimize classification error + domain loss
+        # Total loss: minimize classification error + weighted domain loss
         # The GRL handles the adversarial aspect via -λ gradient multiplication
-        # FIXED: Removed λ multiplication to avoid double lambda application
-        total_loss = y_loss + domain_loss
+        # domain_weight controls the strength of domain adaptation
+        total_loss = y_loss + self.domain_weight * domain_loss
 
         return total_loss, y_loss, domain_loss
 
@@ -272,11 +275,11 @@ class DANN(nn.Module):
             print(f"Latent space visualization saved to {save_path}")
         plt.close()
 
-    @staticmethod
-    def get_lambda(epoch, max_epochs):
+    def get_lambda(self, epoch, max_epochs):
         """
         Adaptive lambda scheduling as described in DANN paper.
         Lambda starts at 0 and gradually increases to 1.
+        The gamma parameter controls the steepness of the sigmoid.
         """
         p = epoch / max_epochs
-        return 2. / (1. + np.exp(-10 * p)) - 1
+        return 2. / (1. + np.exp(-self.lambda_gamma * p)) - 1
