@@ -301,7 +301,7 @@ class MinimalInformationPartitionEvaluator:
             apply_pca: Whether to apply PCA if X is high-dimensional
 
         Returns:
-            Mutual information in nats
+            Mutual information in bits (npeet uses log base 2)
         """
         if apply_pca:
             X, _ = self._apply_pca_if_needed(X, "X")
@@ -335,7 +335,7 @@ class MinimalInformationPartitionEvaluator:
             apply_pca: Whether to apply PCA if Z is high-dimensional
 
         Returns:
-            Conditional mutual information in nats
+            Conditional mutual information in bits (npeet uses log base 2)
         """
         if apply_pca:
             Z, _ = self._apply_pca_if_needed(Z, "Z")
@@ -373,7 +373,7 @@ class MinimalInformationPartitionEvaluator:
             apply_pca: Whether to apply PCA if Z is high-dimensional
 
         Returns:
-            Interaction information in nats (can be positive or negative)
+            Interaction information in bits (npeet uses log base 2), can be positive or negative
         """
         if apply_pca:
             Z, _ = self._apply_pca_if_needed(Z, "Z")
@@ -420,7 +420,7 @@ class MinimalInformationPartitionEvaluator:
             apply_pca: Whether to apply PCA if Z is high-dimensional
 
         Returns:
-            Joint mutual information in nats
+            Joint mutual information in bits (npeet uses log base 2)
         """
         if apply_pca:
             Z, _ = self._apply_pca_if_needed(Z, "Z")
@@ -497,7 +497,7 @@ class MinimalInformationPartitionEvaluator:
             name2: Name of second latent for logging
 
         Returns:
-            Mutual information in nats (should be ≈0 for independent latents)
+            Mutual information in bits (npeet uses log base 2), should be ≈0 for independent latents
         """
         # Check for collapsed latent spaces
         if np.var(Z1) < 1e-10 or np.var(Z2) < 1e-10:
@@ -1259,96 +1259,52 @@ class MinimalInformationPartitionEvaluator:
         """
         Compute overall partition quality score (0-1, higher is better).
 
-        The score incorporates all 4 conditions of the Disentangled Partition definition:
-        1. Class-purity: I(Z_Y; D|Y) = 0
-        2. Domain-purity: I(Z_D; Y|D) = 0
-        3. Residual: I(Z_X; Y,D) = 0
-        4. Independence: I(Z_i; Z_j) = 0 for all pairs
+        Measures adherence to the Minimally Partitioned Representation definition:
+        1. Z_Y captures class-specific information: I(Z_Y;D|Y) = 0
+        2. Z_D captures domain-specific information: I(Z_D;Y|D) = 0
+        3. Z_YD captures shared information: predictive of both Y and D
+        4. Z_X captures residual variation: I(Z_X;Y,D) = 0
 
-        Plus additional quality measures:
-        - Information capture (each latent captures its intended information)
-        - Theorem compliance (pure representations have correct I(Z;Y;D))
+        Each criterion is weighted equally (25% each) and combined via geometric mean
+        to ensure all criteria must be satisfied for a high score.
         """
-        # Normalize by typical entropy values (log(num_classes) ~ 1-3 nats)
-        typical_entropy = 2.5
+        # Entropy bounds for normalization
+        H_Y = 2.303  # log(10) for 10 classes
+        H_D = 1.792  # log(6) for 6 domains
 
-        # ===== Component 1: Purity Score (30% weight) =====
-        # Measures conditions 1-3 of the definition
-        purity_score = 1.0
+        # ===== Criterion 1: I(Z_Y;D|Y) -> 0 (25% weight) =====
+        # Z_Y should capture class info without domain leakage
+        zy_d_given_y = metrics.get('I(z_y;D|Y)', 0) or 0
+        # Convert to adherence score: 1 when leakage=0, decreases as leakage increases
+        zy_adherence = 1.0 / (1.0 + zy_d_given_y / H_D)
 
-        # Condition 1: Class-purity I(Z_Y; D|Y) = 0
-        zy_d_given_y = metrics.get('I(z_y;D|Y)', 0)
-        purity_score -= min(0.33, zy_d_given_y / typical_entropy)
+        # ===== Criterion 2: I(Z_D;Y|D) -> 0 (25% weight) =====
+        # Z_D should capture domain info without class leakage
+        zd_y_given_d = metrics.get('I(z_d;Y|D)', 0) or 0
+        zd_adherence = 1.0 / (1.0 + zd_y_given_d / H_Y)
 
-        # Condition 2: Domain-purity I(Z_D; Y|D) = 0
-        zd_y_given_d = metrics.get('I(z_d;Y|D)', 0)
-        purity_score -= min(0.33, zd_y_given_d / typical_entropy)
+        # ===== Criterion 3: Z_YD captures shared info (25% weight) =====
+        # Z_YD should be predictive of both Y and D: I(Z_YD;Y,D) should be HIGH
+        zdy_joint = metrics.get('I(z_dy;Y,D)', 0) or 0
+        # Normalize by geometric mean of entropies
+        max_joint = np.sqrt(H_Y * H_D)
+        zdy_score = min(1.0, zdy_joint / max_joint)
+        # Ensure minimum score to avoid zero in geometric mean
+        zdy_score = max(0.01, zdy_score)
 
-        # Condition 3: Residual I(Z_X; Y,D) = 0
+        # ===== Criterion 4: I(Z_X;Y,D) -> 0 (25% weight) =====
+        # Z_X should capture residual variation independent of Y and D
         zx_joint = metrics.get('I(z_x;Y,D)', 0)
-        if zx_joint is not None:
-            purity_score -= min(0.33, zx_joint / typical_entropy)
+        if zx_joint is not None and zx_joint > 0:
+            zx_adherence = 1.0 / (1.0 + zx_joint / max_joint)
+        else:
+            # If no Z_X or zero leakage, perfect adherence
+            zx_adherence = 1.0
 
-        purity_score = max(0.0, purity_score)
-
-        # ===== Component 2: Independence Score (25% weight) =====
-        # Measures condition 4 of the definition
-        independence_score = 1.0
-        if independence:
-            avg_dep = independence.get('avg_dependence', 0)
-            # Penalty proportional to average dependence
-            independence_score -= min(1.0, avg_dep / typical_entropy)
-            if not independence.get('all_independent', True):
-                independence_score *= 0.7  # Additional penalty for violations
-
-        independence_score = max(0.0, independence_score)
-
-        # ===== Component 3: Information Capture Score (25% weight) =====
-        capture_score = 1.0
-        if information_capture:
-            n_latents = 0
-            for latent_name, capture in information_capture.items():
-                n_latents += 1
-                if not capture.get('captures_intended', False):
-                    # Penalty for not capturing intended info
-                    capture_score -= 0.25
-
-                # Penalty for leakage
-                leakage = capture.get('leakage_value', 0)
-                if leakage > 0.1:
-                    capture_score -= leakage / (typical_entropy * 2)
-
-            capture_score = max(0.0, min(1.0, capture_score))
-
-        # ===== Component 4: Theorem Compliance Score (20% weight) =====
-        theorem_score = 1.0
-        if theorem_verification:
-            for latent_name, verification in theorem_verification.items():
-                if 'theorem_satisfied' in verification:
-                    if verification.get('is_pure', False):
-                        if not verification.get('theorem_satisfied', False):
-                            # Penalty proportional to deviation
-                            deviation = verification.get('theorem_deviation', 0)
-                            theorem_score -= min(0.2, deviation / typical_entropy)
-
-                    if not verification.get('non_negativity_satisfied', True):
-                        # Severe penalty for non-negativity violation
-                        theorem_score -= 0.3
-
-            theorem_score = max(0.0, min(1.0, theorem_score))
-
-        # ===== Combine Components =====
-        # Weights reflect the 4 conditions of the Disentangled Partition definition:
-        # - Purity (conditions 1-3): 30%
-        # - Independence (condition 4): 25%
-        # - Information capture: 25%
-        # - Theorem compliance: 20%
-        final_score = (
-            0.30 * purity_score +
-            0.25 * independence_score +
-            0.25 * capture_score +
-            0.20 * theorem_score
-        )
+        # ===== Combine via Geometric Mean =====
+        # Geometric mean ensures ALL criteria must be met for high score
+        # A single poor criterion will drag down the overall score
+        final_score = (zy_adherence * zd_adherence * zdy_score * zx_adherence) ** 0.25
 
         return float(max(0.0, min(1.0, final_score)))
 
@@ -1472,12 +1428,12 @@ class MinimalInformationPartitionEvaluator:
         print("\n" + "="*80)
         print("MONOLITHIC REPRESENTATION EVALUATION SUMMARY")
         print("="*80)
-        print(f"\n  I(Z;Y)   = {metrics['I(Z;Y)']:.4f} nats  (class information)")
-        print(f"  I(Z;D)   = {metrics['I(Z;D)']:.4f} nats  (domain information)")
-        print(f"  I(Z;Y|D) = {metrics['I(Z;Y|D)']:.4f} nats  (class info given domain)")
-        print(f"  I(Z;D|Y) = {metrics['I(Z;D|Y)']:.4f} nats  (domain leakage - LOWER IS BETTER)")
-        print(f"  I(Z;Y;D) = {metrics['I(Z;Y;D)']:.4f} nats  (interaction)")
-        print(f"  I(Z;Y,D) = {metrics['I(Z;Y,D)']:.4f} nats  (joint)")
+        print(f"\n  I(Z;Y)   = {metrics['I(Z;Y)']:.4f} bits  (class information)")
+        print(f"  I(Z;D)   = {metrics['I(Z;D)']:.4f} bits  (domain information)")
+        print(f"  I(Z;Y|D) = {metrics['I(Z;Y|D)']:.4f} bits  (class info given domain)")
+        print(f"  I(Z;D|Y) = {metrics['I(Z;D|Y)']:.4f} bits  (domain leakage - LOWER IS BETTER)")
+        print(f"  I(Z;Y;D) = {metrics['I(Z;Y;D)']:.4f} bits  (interaction)")
+        print(f"  I(Z;Y,D) = {metrics['I(Z;Y,D)']:.4f} bits  (joint)")
         print(f"\n  Domain Invariance Score: {metrics['domain_invariance_score']:.4f}")
         print("  (1.0 = perfectly domain-invariant, lower = more domain info leaks)")
         print("="*80 + "\n")
