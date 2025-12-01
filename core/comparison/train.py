@@ -492,6 +492,9 @@ def train_dann_augmented(args, spec_data, train_loader, val_loader, dataset, see
     sparsity_weight_zy_zd = getattr(args, 'sparsity_weight_zy_zd', None)
     lambda_schedule_gamma = getattr(args, 'lambda_schedule_gamma', 5.0)
 
+    # Get decorrelation weight (forces z_dy to capture non-redundant info)
+    beta_decorr = getattr(args, 'beta_decorr', 0.0)
+
     # Create AugmentedDANN model
     dann_aug_model = AugmentedDANN(
         class_map=spec_data.get('class_map', None),  # WILD uses None
@@ -508,6 +511,7 @@ def train_dann_augmented(args, spec_data, train_loader, val_loader, dataset, see
         alpha_y=alpha_y,
         alpha_d=alpha_d,
         beta_adv=getattr(args, 'beta_adv', 0.2),
+        beta_decorr=beta_decorr,                      # Decorrelation loss weight
         lambda_schedule_gamma=lambda_schedule_gamma,
         image_size=image_size,  # Adaptive: 28 for CRMNIST, 96 for WILD
         separate_encoders=getattr(args, 'separate_encoders', False)

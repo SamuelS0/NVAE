@@ -1224,11 +1224,30 @@ def get_model_name(args, model_type=None):
     if model_type is None:
         raise ValueError("Model type must be specified")
 
-    # Create parameter string using y/d/dy/x naming convention
-    param_str = f"ay-{args.alpha_y}_ad-{args.alpha_d}_zy{args.zy_dim}_zx{args.zx_dim}_zdy{args.zdy_dim}_zd{args.zd_dim}_bzy-{args.beta_zy}_bzx-{args.beta_zx}_bzdy-{args.beta_zdy}_bzd-{args.beta_zd}_ep{args.epochs}_bs{args.batch_size}_lr{args.learning_rate}"
-
     # Add timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Handle IRM and DANN which have different parameters
+    if model_type == 'irm':
+        penalty_weight = getattr(args, 'irm_penalty_weight', 10.0)
+        anneal_iters = getattr(args, 'irm_anneal_iters', 1000)
+        param_str = f"pw-{penalty_weight}_ai-{anneal_iters}_ep{args.epochs}_bs{args.batch_size}_lr{args.learning_rate}"
+        return f"{model_type}_{param_str}_{timestamp}"
+    elif model_type == 'dann':
+        lambda_adv = getattr(args, 'lambda_adversarial', 1.0)
+        param_str = f"la-{lambda_adv}_ep{args.epochs}_bs{args.batch_size}_lr{args.learning_rate}"
+        return f"{model_type}_{param_str}_{timestamp}"
+
+    # For NVAE, DIVA, and AugmentedDANN - use alpha/beta parameters
+    # Support both naming conventions (alpha_y/alpha_1, beta_zy/beta_1)
+    alpha_y = getattr(args, 'alpha_y', getattr(args, 'alpha_1', 150.0))
+    alpha_d = getattr(args, 'alpha_d', getattr(args, 'alpha_2', 150.0))
+    beta_zy = getattr(args, 'beta_zy', getattr(args, 'beta_1', 1.0))
+    beta_zx = getattr(args, 'beta_zx', getattr(args, 'beta_2', 1.0))
+    beta_zdy = getattr(args, 'beta_zdy', getattr(args, 'beta_3', 1.0))
+    beta_zd = getattr(args, 'beta_zd', getattr(args, 'beta_4', 1.0))
+
+    param_str = f"ay-{alpha_y}_ad-{alpha_d}_zy{args.zy_dim}_zx{args.zx_dim}_zdy{args.zdy_dim}_zd{args.zd_dim}_bzy-{beta_zy}_bzx-{beta_zx}_bzdy-{beta_zdy}_bzd-{beta_zd}_ep{args.epochs}_bs{args.batch_size}_lr{args.learning_rate}"
 
     # Include model_type prefix to prevent name collisions between different models
     return f"{model_type}_{param_str}_{timestamp}"

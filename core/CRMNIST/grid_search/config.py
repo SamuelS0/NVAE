@@ -78,6 +78,11 @@ CLASSIFIER_PRESETS = {
         'alpha_y': 100.0,
         'alpha_d': 100.0,
     },
+    # --- NEW: Asymmetric classifier to prioritize class over domain ---
+    'class_priority': {
+        'alpha_y': 150.0,  # High class weight (prioritize OOD-relevant info)
+        'alpha_d': 25.0,   # Low domain weight
+    },
 }
 
 # =============================================================================
@@ -143,6 +148,22 @@ DANN_AUG_SPARSITY_PRESETS = {
         'sparsity_weight_zy': 0.5,
         'sparsity_weight_zd': 1.0,
     },
+    # --- NEW: Experimental presets to fix Z_DY routing problem ---
+    'gentle_equal': {  # Equal light sparsity on all spaces
+        'sparsity_weight_zdy': 0.5,
+        'sparsity_weight_zy': 0.5,
+        'sparsity_weight_zd': 0.5,
+    },
+    'zdy_preferred': {  # Z_DY has LOWER penalty - inverted hierarchy
+        'sparsity_weight_zdy': 0.25,
+        'sparsity_weight_zy': 1.5,
+        'sparsity_weight_zd': 1.5,
+    },
+    'class_focused': {  # Light on class spaces, heavier on domain
+        'sparsity_weight_zdy': 0.5,
+        'sparsity_weight_zy': 0.5,
+        'sparsity_weight_zd': 2.0,
+    },
 }
 
 # =============================================================================
@@ -165,6 +186,35 @@ DANN_AUG_ADVERSARIAL_PRESETS = {
     'high': {
         'beta_adv': 1.0,
         'lambda_schedule_gamma': 10.0,
+    },
+    # --- NEW: Ultra-gentle adversarial to prevent information destruction ---
+    'ultra_gentle': {
+        'beta_adv': 0.1,               # Very low adversarial weight
+        'lambda_schedule_gamma': 2.0,  # Very slow GRL ramp-up
+    },
+}
+
+# =============================================================================
+# DECORRELATION PRESETS (forces Z_DY to capture non-redundant information)
+# =============================================================================
+# The decorrelation loss penalizes cross-covariance between Z_DY and (Z_Y, Z_D),
+# forcing Z_DY to capture information that is NOT already in Z_Y or Z_D.
+# This addresses the "lazy minimum" problem where Z_DY duplicates Z_Y/Z_D info.
+DANN_AUG_DECORR_PRESETS = {
+    'none': {
+        'beta_decorr': 0.0,  # No decorrelation (baseline)
+    },
+    'light': {
+        'beta_decorr': 0.1,  # Light decorrelation penalty
+    },
+    'medium': {
+        'beta_decorr': 0.5,  # Medium decorrelation penalty
+    },
+    'strong': {
+        'beta_decorr': 1.0,  # Strong decorrelation penalty
+    },
+    'very_strong': {
+        'beta_decorr': 2.0,  # Very strong decorrelation penalty
     },
 }
 

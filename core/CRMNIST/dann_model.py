@@ -136,6 +136,7 @@ class AugmentedDANN(NModule):
         alpha_y=1.0,
         alpha_d=1.0,
         beta_adv=0.15,
+        beta_decorr=0.0,  # Decorrelation loss weight: penalizes correlation between z_dy and (z_y, z_d)
         image_size=28,  # Image dimensions: 28 for CRMNIST, 96 for WILD
         use_conditional_adversarial=True,  # Use conditional adversarial for I(Z_Y;D|Y)=0 and I(Z_D;Y|D)=0
         lambda_schedule_gamma=5.0,  # Controls speed of adversarial ramp-up (lower = slower). DANN paper: 10, default: 5
@@ -184,6 +185,7 @@ class AugmentedDANN(NModule):
         self.alpha_y = alpha_y
         self.alpha_d = alpha_d
         self.beta_adv = beta_adv
+        self.beta_decorr = beta_decorr  # Decorrelation loss weight
         self.lambda_schedule_gamma = lambda_schedule_gamma
 
         # Store for encoder creation and checkpoint compatibility
@@ -623,7 +625,34 @@ class AugmentedDANN(NModule):
         total_loss = y_loss + domain_loss
 
         return total_loss, y_loss, domain_loss
-    
+
+    def decorrelation_loss(self, z_a, z_b):
+        """
+        Compute decorrelation loss between two latent representations.
+
+        This penalizes the cross-covariance between z_a and z_b, forcing them
+        to capture non-redundant information. Based on the Frobenius norm of
+        the cross-covariance matrix.
+
+        Args:
+            z_a: First latent tensor (batch, dim_a)
+            z_b: Second latent tensor (batch, dim_b)
+
+        Returns:
+            Frobenius norm of the cross-covariance matrix (scalar tensor)
+        """
+        # Center the latents (subtract batch mean)
+        z_a_centered = z_a - z_a.mean(dim=0, keepdim=True)
+        z_b_centered = z_b - z_b.mean(dim=0, keepdim=True)
+
+        # Compute cross-covariance matrix: (dim_a, dim_b)
+        # Each element (i, j) is the covariance between z_a[:,i] and z_b[:,j]
+        batch_size = z_a.size(0)
+        cross_cov = (z_a_centered.T @ z_b_centered) / batch_size
+
+        # Return Frobenius norm of cross-covariance matrix
+        return torch.norm(cross_cov, p='fro')
+
     def detailed_loss(self, x, y, d):
         """
         Compute detailed loss breakdown for monitoring
@@ -659,14 +688,21 @@ class AugmentedDANN(NModule):
         sparsity_loss_zy = torch.mean(torch.abs(outputs['zy']))
         sparsity_loss_zd = torch.mean(torch.abs(outputs['zd']))
 
-        # Total loss with independent sparsity weights
+        # Decorrelation losses: penalize cross-covariance between z_dy and (z_y, z_d)
+        # This forces z_dy to capture non-redundant information
+        decorr_loss_zdy_zy = self.decorrelation_loss(outputs['zdy'], outputs['zy'])
+        decorr_loss_zdy_zd = self.decorrelation_loss(outputs['zdy'], outputs['zd'])
+        decorr_loss_total = decorr_loss_zdy_zy + decorr_loss_zdy_zd
+
+        # Total loss with independent sparsity weights and decorrelation
         total_loss = (
             self.alpha_y * loss_y_main +
             self.alpha_d * loss_d_main +
             self.beta_adv * (loss_d_adversarial + loss_y_adversarial) +
             self.sparsity_weight_zdy_current * sparsity_loss_zdy +
             self.sparsity_weight_zy_current * sparsity_loss_zy +   # Independent z_y sparsity
-            self.sparsity_weight_zd_current * sparsity_loss_zd     # Independent z_d sparsity
+            self.sparsity_weight_zd_current * sparsity_loss_zd +   # Independent z_d sparsity
+            self.beta_decorr * decorr_loss_total                   # Decorrelation loss
         )
 
         loss_dict = {
@@ -678,10 +714,14 @@ class AugmentedDANN(NModule):
             'sparsity_loss_zdy': sparsity_loss_zdy.item(),
             'sparsity_loss_zy': sparsity_loss_zy.item(),
             'sparsity_loss_zd': sparsity_loss_zd.item(),
+            'decorr_loss_zdy_zy': decorr_loss_zdy_zy.item(),
+            'decorr_loss_zdy_zd': decorr_loss_zdy_zd.item(),
+            'decorr_loss_total': decorr_loss_total.item(),
             'sparsity_weight_zdy': self.sparsity_weight_zdy_current,
             'sparsity_weight_zy': self.sparsity_weight_zy_current,   # Independent z_y weight
             'sparsity_weight_zd': self.sparsity_weight_zd_current,   # Independent z_d weight
-            'sparsity_weight_zy_zd': self.sparsity_weight_zy_zd_current  # Legacy (for backward compat)
+            'sparsity_weight_zy_zd': self.sparsity_weight_zy_zd_current,  # Legacy (for backward compat)
+            'beta_decorr': self.beta_decorr
         }
 
         return total_loss, loss_dict

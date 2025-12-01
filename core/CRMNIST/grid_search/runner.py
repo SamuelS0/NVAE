@@ -98,6 +98,17 @@ class GridSearchRunner:
         args.dataset = 'crmnist'
         args.setting = 'standard'
 
+        # Ensure beta_zy/zx/zdy/zd exist for get_model_name compatibility
+        # These are needed by utils.get_model_name() even for non-VAE models
+        if not hasattr(args, 'beta_zy'):
+            args.beta_zy = getattr(args, 'beta_1', 1.0)
+        if not hasattr(args, 'beta_zx'):
+            args.beta_zx = getattr(args, 'beta_2', 1.0)
+        if not hasattr(args, 'beta_zdy'):
+            args.beta_zdy = getattr(args, 'beta_3', 1.0)
+        if not hasattr(args, 'beta_zd'):
+            args.beta_zd = getattr(args, 'beta_4', 1.0)
+
         # Ensure output directory exists
         os.makedirs(args.out, exist_ok=True)
 
